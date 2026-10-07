@@ -11,6 +11,8 @@ import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -154,6 +156,9 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     val enableHaptic = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_HAPTIC, true)
     isVoiceEnabled = intent.getBooleanExtra(AutomationManager.EXTRA_IS_VOICE_ENABLED, true)
 
+    val isSoundAlertEnabled = intent.getBooleanExtra(AutomationManager.EXTRA_IS_SOUND_ALERT_ENABLED, true)
+    val ringtoneUriString = intent.getStringExtra(AutomationManager.EXTRA_CUSTOM_RINGTONE_URI)
+
     val notifTitle = intent.getStringExtra(AutomationManager.EXTRA_NOTIFICATION_TITLE) ?: title
     val notifBody = intent.getStringExtra(AutomationManager.EXTRA_NOTIFICATION_BODY) ?: voiceMessage
 
@@ -181,20 +186,36 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       false
     }
 
-    // Gentle Haptic pulse
-    if (enableHaptic) {
-      AutomationManager.triggerHaptic(this)
-    }
+    // Audio & Haptic Alerts: strictly respect isSoundAlertEnabled toggle
+    if (isSoundAlertEnabled) {
+      // Gentle Haptic pulse
+      if (enableHaptic) {
+        AutomationManager.triggerHaptic(this)
+      }
 
-    // Voice Reminder via TTS if enabled
-    if (isVoiceEnabled) {
-      if (isTtsReady) {
-        speakMessage(voiceMessage)
+      // Play chosen system notification sound
+      try {
+        val soundUri = if (!ringtoneUriString.isNullOrBlank()) {
+          Uri.parse(ringtoneUriString)
+        } else {
+          RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        }
+        val ringtone = RingtoneManager.getRingtone(applicationContext, soundUri)
+        ringtone?.play()
+      } catch (_: Exception) {}
+
+      // Voice Reminder via TTS if enabled
+      if (isVoiceEnabled) {
+        if (isTtsReady) {
+          speakMessage(voiceMessage)
+        } else {
+          pendingSpeechText = voiceMessage
+        }
       } else {
-        pendingSpeechText = voiceMessage
+        releaseWakeLock()
       }
     } else {
-      // Voice is disabled: do not speak, release wake lock
+      // Sound alert is OFF: Alarms, DND and visual notifications fire silently
       releaseWakeLock()
     }
 

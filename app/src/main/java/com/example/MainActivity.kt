@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,6 +71,7 @@ import com.example.model.RoutineTask
 import com.example.service.AutomationManager
 import com.example.ui.NavigationTab
 import com.example.ui.RoutineViewModel
+import com.example.ui.components.ChronosArchitectureGuideSheet
 import com.example.ui.components.TaskModalBottomSheet
 import com.example.ui.screens.AutomationCenterScreen
 import com.example.ui.screens.ConsoleTerminalScreen
@@ -122,6 +124,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
   var isModalOpen by remember { mutableStateOf(false) }
   var editingTask by remember { mutableStateOf<RoutineTask?>(null) }
   var showAddChooserSheet by remember { mutableStateOf(false) }
+  var showArchitectureGuideSheet by remember { mutableStateOf(false) }
 
   // Runtime Notification Permission for Android 13+
   val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -456,6 +459,52 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
                 }
               }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Card 3: In-App Architecture Guide Button (Requirement 6)
+            Surface(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.4f)), RoundedCornerShape(18.dp))
+                .clickable {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  showAddChooserSheet = false
+                  showArchitectureGuideSheet = true
+                }
+                .testTag("choose_architecture_guide_option"),
+              color = OneUiSurfaceHigh
+            ) {
+              Row(
+                modifier = Modifier.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF6366F1).copy(alpha = 0.2f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(imageVector = Icons.Default.MenuBook, contentDescription = null, tint = Color(0xFFA5B4FC))
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column {
+                  Text(
+                    text = "📖 How Chronos Works",
+                    color = TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                  )
+                  Text(
+                    text = "Architecture & Engine Guide • 7 Anchors, Buffer & Fluid Twins",
+                    color = TextSecondary,
+                    fontSize = 12.sp
+                  )
+                }
+              }
+            }
           }
         }
       }
@@ -471,11 +520,45 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           onSaveTask = { task ->
             viewModel.saveDynamicTask(task)
           },
-          onSaveFluidTwin = { title, pool, p1Start, p1Dur, p2Start, p2Dur, dnd, days, isVoice, nTitle, nBody, ringUri, ringTitle ->
-            viewModel.saveFluidTwin(title, pool, p1Start, p1Dur, p2Start, p2Dur, dnd, days, isVoice, nTitle, nBody, ringUri, ringTitle)
+          onSaveFluidTwin = { title, pool, p1Title, p1Start, p1Dur, p1Voice, p2Title, p2Start, p2Dur, p2Voice, dnd, days, isVoice, nTitle, nBody, ringUri, ringTitle, isSoundAlert ->
+            viewModel.saveFluidTwin(
+              title = title,
+              totalPoolMinutes = pool,
+              part1Title = p1Title,
+              part1StartMinute = p1Start,
+              part1Duration = p1Dur,
+              part1VoiceMessage = p1Voice,
+              part2Title = p2Title,
+              part2StartMinute = p2Start,
+              part2Duration = p2Dur,
+              part2VoiceMessage = p2Voice,
+              enableDnd = dnd,
+              selectedDays = days,
+              isVoiceEnabled = isVoice,
+              customNotificationTitle = nTitle,
+              customNotificationBody = nBody,
+              customRingtoneUri = ringUri,
+              customRingtoneTitle = ringTitle,
+              isSoundAlertEnabled = isSoundAlert
+            )
           },
-          onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle ->
-            viewModel.updateAnchorDetails(slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle)
+          onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle, isSoundAlert ->
+            viewModel.updateAnchorDetails(
+              slotNumber = slot,
+              title = title,
+              startMinute = start,
+              durationMinutes = duration,
+              voiceMessage = voice,
+              enableDnd = dnd,
+              enableHaptic = haptic,
+              selectedDays = days,
+              isVoiceEnabled = isVoice,
+              customNotificationTitle = notifTitle,
+              customNotificationBody = notifBody,
+              customRingtoneUri = ringUri,
+              customRingtoneTitle = ringTitle,
+              isSoundAlertEnabled = isSoundAlert
+            )
           },
           onSaveSlot5 = { title, voice ->
             viewModel.updateSlot5Protected(title, voice)
@@ -483,6 +566,13 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           onMoveToTrash = { taskId ->
             viewModel.moveToTrash(taskId)
           }
+        )
+      }
+
+      // In-App Architecture Guide Modal Sheet
+      if (showArchitectureGuideSheet) {
+        ChronosArchitectureGuideSheet(
+          onDismiss = { showArchitectureGuideSheet = false }
         )
       }
     }

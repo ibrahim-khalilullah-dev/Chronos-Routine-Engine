@@ -212,6 +212,7 @@ class RoutineRepository(context: Context) {
         if (t.fluidTotalPoolMinutes != null) put("fluidTotalPoolMinutes", t.fluidTotalPoolMinutes)
         if (t.customRingtoneUri != null) put("customRingtoneUri", t.customRingtoneUri)
         if (t.customRingtoneTitle != null) put("customRingtoneTitle", t.customRingtoneTitle)
+        put("isSoundAlertEnabled", t.isSoundAlertEnabled)
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -262,7 +263,8 @@ class RoutineRepository(context: Context) {
         fluidTwinPart = if (obj.has("fluidTwinPart")) obj.getInt("fluidTwinPart") else null,
         fluidTotalPoolMinutes = if (obj.has("fluidTotalPoolMinutes")) obj.getInt("fluidTotalPoolMinutes") else null,
         customRingtoneUri = if (obj.has("customRingtoneUri")) obj.getString("customRingtoneUri") else null,
-        customRingtoneTitle = if (obj.has("customRingtoneTitle")) obj.getString("customRingtoneTitle") else null
+        customRingtoneTitle = if (obj.has("customRingtoneTitle")) obj.getString("customRingtoneTitle") else null,
+        isSoundAlertEnabled = obj.optBoolean("isSoundAlertEnabled", true)
       )
       list.add(task)
     }

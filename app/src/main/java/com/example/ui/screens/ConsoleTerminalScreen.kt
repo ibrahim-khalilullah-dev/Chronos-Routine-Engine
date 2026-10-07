@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -37,6 +41,7 @@ import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -59,6 +64,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -73,7 +79,6 @@ import com.example.ui.theme.AnchorGradientStart
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.DynamicGradientEnd
 import com.example.ui.theme.ElasticGradientStart
-import com.example.ui.theme.OneUiBackground
 import com.example.ui.theme.OneUiBorder
 import com.example.ui.theme.OneUiSurfaceElevated
 import com.example.ui.theme.OneUiSurfaceHigh
@@ -88,9 +93,11 @@ import com.example.ui.theme.WarningAmber
 fun ConsoleTerminalScreen(
   anchors: List<RoutineTask>,
   onApplyTasks: (tasks: List<RoutineTask>, replaceAll: Boolean) -> Unit,
+  onExportRoutine: () -> String = { "" },
   onBack: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
+  val context = LocalContext.current
   val haptic = LocalHapticFeedback.current
   BackHandler { onBack() }
 
@@ -113,7 +120,7 @@ fun ConsoleTerminalScreen(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(OneUiBackground)
+      .background(Color(0xFF0A0D14)) // Deep AMOLED obsidian background
       .statusBarsPadding()
       .verticalScroll(rememberScrollState())
       .padding(20.dp)
@@ -450,10 +457,10 @@ fun ConsoleTerminalScreen(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // Quick Action Bar: "Quick-Copy Template" & "Clear"
+    // Quick Action Bar: "Quick-Copy Template", "Export / Copy", & "Clear"
     Row(
       modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(10.dp)
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
       OutlinedButton(
         onClick = {
@@ -464,9 +471,27 @@ fun ConsoleTerminalScreen(
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.6f))
       ) {
-        Icon(imageVector = Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF06B6D4))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("Quick-Copy Template", color = Color(0xFF06B6D4), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Icon(imageVector = Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFF06B6D4))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Template", color = Color(0xFF06B6D4), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+      }
+
+      OutlinedButton(
+        onClick = {
+          haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+          val script = onExportRoutine()
+          val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+          val clip = ClipData.newPlainText("Chronos Routine", script)
+          clipboard?.setPrimaryClip(clip)
+          Toast.makeText(context, "Dynamic routine copied! (Anchors excluded)", Toast.LENGTH_SHORT).show()
+        },
+        modifier = Modifier.weight(1.2f).testTag("export_routine_button"),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f))
+      ) {
+        Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFF10B981))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Export Routine", color = Color(0xFF10B981), fontSize = 11.sp, fontWeight = FontWeight.Bold)
       }
 
       if (consoleText.isNotBlank()) {
@@ -479,9 +504,9 @@ fun ConsoleTerminalScreen(
           shape = RoundedCornerShape(12.dp),
           border = BorderStroke(1.dp, OneUiBorder)
         ) {
-          Icon(imageVector = Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp), tint = TextSecondary)
+          Icon(imageVector = Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
           Spacer(modifier = Modifier.width(4.dp))
-          Text("Clear", color = TextSecondary, fontSize = 12.sp)
+          Text("Clear", color = TextSecondary, fontSize = 11.sp)
         }
       }
     }
@@ -489,14 +514,14 @@ fun ConsoleTerminalScreen(
     Spacer(modifier = Modifier.height(12.dp))
 
     // ==============================================================
-    // 4. ULTRA-CLEAN CODE EDITOR (Obsidian-Black #080A0F)
+    // 4. ULTRA-CLEAN OBSIDIAN CODE EDITOR (#121620 with Gutter Numbers)
     // ==============================================================
     Surface(
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(18.dp))
-        .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(18.dp)),
-      color = Color(0xFF080A0F)
+        .border(BorderStroke(1.dp, Color(0xFF1E293B)), RoundedCornerShape(18.dp)),
+      color = Color(0xFF121620)
     ) {
       Column(modifier = Modifier.padding(14.dp)) {
         Row(
@@ -505,9 +530,10 @@ fun ConsoleTerminalScreen(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Text(
-            text = "Console Input Editor",
-            color = TextSecondary,
-            fontSize = 11.sp,
+            text = "Obsidian Terminal Editor",
+            color = Color(0xFF67E8F9),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace
           )
           Text(
@@ -519,35 +545,56 @@ fun ConsoleTerminalScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        OutlinedTextField(
-          value = consoleText,
-          onValueChange = { consoleText = it },
-          modifier = Modifier
-            .fillMaxWidth()
-            .height(230.dp)
-            .testTag("console_text_input"),
-          textStyle = TextStyle(
-            fontFamily = FontFamily.Monospace,
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-            color = Color(0xFFF8FAFC)
-          ),
-          placeholder = {
-            Text(
-              text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration | Start | DND | Days | Voice | Custom Message\n# Tap 'Quick-Copy Template' above to load a ready-to-edit template.",
-              color = TextTertiary,
+        Row(modifier = Modifier.fillMaxWidth()) {
+          // Gutter Line Numbers
+          val lineCount = consoleText.lines().size.coerceAtLeast(1)
+          Column(
+            modifier = Modifier
+              .padding(top = 16.dp, end = 10.dp)
+              .width(24.dp),
+            horizontalAlignment = Alignment.End
+          ) {
+            for (i in 1..lineCount.coerceAtMost(40)) {
+              Text(
+                text = "$i",
+                color = Color(0xFF475569),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                lineHeight = 18.sp
+              )
+            }
+          }
+
+          OutlinedTextField(
+            value = consoleText,
+            onValueChange = { consoleText = it },
+            modifier = Modifier
+              .weight(1f)
+              .height(240.dp)
+              .testTag("console_text_input"),
+            textStyle = TextStyle(
               fontFamily = FontFamily.Monospace,
-              fontSize = 12.sp
-            )
-          },
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = Color(0xFF080A0F),
-            unfocusedContainerColor = Color(0xFF080A0F),
-            focusedBorderColor = Color(0xFF06B6D4),
-            unfocusedBorderColor = Color.Transparent
-          ),
-          shape = RoundedCornerShape(12.dp)
-        )
+              fontSize = 13.sp,
+              lineHeight = 18.sp,
+              color = Color(0xFFF8FAFC)
+            ),
+            placeholder = {
+              Text(
+                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration | Start | DND | Days | Voice | Custom Message\n# Tap 'Template' above to load a ready-to-edit template.",
+                color = TextTertiary,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp
+              )
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedContainerColor = Color(0xFF121620),
+              unfocusedContainerColor = Color(0xFF121620),
+              focusedBorderColor = Color(0xFF06B6D4),
+              unfocusedBorderColor = Color.Transparent
+            ),
+            shape = RoundedCornerShape(12.dp)
+          )
+        }
       }
     }
 

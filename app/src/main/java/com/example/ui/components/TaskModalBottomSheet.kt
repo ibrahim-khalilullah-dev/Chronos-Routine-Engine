@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,7 +30,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -39,16 +40,16 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.VolumeMute
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -58,6 +59,10 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -82,7 +87,6 @@ import com.example.model.RoutineTask
 import com.example.model.TaskType
 import com.example.ui.theme.AnchorGradientStart
 import com.example.ui.theme.DangerRed
-import com.example.ui.theme.DynamicGradientStart
 import com.example.ui.theme.OneUiBorder
 import com.example.ui.theme.OneUiSurface
 import com.example.ui.theme.OneUiSurfaceElevated
@@ -90,7 +94,6 @@ import com.example.ui.theme.OneUiSurfaceHigh
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
-import com.example.ui.theme.WarningAmber
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -102,18 +105,23 @@ fun TaskModalBottomSheet(
   onSaveFluidTwin: (
     title: String,
     totalPoolMinutes: Int,
+    part1Title: String,
     part1StartMinute: Int,
     part1Duration: Int,
+    part1VoiceMessage: String,
+    part2Title: String,
     part2StartMinute: Int,
     part2Duration: Int,
+    part2VoiceMessage: String,
     enableDnd: Boolean,
     selectedDays: Set<RoutineDay>,
     isVoiceEnabled: Boolean,
     customNotificationTitle: String,
     customNotificationBody: String,
     customRingtoneUri: String?,
-    customRingtoneTitle: String?
-  ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    customRingtoneTitle: String?,
+    isSoundAlertEnabled: Boolean
+  ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
   onSaveAnchorDetails: (
     slotNumber: Int,
     title: String,
@@ -127,7 +135,8 @@ fun TaskModalBottomSheet(
     customNotificationTitle: String,
     customNotificationBody: String,
     customRingtoneUri: String?,
-    customRingtoneTitle: String?
+    customRingtoneTitle: String?,
+    isSoundAlertEnabled: Boolean
   ) -> Unit,
   onSaveSlot5: (title: String, voiceMessage: String) -> Unit,
   onMoveToTrash: (taskId: String) -> Unit = {}
@@ -143,36 +152,53 @@ fun TaskModalBottomSheet(
   val isSlot1 = slotNum == 1
   val isSlot5 = slotNum == 5
 
-  // Mode: Standard Task vs Fluid Twin (when creating new task)
+  // 2-Session Switchable Fluid Twin Toggle state
   var isFluidTwinMode by remember { mutableStateOf(initialTask?.isFluidTwin ?: false) }
+  var fluidTwinSelectedTab by remember { mutableIntStateOf(0) } // 0 = Session 1, 1 = Session 2
 
+  // Single / Base Task State
   var title by remember { mutableStateOf(initialTask?.title ?: "") }
   var startHour by remember { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) / 60) }
   var startMinute by remember { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) % 60) }
   var durationHours by remember { mutableIntStateOf((initialTask?.durationMinutes ?: 60) / 60) }
   var durationMins by remember { mutableIntStateOf((initialTask?.durationMinutes ?: 60) % 60) }
+  var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
 
-  // Fluid Twin Specific Settings
-  var fluidPoolHours by remember { mutableIntStateOf((initialTask?.fluidTotalPoolMinutes ?: 360) / 60) }
-  var fluidPoolMins by remember { mutableIntStateOf((initialTask?.fluidTotalPoolMinutes ?: 360) % 60) }
+  // Fluid Twin Session 1 Specific State
+  var part1Title by remember {
+    mutableStateOf(if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 1) initialTask.title else "")
+  }
+  var part1StartHour by remember { mutableIntStateOf(startHour) }
+  var part1StartMinute by remember { mutableIntStateOf(startMinute) }
+  var part1DurationHours by remember { mutableIntStateOf(if (durationHours > 0) durationHours else 1) }
+  var part1DurationMins by remember { mutableIntStateOf(if (durationHours == 0 && durationMins < 45) 45 else durationMins) }
+  var part1VoiceMessage by remember { mutableStateOf(voiceMessage) }
+
+  // Fluid Twin Session 2 Specific State
+  var part2Title by remember {
+    mutableStateOf(if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 2) initialTask.title else "")
+  }
   var part2StartHour by remember { mutableIntStateOf(14) } // Default 2:00 PM
   var part2StartMinute by remember { mutableIntStateOf(0) }
   var part2DurationHours by remember { mutableIntStateOf(2) }
-  var part2DurationMins by remember { mutableIntStateOf(30) }
+  var part2DurationMins by remember { mutableIntStateOf(0) }
+  var part2VoiceMessage by remember { mutableStateOf("") }
 
-  var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
+  // Common Controls State
   var enableDnd by remember { mutableStateOf(initialTask?.enableDnd ?: false) }
   var enableHaptic by remember { mutableStateOf(initialTask?.enableHaptic ?: true) }
   var allowSplitting by remember { mutableStateOf(initialTask?.allowSplitting ?: true) }
   var isVoiceEnabled by remember { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
+  var isSoundAlertEnabled by remember { mutableStateOf(initialTask?.isSoundAlertEnabled ?: true) }
   var customNotificationTitle by remember { mutableStateOf(initialTask?.customNotificationTitle ?: "") }
   var customNotificationBody by remember { mutableStateOf(initialTask?.customNotificationBody ?: "") }
 
-  // Ringtone / Notification Sound State
+  // Notification Sound State & Dropdown
   var customRingtoneUri by remember { mutableStateOf(initialTask?.customRingtoneUri) }
-  var customRingtoneTitle by remember { mutableStateOf(initialTask?.customRingtoneTitle ?: "Default Notification") }
+  var customRingtoneTitle by remember { mutableStateOf(initialTask?.customRingtoneTitle ?: "Default Notification Tone") }
   var isPreviewPlaying by remember { mutableStateOf(false) }
   var activeRingtonePlayer by remember { mutableStateOf<Ringtone?>(null) }
+  var soundDropdownExpanded by remember { mutableStateOf(false) }
 
   // Confirmation dialog for delete
   var showDeleteConfirmDialog by remember { mutableStateOf(false) }
@@ -181,7 +207,7 @@ fun TaskModalBottomSheet(
     mutableStateOf(initialTask?.selectedDays ?: RoutineDay.allDays())
   }
 
-  // Ringtone Picker Activity Result Launcher
+  // Ringtone Picker Activity Launcher
   val ringtonePickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.StartActivityForResult()
   ) { result ->
@@ -195,7 +221,7 @@ fun TaskModalBottomSheet(
       if (uri != null) {
         customRingtoneUri = uri.toString()
         val r = RingtoneManager.getRingtone(context, uri)
-        customRingtoneTitle = r?.getTitle(context) ?: "Custom Notification Sound"
+        customRingtoneTitle = r?.getTitle(context) ?: "Selected Device Ringtone"
       } else {
         customRingtoneUri = null
         customRingtoneTitle = "Silent / None"
@@ -246,7 +272,7 @@ fun TaskModalBottomSheet(
               isSlot1 -> "Slot 1: Reverse Sleep Settings"
               isSlot5 -> "Slot 5: Elastic Rubber Buffer"
               isAnchor -> "Anchor Slot $slotNum"
-              isFluidTwinMode -> "Fluid Twin (2 Linked Sessions)"
+              isFluidTwinMode -> "Fluid Twin (2 Communicating Sessions)"
               isEditing -> "Edit Dynamic Task"
               else -> "New Routine Task"
             },
@@ -277,75 +303,403 @@ fun TaskModalBottomSheet(
 
       Spacer(modifier = Modifier.height(14.dp))
 
-      // Workflow Mode Selector (Only when creating a new dynamic task)
-      if (!isEditing && !isAnchor) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(10.dp)
+      // ==============================================================
+      // 1. FLUID TWIN SWITCHER (Toggle Switch)
+      // ==============================================================
+      if (!isAnchor) {
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(
+              BorderStroke(1.dp, if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.6f) else OneUiBorder),
+              RoundedCornerShape(16.dp)
+            ),
+          color = OneUiSurfaceElevated
         ) {
-          FilterChip(
-            selected = !isFluidTwinMode,
-            onClick = { isFluidTwinMode = false },
-            label = { Text("Standard Session") },
-            colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = AnchorGradientStart,
-              selectedLabelColor = Color.White,
-              containerColor = OneUiSurfaceElevated,
-              labelColor = TextSecondary
-            ),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.weight(1f)
-          )
-
-          FilterChip(
-            selected = isFluidTwinMode,
-            onClick = { isFluidTwinMode = true },
-            label = { Text("Fluid Twin (2 Sessions)") },
-            leadingIcon = {
-              Icon(imageVector = Icons.Default.CallSplit, contentDescription = null, modifier = Modifier.size(14.dp))
-            },
-            colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = Color(0xFF8B5CF6),
-              selectedLabelColor = Color.White,
-              containerColor = OneUiSurfaceElevated,
-              labelColor = TextSecondary
-            ),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.weight(1f)
-          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+              Box(
+                modifier = Modifier
+                  .size(36.dp)
+                  .clip(CircleShape)
+                  .background(if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.Default.CallSplit,
+                  contentDescription = null,
+                  tint = if (isFluidTwinMode) Color(0xFFC4B5FD) else TextSecondary,
+                  modifier = Modifier.size(18.dp)
+                )
+              }
+              Spacer(modifier = Modifier.width(12.dp))
+              Column {
+                Text(
+                  text = "Link as Fluid Twin (2 Communicating Sessions)",
+                  color = TextPrimary,
+                  fontWeight = FontWeight.SemiBold,
+                  fontSize = 14.sp
+                )
+                Text(
+                  text = "Share duration pool dynamically across 2 separate sessions",
+                  color = TextSecondary,
+                  fontSize = 11.sp
+                )
+              }
+            }
+            Switch(
+              checked = isFluidTwinMode,
+              onCheckedChange = { isFluidTwinMode = it },
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF8B5CF6)
+              ),
+              modifier = Modifier.testTag("toggle_fluid_twin_switch")
+            )
+          }
         }
         Spacer(modifier = Modifier.height(14.dp))
       }
 
-      // Title Input
-      Text(
-        text = if (isFluidTwinMode) "Twin Routine Name" else "Task Title",
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = TextSecondary
-      )
-      Spacer(modifier = Modifier.height(6.dp))
+      // ==============================================================
+      // 2. FORM FIELDS: SINGLE TASK BASELINE vs 2-SESSION FLUID TWIN
+      // ==============================================================
+      if (isFluidTwinMode) {
+        // Shared Twin Routine Group Title
+        Text(
+          text = "Twin Routine Master Name",
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = TextSecondary
+        )
+        Spacer(modifier = Modifier.height(6.dp))
 
-      OutlinedTextField(
-        value = title,
-        onValueChange = { title = it },
-        placeholder = { Text(if (isFluidTwinMode) "e.g., Deep Focus & Synthesis" else "e.g., Deep Coding Sprint", color = TextTertiary) },
-        modifier = Modifier.fillMaxWidth().testTag("task_title_input"),
-        colors = OutlinedTextFieldDefaults.colors(
-          focusedContainerColor = OneUiSurfaceElevated,
-          unfocusedContainerColor = OneUiSurfaceElevated,
-          focusedBorderColor = AnchorGradientStart,
-          unfocusedBorderColor = OneUiBorder
-        ),
-        shape = RoundedCornerShape(14.dp),
-        singleLine = true
-      )
+        OutlinedTextField(
+          value = title,
+          onValueChange = { title = it },
+          placeholder = { Text("e.g., Deep Work & Synthesis", color = TextTertiary) },
+          modifier = Modifier.fillMaxWidth().testTag("twin_master_title_input"),
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = OneUiSurfaceElevated,
+            unfocusedContainerColor = OneUiSurfaceElevated,
+            focusedBorderColor = Color(0xFF8B5CF6),
+            unfocusedBorderColor = OneUiBorder
+          ),
+          shape = RoundedCornerShape(14.dp),
+          singleLine = true
+        )
 
-      Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-      // Timing controls for Standard Tasks / Anchors vs Fluid Twins
-      if (!isFluidTwinMode) {
-        // Standard Session Time Picker & Duration
+        // Two-Tab Switchable View: [Session 1] | [Session 2]
+        TabRow(
+          selectedTabIndex = fluidTwinSelectedTab,
+          containerColor = OneUiSurfaceElevated,
+          contentColor = Color(0xFF8B5CF6),
+          indicator = { tabPositions ->
+            TabRowDefaults.SecondaryIndicator(
+              Modifier.tabIndicatorOffset(tabPositions[fluidTwinSelectedTab]),
+              color = Color(0xFF8B5CF6)
+            )
+          },
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(14.dp))
+        ) {
+          Tab(
+            selected = fluidTwinSelectedTab == 0,
+            onClick = { fluidTwinSelectedTab = 0 },
+            text = { Text("Session 1 (Part 1)", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+            modifier = Modifier.testTag("fluid_twin_tab_session_1")
+          )
+          Tab(
+            selected = fluidTwinSelectedTab == 1,
+            onClick = { fluidTwinSelectedTab = 1 },
+            text = { Text("Session 2 (Part 2)", fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+            modifier = Modifier.testTag("fluid_twin_tab_session_2")
+          )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // TAB CONTENT
+        if (fluidTwinSelectedTab == 0) {
+          // SESSION 1 CONFIGURATION
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(16.dp))
+              .border(BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.35f)), RoundedCornerShape(16.dp)),
+            color = OneUiSurfaceElevated
+          ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+              Text(text = "Session 1: Morning/Day Block", fontWeight = FontWeight.Bold, color = Color(0xFFC4B5FD), fontSize = 14.sp)
+              Spacer(modifier = Modifier.height(10.dp))
+
+              Text(text = "Session 1 Title", fontSize = 12.sp, color = TextSecondary)
+              Spacer(modifier = Modifier.height(4.dp))
+              OutlinedTextField(
+                value = part1Title,
+                onValueChange = { part1Title = it },
+                placeholder = { Text(if (title.isNotBlank()) "$title (Part 1)" else "e.g., Deep Coding (Part 1)", color = TextTertiary) },
+                modifier = Modifier.fillMaxWidth().testTag("session_1_title_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = OneUiSurface,
+                  unfocusedContainerColor = OneUiSurface,
+                  focusedBorderColor = Color(0xFF8B5CF6),
+                  unfocusedBorderColor = OneUiBorder
+                ),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true
+              )
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              // Session 1 Start Time
+              Text(text = "Preferred Start Time", fontSize = 12.sp, color = TextSecondary)
+              Spacer(modifier = Modifier.height(4.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(18.dp))
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Text(text = String.format("%02d:%02d", part1StartHour, part1StartMinute), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  OutlinedButton(
+                    onClick = { part1StartHour = (part1StartHour + 1) % 24 },
+                    shape = RoundedCornerShape(8.dp)
+                  ) { Text("+1h", fontSize = 11.sp, color = TextPrimary) }
+                  OutlinedButton(
+                    onClick = { part1StartMinute = (part1StartMinute + 15) % 60 },
+                    shape = RoundedCornerShape(8.dp)
+                  ) { Text("+15m", fontSize = 11.sp, color = TextPrimary) }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              // Session 1 Duration (Floor: 45m limit)
+              Text(text = "Duration (Min Safety Floor: 45m)", fontSize = 12.sp, color = TextSecondary)
+              Spacer(modifier = Modifier.height(4.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                val p1MinsTotal = part1DurationHours * 60 + part1DurationMins
+                Text(text = "${part1DurationHours}h ${part1DurationMins}m ($p1MinsTotal mins)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  OutlinedButton(
+                    onClick = { part1DurationHours = (part1DurationHours + 1).coerceAtMost(8) },
+                    shape = RoundedCornerShape(8.dp)
+                  ) { Text("+1h", fontSize = 11.sp, color = TextPrimary) }
+                  OutlinedButton(
+                    onClick = {
+                      val totalMins = part1DurationHours * 60 + part1DurationMins + 15
+                      val bounded = totalMins.coerceAtLeast(45)
+                      part1DurationHours = bounded / 60
+                      part1DurationMins = bounded % 60
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                  ) { Text("+15m", fontSize = 11.sp, color = TextPrimary) }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              // Session 1 Voice Message
+              Text(text = "Custom Voice Reminder", fontSize = 12.sp, color = TextSecondary)
+              Spacer(modifier = Modifier.height(4.dp))
+              OutlinedTextField(
+                value = part1VoiceMessage,
+                onValueChange = { part1VoiceMessage = it },
+                placeholder = { Text("e.g., Session 1 starting. Focus on architecture.", color = TextTertiary) },
+                modifier = Modifier.fillMaxWidth().testTag("session_1_voice_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = OneUiSurface,
+                  unfocusedContainerColor = OneUiSurface,
+                  focusedBorderColor = Color(0xFF8B5CF6),
+                  unfocusedBorderColor = OneUiBorder
+                ),
+                shape = RoundedCornerShape(12.dp),
+                maxLines = 2
+              )
+            }
+          }
+        } else {
+          // SESSION 2 CONFIGURATION
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(16.dp))
+              .border(BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.35f)), RoundedCornerShape(16.dp)),
+            color = OneUiSurfaceElevated
+          ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+              Text(text = "Session 2: Afternoon/Evening Block", fontWeight = FontWeight.Bold, color = Color(0xFFC4B5FD), fontSize = 14.sp)
+              Spacer(modifier = Modifier.height(10.dp))
+
+              Text(text = "Session 2 Title", fontSize = 12.sp, color = TextSecondary)
+              Spacer(modifier = Modifier.height(4.dp))
+              OutlinedTextField(
+                value = part2Title,
+                onValueChange = { part2Title = it },
+                placeholder = { Text(if (title.isNotBlank()) "$title (Part 2)" else "e.g., Code Review & Synthesis (Part 2)", color = TextTertiary) },
+                modifier = Modifier.fillMaxWidth().testTag("session_2_title_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = OneUiSurface,
+                  unfocusedContainerColor = OneUiSurface,
+                  focusedBorderColor = Color(0xFF8B5CF6),
+                  unfocusedBorderColor = OneUiBorder
+                ),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true
+              )
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              // Session 2 Start Time
+              Text(text = "Preferred Start Time", fontSize = 12.sp, color = TextSecondary)
+              Spacer(modifier = Modifier.height(4.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(18.dp))
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Text(text = String.format("%02d:%02d", part2StartHour, part2StartMinute), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  OutlinedButton(
+                    onClick = { part2StartHour = (part2StartHour + 1) % 24 },
+                    shape = RoundedCornerShape(8.dp)
+                  ) { Text("+1h", fontSize = 11.sp, color = TextPrimary) }
+                  OutlinedButton(
+                    onClick = { part2StartMinute = (part2StartMinute + 15) % 60 },
+                    shape = RoundedCornerShape(8.dp)
+                  ) { Text("+15m", fontSize = 11.sp, color = TextPrimary) }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              // Session 2 Duration (Floor: 45m limit)
+              Text(text = "Duration (Min Safety Floor: 45m)", fontSize = 12.sp, color = TextSecondary)
+              Spacer(modifier = Modifier.height(4.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                val p2MinsTotal = part2DurationHours * 60 + part2DurationMins
+                Text(text = "${part2DurationHours}h ${part2DurationMins}m ($p2MinsTotal mins)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  OutlinedButton(
+                    onClick = { part2DurationHours = (part2DurationHours + 1).coerceAtMost(8) },
+                    shape = RoundedCornerShape(8.dp)
+                  ) { Text("+1h", fontSize = 11.sp, color = TextPrimary) }
+                  OutlinedButton(
+                    onClick = {
+                      val totalMins = part2DurationHours * 60 + part2DurationMins + 15
+                      val bounded = totalMins.coerceAtLeast(45)
+                      part2DurationHours = bounded / 60
+                      part2DurationMins = bounded % 60
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                  ) { Text("+15m", fontSize = 11.sp, color = TextPrimary) }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              // Session 2 Voice Message
+              Text(text = "Custom Voice Reminder", fontSize = 12.sp, color = TextSecondary)
+              Spacer(modifier = Modifier.height(4.dp))
+              OutlinedTextField(
+                value = part2VoiceMessage,
+                onValueChange = { part2VoiceMessage = it },
+                placeholder = { Text("e.g., Session 2 starting. Synthesis sprint.", color = TextTertiary) },
+                modifier = Modifier.fillMaxWidth().testTag("session_2_voice_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = OneUiSurface,
+                  unfocusedContainerColor = OneUiSurface,
+                  focusedBorderColor = Color(0xFF8B5CF6),
+                  unfocusedBorderColor = OneUiBorder
+                ),
+                shape = RoundedCornerShape(12.dp),
+                maxLines = 2
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Total Combined Pool Banner
+        val combinedTotalMins = (part1DurationHours * 60 + part1DurationMins) + (part2DurationHours * 60 + part2DurationMins)
+        Surface(
+          modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)),
+          color = Color(0xFF8B5CF6).copy(alpha = 0.15f),
+          border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.35f))
+        ) {
+          Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Icon(imageVector = Icons.Default.CallSplit, contentDescription = null, tint = Color(0xFFC4B5FD), modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = "Communicating Vessels Pool: ${combinedTotalMins / 60}h ${combinedTotalMins % 60}m ($combinedTotalMins mins total) • Bounded by 7 Core Anchors",
+              color = Color(0xFFE2E8F0),
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Medium
+            )
+          }
+        }
+      } else {
+        // ==============================================================
+        // SIMPLE BASELINE FORM (Title, Start Time, Duration)
+        // ==============================================================
+        Text(
+          text = if (isAnchor) "Anchor Title" else "Task Title",
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = TextSecondary
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        OutlinedTextField(
+          value = title,
+          onValueChange = { title = it },
+          placeholder = { Text("e.g., Deep Coding Sprint", color = TextTertiary) },
+          modifier = Modifier.fillMaxWidth().testTag("task_title_input"),
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = OneUiSurfaceElevated,
+            unfocusedContainerColor = OneUiSurfaceElevated,
+            focusedBorderColor = AnchorGradientStart,
+            unfocusedBorderColor = OneUiBorder
+          ),
+          shape = RoundedCornerShape(14.dp),
+          singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Preferred Start Time
         Text(
           text = if (isAnchor) "Anchor Start Time" else "Preferred Start Time",
           fontSize = 13.sp,
@@ -434,227 +788,239 @@ fun TaskModalBottomSheet(
             }
           }
         }
-      } else {
-        // ==========================================================
-        // FLUID TWIN DURATION POOL & SESSIONS CONFIGURATION
-        // ==========================================================
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .border(BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.4f)), RoundedCornerShape(18.dp)),
-          color = OneUiSurfaceElevated
-        ) {
-          Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(imageVector = Icons.Default.CallSplit, contentDescription = null, tint = Color(0xFFC4B5FD), modifier = Modifier.size(18.dp))
-              Spacer(modifier = Modifier.width(8.dp))
-              Text(text = "Combined Duration Pool", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-              text = "Total Pool: ${fluidPoolHours}h ${fluidPoolMins}m (${fluidPoolHours * 60 + fluidPoolMins} mins total)",
-              color = Color(0xFFC4B5FD),
-              fontWeight = FontWeight.Bold,
-              fontSize = 16.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              OutlinedButton(
-                onClick = { fluidPoolHours = (fluidPoolHours + 1).coerceIn(1, 10) },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, OneUiBorder)
-              ) { Text("+1h Pool", fontSize = 11.sp, color = TextPrimary) }
-              OutlinedButton(
-                onClick = { fluidPoolMins = (fluidPoolMins + 30) % 60 },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, OneUiBorder)
-              ) { Text("+30m Pool", fontSize = 11.sp, color = TextPrimary) }
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-            // Part 1
-            Text(text = "Part 1: Morning/Day Block (Min 45m)", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = "Start: ${String.format("%02d:%02d", startHour, startMinute)} • Target: ${durationHours}h ${durationMins}m",
-                color = TextSecondary,
-                fontSize = 12.sp
-              )
-              Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(
-                  onClick = { startHour = (startHour + 1) % 24 },
-                  shape = RoundedCornerShape(8.dp),
-                  contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) { Text("+1h", fontSize = 10.sp, color = TextPrimary) }
-                OutlinedButton(
-                  onClick = { durationMins = if (durationMins == 45) 0 else 45; if (durationMins == 0) durationHours = (durationHours + 1).coerceAtMost(5) },
-                  shape = RoundedCornerShape(8.dp),
-                  contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) { Text("+45m", fontSize = 10.sp, color = TextPrimary) }
-              }
-            }
+        // Voice Message Input
+        Text(
+          text = "Voice Message Announcement",
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = TextSecondary
+        )
+        Spacer(modifier = Modifier.height(6.dp))
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Part 2
-            Text(text = "Part 2: Afternoon/Evening Block (Min 45m)", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = "Start: ${String.format("%02d:%02d", part2StartHour, part2StartMinute)} • Target: ${part2DurationHours}h ${part2DurationMins}m",
-                color = TextSecondary,
-                fontSize = 12.sp
-              )
-              Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(
-                  onClick = { part2StartHour = (part2StartHour + 1) % 24 },
-                  shape = RoundedCornerShape(8.dp),
-                  contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) { Text("+1h", fontSize = 10.sp, color = TextPrimary) }
-                OutlinedButton(
-                  onClick = { part2DurationMins = if (part2DurationMins == 45) 0 else 45; if (part2DurationMins == 0) part2DurationHours = (part2DurationHours + 1).coerceAtMost(5) },
-                  shape = RoundedCornerShape(8.dp),
-                  contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) { Text("+45m", fontSize = 10.sp, color = TextPrimary) }
-              }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-              text = "Notice: Fluid Twins share duration. If schedule pressure compresses one part against an anchor boundary, surplus flows to the other part. Neither part will cross an anchor slot.",
-              color = TextTertiary,
-              fontSize = 11.sp,
-              lineHeight = 15.sp
-            )
-          }
-        }
+        OutlinedTextField(
+          value = voiceMessage,
+          onValueChange = { voiceMessage = it },
+          placeholder = { Text("e.g., Focus sprint initiated. Start your priority tasks.", color = TextTertiary) },
+          modifier = Modifier.fillMaxWidth().testTag("task_voice_message_input"),
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = OneUiSurfaceElevated,
+            unfocusedContainerColor = OneUiSurfaceElevated,
+            focusedBorderColor = AnchorGradientStart,
+            unfocusedBorderColor = OneUiBorder
+          ),
+          shape = RoundedCornerShape(14.dp),
+          maxLines = 2
+        )
       }
 
-      Spacer(modifier = Modifier.height(14.dp))
+      Spacer(modifier = Modifier.height(16.dp))
 
       // ==============================================================
-      // 2. ANDROID SYSTEM NOTIFICATION SOUND / RINGTONE PICKER
+      // 3. NOTIFICATION SOUND SELECTOR & MASTER SOUND ALERT TOGGLE
       // ==============================================================
-      Text(
-        text = "System Notification Sound",
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = TextSecondary
-      )
-      Spacer(modifier = Modifier.height(6.dp))
-
+      // Master Sound Alert Toggle (ON/OFF)
       Surface(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(16.dp)),
+          .border(
+            BorderStroke(1.dp, if (isSoundAlertEnabled) Color(0xFF10B981).copy(alpha = 0.5f) else OneUiBorder),
+            RoundedCornerShape(16.dp)
+          ),
         color = OneUiSurfaceElevated
       ) {
         Row(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(14.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
+          Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             Box(
               modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF6366F1).copy(alpha = 0.2f)),
+                .background(if (isSoundAlertEnabled) Color(0xFF10B981).copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f)),
               contentAlignment = Alignment.Center
             ) {
-              Icon(imageVector = Icons.Default.MusicNote, contentDescription = null, tint = Color(0xFFA5B4FC), modifier = Modifier.size(18.dp))
+              Icon(
+                imageVector = if (isSoundAlertEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.VolumeMute,
+                contentDescription = null,
+                tint = if (isSoundAlertEnabled) Color(0xFF10B981) else TextSecondary,
+                modifier = Modifier.size(18.dp)
+              )
             }
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Column {
               Text(
-                text = customRingtoneTitle,
+                text = "Notification Sound Alert",
                 color = TextPrimary,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
-                maxLines = 1
+                fontSize = 14.sp
               )
               Text(
-                text = "Plays when task automation fires",
-                color = TextTertiary,
+                text = if (isSoundAlertEnabled) "Plays chosen system sound & vibration" else "Silent Mode: Alarms & DND fire silently without audio",
+                color = if (isSoundAlertEnabled) Color(0xFF10B981) else TextSecondary,
                 fontSize = 11.sp
               )
             }
           }
-
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            // Preview Play / Stop Button
-            IconButton(
-              onClick = {
-                try {
-                  if (isPreviewPlaying) {
-                    activeRingtonePlayer?.stop()
-                    isPreviewPlaying = false
-                  } else {
-                    val ringtoneUri = if (customRingtoneUri != null) {
-                      Uri.parse(customRingtoneUri)
-                    } else {
-                      RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                    }
-                    val r = RingtoneManager.getRingtone(context, ringtoneUri)
-                    activeRingtonePlayer = r
-                    r?.play()
-                    isPreviewPlaying = true
-                  }
-                } catch (_: Exception) {
-                  isPreviewPlaying = false
-                }
-              },
-              modifier = Modifier.size(36.dp).testTag("preview_ringtone_button")
-            ) {
-              Icon(
-                imageVector = if (isPreviewPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
-                contentDescription = if (isPreviewPlaying) "Stop" else "Preview",
-                tint = if (isPreviewPlaying) DangerRed else Color(0xFF10B981)
-              )
-            }
-
-            // Choose Ringtone Button
-            OutlinedButton(
-              onClick = {
-                val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                  putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
-                  putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Notification Sound")
-                  putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
-                  putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
-                  if (customRingtoneUri != null) {
-                    putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(customRingtoneUri))
-                  }
-                }
-                ringtonePickerLauncher.launch(intent)
-              },
-              shape = RoundedCornerShape(10.dp),
-              border = BorderStroke(1.dp, AnchorGradientStart.copy(alpha = 0.6f)),
-              modifier = Modifier.testTag("open_ringtone_picker_button")
-            ) {
-              Text("Change", fontSize = 11.sp, color = AnchorGradientStart, fontWeight = FontWeight.Bold)
-            }
-          }
+          Switch(
+            checked = isSoundAlertEnabled,
+            onCheckedChange = { isSoundAlertEnabled = it },
+            colors = SwitchDefaults.colors(
+              checkedThumbColor = Color.White,
+              checkedTrackColor = Color(0xFF10B981)
+            ),
+            modifier = Modifier.testTag("toggle_sound_alert_master_switch")
+          )
         }
       }
 
-      Spacer(modifier = Modifier.height(14.dp))
+      Spacer(modifier = Modifier.height(10.dp))
+
+      // System Ringtone Dropdown Selector (Active when sound is enabled)
+      AnimatedVisibility(visible = isSoundAlertEnabled) {
+        Column {
+          Text(
+            text = "System Notification Tone",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextSecondary
+          )
+          Spacer(modifier = Modifier.height(6.dp))
+
+          Box(modifier = Modifier.fillMaxWidth()) {
+            Surface(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(16.dp))
+                .clickable { soundDropdownExpanded = true }
+                .testTag("open_sound_dropdown_button"),
+              color = OneUiSurfaceElevated
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  modifier = Modifier.weight(1f),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(34.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFF6366F1).copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(imageVector = Icons.Default.MusicNote, contentDescription = null, tint = Color(0xFFA5B4FC), modifier = Modifier.size(18.dp))
+                  }
+                  Spacer(modifier = Modifier.width(10.dp))
+                  Column {
+                    Text(
+                      text = customRingtoneTitle,
+                      color = TextPrimary,
+                      fontWeight = FontWeight.SemiBold,
+                      fontSize = 14.sp,
+                      maxLines = 1
+                    )
+                    Text(
+                      text = "Tap to choose or browse system sounds",
+                      color = TextTertiary,
+                      fontSize = 11.sp
+                    )
+                  }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  // Preview Play / Stop Button
+                  IconButton(
+                    onClick = {
+                      try {
+                        if (isPreviewPlaying) {
+                          activeRingtonePlayer?.stop()
+                          isPreviewPlaying = false
+                        } else {
+                          val ringtoneUri = if (customRingtoneUri != null) {
+                            Uri.parse(customRingtoneUri)
+                          } else {
+                            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                          }
+                          val r = RingtoneManager.getRingtone(context, ringtoneUri)
+                          activeRingtonePlayer = r
+                          r?.play()
+                          isPreviewPlaying = true
+                        }
+                      } catch (_: Exception) {
+                        isPreviewPlaying = false
+                      }
+                    },
+                    modifier = Modifier.size(36.dp).testTag("preview_ringtone_button")
+                  ) {
+                    Icon(
+                      imageVector = if (isPreviewPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                      contentDescription = if (isPreviewPlaying) "Stop" else "Preview",
+                      tint = if (isPreviewPlaying) DangerRed else Color(0xFF10B981)
+                    )
+                  }
+
+                  Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "Dropdown", tint = TextSecondary)
+                }
+              }
+            }
+
+            // Dropdown menu with standard choices + browse launcher
+            DropdownMenu(
+              expanded = soundDropdownExpanded,
+              onDismissRequest = { soundDropdownExpanded = false },
+              modifier = Modifier.background(OneUiSurfaceElevated).border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(12.dp))
+            ) {
+              DropdownMenuItem(
+                text = { Text("Default Notification Tone", color = TextPrimary) },
+                onClick = {
+                  customRingtoneUri = null
+                  customRingtoneTitle = "Default Notification Tone"
+                  soundDropdownExpanded = false
+                }
+              )
+              DropdownMenuItem(
+                text = { Text("Silent / No Sound", color = TextSecondary) },
+                onClick = {
+                  customRingtoneUri = null
+                  customRingtoneTitle = "Silent / None"
+                  soundDropdownExpanded = false
+                }
+              )
+              DropdownMenuItem(
+                text = { Text("🎵 Browse All Device Ringtones...", color = AnchorGradientStart, fontWeight = FontWeight.Bold) },
+                onClick = {
+                  soundDropdownExpanded = false
+                  val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select System Sound")
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
+                    if (customRingtoneUri != null) {
+                      putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(customRingtoneUri))
+                    }
+                  }
+                  ringtonePickerLauncher.launch(intent)
+                }
+              )
+            }
+          }
+          Spacer(modifier = Modifier.height(10.dp))
+        }
+      }
 
       // Hardware DND Toggle
       Surface(
@@ -707,51 +1073,8 @@ fun TaskModalBottomSheet(
         }
       }
 
-      // Custom Visual Notification Popup Fields
-      Spacer(modifier = Modifier.height(14.dp))
-      Text(
-        text = "Visual Popup Notification (Heads-Up Banner)",
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = TextSecondary
-      )
-      Spacer(modifier = Modifier.height(6.dp))
-
-      OutlinedTextField(
-        value = customNotificationTitle,
-        onValueChange = { customNotificationTitle = it },
-        placeholder = { Text("Custom Notification Title (defaults to task title)", color = TextTertiary, fontSize = 13.sp) },
-        modifier = Modifier.fillMaxWidth().testTag("custom_notif_title_input"),
-        colors = OutlinedTextFieldDefaults.colors(
-          focusedContainerColor = OneUiSurfaceElevated,
-          unfocusedContainerColor = OneUiSurfaceElevated,
-          focusedBorderColor = AnchorGradientStart,
-          unfocusedBorderColor = OneUiBorder
-        ),
-        shape = RoundedCornerShape(14.dp),
-        singleLine = true
-      )
-
-      Spacer(modifier = Modifier.height(8.dp))
-
-      OutlinedTextField(
-        value = customNotificationBody,
-        onValueChange = { customNotificationBody = it },
-        placeholder = { Text("Custom Notification Body / Heads-Up Message", color = TextTertiary, fontSize = 13.sp) },
-        modifier = Modifier.fillMaxWidth().testTag("custom_notif_body_input"),
-        colors = OutlinedTextFieldDefaults.colors(
-          focusedContainerColor = OneUiSurfaceElevated,
-          unfocusedContainerColor = OneUiSurfaceElevated,
-          focusedBorderColor = AnchorGradientStart,
-          unfocusedBorderColor = OneUiBorder
-        ),
-        shape = RoundedCornerShape(14.dp),
-        maxLines = 2
-      )
-
-      Spacer(modifier = Modifier.height(14.dp))
-
       // Weekly Recurrence: Sat-Fri
+      Spacer(modifier = Modifier.height(14.dp))
       Text(
         text = "Weekly Recurrence (Sat - Fri)",
         fontSize = 13.sp,
@@ -822,27 +1145,35 @@ fun TaskModalBottomSheet(
               customNotificationTitle,
               customNotificationBody,
               customRingtoneUri,
-              customRingtoneTitle
+              customRingtoneTitle,
+              isSoundAlertEnabled
             )
           } else if (isFluidTwinMode) {
-            val totalPool = (fluidPoolHours * 60 + fluidPoolMins).coerceAtLeast(90)
-            val p1Dur = calculatedDuration.coerceAtLeast(45)
-            val p2Start = part2StartHour * 60 + part2StartMinute
+            val p1Dur = (part1DurationHours * 60 + part1DurationMins).coerceAtLeast(45)
             val p2Dur = (part2DurationHours * 60 + part2DurationMins).coerceAtLeast(45)
+            val totalPool = (p1Dur + p2Dur).coerceAtLeast(90)
+            val p1Start = part1StartHour * 60 + part1StartMinute
+            val p2Start = part2StartHour * 60 + part2StartMinute
+
             onSaveFluidTwin(
               title,
               totalPool,
-              calculatedStart,
+              part1Title,
+              p1Start,
               p1Dur,
+              part1VoiceMessage,
+              part2Title,
               p2Start,
               p2Dur,
+              part2VoiceMessage,
               enableDnd,
               selectedDays,
               isVoiceEnabled,
               customNotificationTitle,
               customNotificationBody,
               customRingtoneUri,
-              customRingtoneTitle
+              customRingtoneTitle,
+              isSoundAlertEnabled
             )
           } else {
             val task = RoutineTask(
@@ -860,7 +1191,8 @@ fun TaskModalBottomSheet(
               customNotificationTitle = customNotificationTitle,
               customNotificationBody = customNotificationBody,
               customRingtoneUri = customRingtoneUri,
-              customRingtoneTitle = customRingtoneTitle
+              customRingtoneTitle = customRingtoneTitle,
+              isSoundAlertEnabled = isSoundAlertEnabled
             )
             onSaveTask(task)
           }
@@ -871,7 +1203,7 @@ fun TaskModalBottomSheet(
           .height(52.dp)
           .testTag("save_task_button"),
         colors = ButtonDefaults.buttonColors(
-          containerColor = AnchorGradientStart,
+          containerColor = if (isFluidTwinMode) Color(0xFF8B5CF6) else AnchorGradientStart,
           contentColor = Color.White
         ),
         shape = RoundedCornerShape(16.dp)
@@ -882,7 +1214,7 @@ fun TaskModalBottomSheet(
       }
 
       // ==============================================================
-      // 5. MOVE TO TRASH ACTION (Inside Edit Form, Requirement 5)
+      // 4. MOVE TO TRASH ACTION (Inside Edit Form Only, Requirement 4)
       // ==============================================================
       if (isEditing && !isAnchor && initialTask != null) {
         Spacer(modifier = Modifier.height(14.dp))

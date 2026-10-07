@@ -40,7 +40,9 @@ enum class TimelineSortMode(val label: String) {
   LONGEST_DURATION("Longest Duration"),
   SHORTEST_DURATION("Shortest Duration"),
   ACTIVE_FIRST("Active Task on Top"),
-  HORIZON_REVERSE("Horizon / Last Task First")
+  HORIZON_REVERSE("Horizon / Last Task First"),
+  ANCHORS_TOP("Anchors on Top"),
+  ANCHORS_BOTTOM("Anchors at Bottom")
 }
 
 class RoutineViewModel(application: Application) : AndroidViewModel(application) {
@@ -137,7 +139,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         active + upcoming + completed
       }
       TimelineSortMode.HORIZON_REVERSE -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute + it.durationMinutes }
-      else -> rawResult.scheduledTasks
+      TimelineSortMode.ANCHORS_TOP -> {
+        val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
+          it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
+        }
+        anchorsList.sortedBy { it.slotNumber ?: 0 } + dynamicsList.sortedBy { it.startTimeMinute }
+      }
+      TimelineSortMode.ANCHORS_BOTTOM -> {
+        val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
+          it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
+        }
+        dynamicsList.sortedBy { it.startTimeMinute } + anchorsList.sortedBy { it.slotNumber ?: 0 }
+      }
     }
 
     rawResult.copy(scheduledTasks = sortedScheduled)
@@ -245,7 +258,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     customNotificationTitle: String = "",
     customNotificationBody: String = "",
     customRingtoneUri: String? = null,
-    customRingtoneTitle: String? = null
+    customRingtoneTitle: String? = null,
+    isSoundAlertEnabled: Boolean = true
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
@@ -263,7 +277,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
               customNotificationTitle = customNotificationTitle,
               customNotificationBody = customNotificationBody,
               customRingtoneUri = customRingtoneUri,
-              customRingtoneTitle = customRingtoneTitle
+              customRingtoneTitle = customRingtoneTitle,
+              isSoundAlertEnabled = isSoundAlertEnabled
             )
           } else {
             task
@@ -291,62 +306,71 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun saveFluidTwin(
     title: String,
     totalPoolMinutes: Int,
+    part1Title: String,
     part1StartMinute: Int,
     part1Duration: Int,
+    part1VoiceMessage: String,
+    part2Title: String,
     part2StartMinute: Int,
     part2Duration: Int,
+    part2VoiceMessage: String,
     enableDnd: Boolean,
     selectedDays: Set<RoutineDay>,
     isVoiceEnabled: Boolean,
     customNotificationTitle: String,
     customNotificationBody: String,
     customRingtoneUri: String? = null,
-    customRingtoneTitle: String? = null
+    customRingtoneTitle: String? = null,
+    isSoundAlertEnabled: Boolean = true
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
         val twinId = "fluid_${UUID.randomUUID().toString().take(8)}"
+        val actualP1Title = part1Title.ifBlank { "$title (Part 1)" }
+        val actualP2Title = part2Title.ifBlank { "$title (Part 2)" }
         val part1 = RoutineTask(
           id = "${twinId}_p1",
-          title = "$title (Part 1)",
+          title = actualP1Title,
           type = TaskType.DYNAMIC,
           startTimeMinute = part1StartMinute,
           durationMinutes = part1Duration.coerceAtLeast(45),
-          voiceMessage = "$title Part 1 starting now.",
+          voiceMessage = part1VoiceMessage.ifBlank { "$actualP1Title starting now." },
           enableDnd = enableDnd,
           enableHaptic = true,
           allowSplitting = false,
           selectedDays = selectedDays,
           isVoiceEnabled = isVoiceEnabled,
-          customNotificationTitle = customNotificationTitle.ifBlank { "$title (Part 1)" },
+          customNotificationTitle = customNotificationTitle.ifBlank { actualP1Title },
           customNotificationBody = customNotificationBody,
           isFluidTwin = true,
           fluidTwinId = twinId,
           fluidTwinPart = 1,
           fluidTotalPoolMinutes = totalPoolMinutes,
           customRingtoneUri = customRingtoneUri,
-          customRingtoneTitle = customRingtoneTitle
+          customRingtoneTitle = customRingtoneTitle,
+          isSoundAlertEnabled = isSoundAlertEnabled
         )
         val part2 = RoutineTask(
           id = "${twinId}_p2",
-          title = "$title (Part 2)",
+          title = actualP2Title,
           type = TaskType.DYNAMIC,
           startTimeMinute = part2StartMinute,
           durationMinutes = part2Duration.coerceAtLeast(45),
-          voiceMessage = "$title Part 2 starting now.",
+          voiceMessage = part2VoiceMessage.ifBlank { "$actualP2Title starting now." },
           enableDnd = enableDnd,
           enableHaptic = true,
           allowSplitting = false,
           selectedDays = selectedDays,
           isVoiceEnabled = isVoiceEnabled,
-          customNotificationTitle = customNotificationTitle.ifBlank { "$title (Part 2)" },
+          customNotificationTitle = customNotificationTitle.ifBlank { actualP2Title },
           customNotificationBody = customNotificationBody,
           isFluidTwin = true,
           fluidTwinId = twinId,
           fluidTwinPart = 2,
           fluidTotalPoolMinutes = totalPoolMinutes,
           customRingtoneUri = customRingtoneUri,
-          customRingtoneTitle = customRingtoneTitle
+          customRingtoneTitle = customRingtoneTitle,
+          isSoundAlertEnabled = isSoundAlertEnabled
         )
 
         val list = _dynamicTasks.value.toMutableList()
@@ -419,29 +443,24 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
 
   fun exportFullRoutineScript(): String {
     val sb = StringBuilder()
-    sb.appendLine("# CHRONOS_ROUTINE_EXPORT_V1")
-    sb.appendLine("# SLEEP_MINUTES=${_sleepDurationMinutes.value}")
-    sb.appendLine("# BUFFER_MINUTES=${_bufferMinutes.value}")
-    sb.appendLine("# ANCHOR | Slot | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | Voice(Y/N)")
-    for (anchor in _anchors.value.sortedBy { it.slotNumber ?: 0 }) {
-      val slot = anchor.slotNumber ?: 0
-      val dnd = if (anchor.enableDnd) "Y" else "N"
-      val voice = if (anchor.isVoiceEnabled) "Y" else "N"
-      sb.appendLine("ANCHOR | $slot | ${anchor.title} | ${anchor.formattedStartTime} | ${anchor.durationMinutes} | $dnd | $voice")
-    }
+    sb.appendLine("# CHRONOS DYNAMIC ROUTINE EXPORT")
+    sb.appendLine("# User dynamic tasks and fluid twins (Core anchors are preserved in the engine)")
+    sb.appendLine("# Format: Task Name | Duration(m) | Preferred Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Custom Message")
     sb.appendLine("")
-    sb.appendLine("# DYNAMIC | Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | IsFluidTwin(Y/N) | TwinPart | TwinPool | RingtoneUri | RingtoneTitle")
     for (task in _dynamicTasks.value.filter { !it.isDeleted }) {
       val dnd = if (task.enableDnd) "Y" else "N"
       val voice = if (task.isVoiceEnabled) "Y" else "N"
       val days = if (task.selectedDays.size == 7) "ALL" else task.selectedDays.joinToString(",") { it.shortName }
       val msg = task.voiceMessage.ifBlank { task.title }
-      val isTwin = if (task.isFluidTwin) "Y" else "N"
-      val part = task.fluidTwinPart ?: 0
-      val pool = task.fluidTotalPoolMinutes ?: 0
-      val rUri = task.customRingtoneUri ?: "DEFAULT"
-      val rTitle = task.customRingtoneTitle ?: "Default"
-      sb.appendLine("DYNAMIC | ${task.title} | ${task.durationMinutes} | ${task.formattedStartTime} | $dnd | $days | $voice | $msg | $isTwin | $part | $pool | $rUri | $rTitle")
+      if (task.isFluidTwin) {
+        val part = task.fluidTwinPart ?: 1
+        val pool = task.fluidTotalPoolMinutes ?: task.durationMinutes
+        val rUri = task.customRingtoneUri ?: "DEFAULT"
+        val rTitle = task.customRingtoneTitle ?: "Default"
+        sb.appendLine("DYNAMIC | ${task.title} | ${task.durationMinutes} | ${task.formattedStartTime} | $dnd | $days | $voice | $msg | Y | $part | $pool | $rUri | $rTitle")
+      } else {
+        sb.appendLine("${task.title} | ${task.durationMinutes} | ${task.formattedStartTime} | $dnd | $days | $voice | $msg")
+      }
     }
     return sb.toString()
   }

@@ -198,12 +198,12 @@ object SchedulerEngine {
 
     for (task in committedTasks) {
       val start = ((task.startTimeMinute % 1440) + 1440) % 1440
-      // For dynamic tasks, include the interTaskBufferMinutes to guarantee rest gap
-      val totalBlock = if (task.type == TaskType.DYNAMIC) {
-        task.durationMinutes + interTaskBufferMinutes
+      val taskBuffer = if (task.type == TaskType.DYNAMIC) {
+        task.interTaskBufferMinutes.coerceAtLeast(interTaskBufferMinutes)
       } else {
-        task.durationMinutes
+        0
       }
+      val totalBlock = task.durationMinutes + taskBuffer
 
       for (i in 0 until totalBlock) {
         val min = (start + i) % 1440
@@ -388,6 +388,46 @@ object SchedulerEngine {
         )
         scheduledTasks.add(placed)
         continue
+      }
+
+      // Schedule Float / Tolerance Margin (±5m to ±15m flexibility)
+      // Safely compresses duration within tolerance margin to fit tight anchor boundaries without overflowing
+      if (dynamicTask.toleranceMinutes > 0) {
+        val tolerance = dynamicTask.toleranceMinutes.coerceIn(0, 15)
+        val minViable = (requiredDuration - tolerance).coerceAtLeast(MIN_SPLIT_MINUTES)
+        var flexGap: ScheduleGap? = null
+        var flexStart = -1
+        var flexDuration = -1
+        var minFlexDist = Int.MAX_VALUE
+
+        for (gap in gaps) {
+          if (gap.durationMinutes >= minViable) {
+            val fittedDuration = gap.durationMinutes.coerceIn(minViable, requiredDuration)
+            val possibleStart = when {
+              prefStart in gap.startMinute..(gap.endMinute - fittedDuration) -> prefStart
+              prefStart < gap.startMinute -> gap.startMinute
+              else -> gap.endMinute - fittedDuration
+            }
+            val distance = Math.abs(possibleStart - prefStart)
+            if (distance < minFlexDist) {
+              minFlexDist = distance
+              flexGap = gap
+              flexStart = possibleStart
+              flexDuration = fittedDuration
+            }
+          }
+        }
+
+        if (flexGap != null && flexStart != -1 && flexDuration >= minViable) {
+          val placed = dynamicTask.copy(
+            startTimeMinute = flexStart,
+            durationMinutes = flexDuration,
+            isSplitPart = false,
+            isOverflow = false
+          )
+          scheduledTasks.add(placed)
+          continue
+        }
       }
 
       // If continuous placement failed, check if task splitting is allowed and duration > 60m

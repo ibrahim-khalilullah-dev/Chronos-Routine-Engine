@@ -27,6 +27,8 @@ object AutomationManager {
   const val EXTRA_ENABLE_DND = "extra_enable_dnd"
   const val EXTRA_ENABLE_HAPTIC = "extra_enable_haptic"
   const val EXTRA_IS_VOICE_ENABLED = "extra_is_voice_enabled"
+  const val EXTRA_IS_SOUND_ALERT_ENABLED = "extra_is_sound_alert_enabled"
+  const val EXTRA_CUSTOM_RINGTONE_URI = "extra_custom_ringtone_uri"
   const val EXTRA_NOTIFICATION_TITLE = "extra_notification_title"
   const val EXTRA_NOTIFICATION_BODY = "extra_notification_body"
 
@@ -154,6 +156,8 @@ object AutomationManager {
       putExtra(EXTRA_ENABLE_DND, task.enableDnd)
       putExtra(EXTRA_ENABLE_HAPTIC, task.enableHaptic)
       putExtra(EXTRA_IS_VOICE_ENABLED, task.isVoiceEnabled)
+      putExtra(EXTRA_IS_SOUND_ALERT_ENABLED, task.isSoundAlertEnabled)
+      putExtra(EXTRA_CUSTOM_RINGTONE_URI, task.customRingtoneUri)
       putExtra(EXTRA_NOTIFICATION_TITLE, task.notificationDisplayTitle)
       putExtra(EXTRA_NOTIFICATION_BODY, task.notificationDisplayBody)
     }
@@ -250,6 +254,8 @@ object AutomationManager {
       putExtra(EXTRA_ENABLE_DND, task.enableDnd)
       putExtra(EXTRA_ENABLE_HAPTIC, task.enableHaptic)
       putExtra(EXTRA_IS_VOICE_ENABLED, task.isVoiceEnabled)
+      putExtra(EXTRA_IS_SOUND_ALERT_ENABLED, task.isSoundAlertEnabled)
+      putExtra(EXTRA_CUSTOM_RINGTONE_URI, task.customRingtoneUri)
       putExtra(EXTRA_NOTIFICATION_TITLE, task.notificationDisplayTitle)
       putExtra(EXTRA_NOTIFICATION_BODY, task.notificationDisplayBody)
     }

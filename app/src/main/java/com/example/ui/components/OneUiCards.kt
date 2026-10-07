@@ -23,6 +23,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.Edit
@@ -45,6 +47,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -125,6 +131,7 @@ fun AnchorSlotCard(
   }
 
   val haptic = LocalHapticFeedback.current
+  var pendingDeltaMinutes by remember(task.startTimeMinute) { mutableIntStateOf(0) }
 
   Surface(
     modifier = modifier
@@ -262,9 +269,15 @@ fun AnchorSlotCard(
               modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
+            val effectiveStart = (task.startTimeMinute + pendingDeltaMinutes + 1440) % 1440
+            val effectiveEnd = (effectiveStart + task.durationMinutes) % 1440
             Text(
-              text = "${task.formattedStartTime} → ${task.formattedEndTime}",
-              color = TextPrimary,
+              text = if (pendingDeltaMinutes != 0) {
+                "${RoutineTask.formatTime(effectiveStart)} → ${RoutineTask.formatTime(effectiveEnd)}"
+              } else {
+                "${task.formattedStartTime} → ${task.formattedEndTime}"
+              },
+              color = if (pendingDeltaMinutes != 0) WarningAmber else TextPrimary,
               fontWeight = FontWeight.Bold,
               fontSize = 19.sp,
               fontFamily = FontFamily.SansSerif
@@ -286,6 +299,23 @@ fun AnchorSlotCard(
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
               )
+            }
+
+            if (pendingDeltaMinutes != 0) {
+              Spacer(modifier = Modifier.width(6.dp))
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(WarningAmber.copy(alpha = 0.25f))
+                  .padding(horizontal = 6.dp, vertical = 3.dp)
+              ) {
+                Text(
+                  text = "${if (pendingDeltaMinutes > 0) "+$pendingDeltaMinutes" else "$pendingDeltaMinutes"} min (Pending)",
+                  color = WarningAmber,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold
+                )
+              }
             }
 
             if (task.enableDnd) {
@@ -330,49 +360,94 @@ fun AnchorSlotCard(
           }
         }
 
-        // Quick Adjust +/- 5 min buttons for Standard Anchors
+        // Quick Adjust +/- 5 min buttons for Standard Anchors with Accumulative Batch Save Protection
         if (isStandardAnchor) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
           ) {
+            // Minus 5m Button (accumulative: allows consecutive taps)
             FilledTonalIconButton(
               onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onQuickAdjust(-5)
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                pendingDeltaMinutes -= 5
               },
               modifier = Modifier
-                .size(42.dp)
+                .size(38.dp)
                 .testTag("quick_minus_slot_$slotNum"),
               colors = IconButtonDefaults.filledTonalIconButtonColors(
                 containerColor = Color.White.copy(alpha = 0.14f),
                 contentColor = TextPrimary
               ),
-              shape = RoundedCornerShape(14.dp)
+              shape = RoundedCornerShape(12.dp)
             ) {
               Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.Remove, contentDescription = "Minus 5 min", modifier = Modifier.size(16.dp))
-                Text(text = "5m", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Icon(imageVector = Icons.Default.Remove, contentDescription = "Minus 5 min", modifier = Modifier.size(15.dp))
+                Text(text = "5m", fontSize = 10.sp, fontWeight = FontWeight.Bold)
               }
             }
 
+            // Plus 5m Button (accumulative: allows consecutive taps)
             FilledTonalIconButton(
               onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onQuickAdjust(5)
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                pendingDeltaMinutes += 5
               },
               modifier = Modifier
-                .size(42.dp)
+                .size(38.dp)
                 .testTag("quick_plus_slot_$slotNum"),
               colors = IconButtonDefaults.filledTonalIconButtonColors(
                 containerColor = Color.White.copy(alpha = 0.14f),
                 contentColor = TextPrimary
               ),
-              shape = RoundedCornerShape(14.dp)
+              shape = RoundedCornerShape(12.dp)
             ) {
               Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "Plus 5 min", modifier = Modifier.size(16.dp))
-                Text(text = "5m", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Icon(imageVector = Icons.Default.Add, contentDescription = "Plus 5 min", modifier = Modifier.size(15.dp))
+                Text(text = "5m", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+              }
+            }
+
+            // In-place Action Pill: "Save (✓)" and "Cancel (✕)" (Shown whenever pendingDeltaMinutes != 0)
+            if (pendingDeltaMinutes != 0) {
+              // Prominent "Save" Checkmark Gradient Pill Button
+              Button(
+                onClick = {
+                  haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                  onQuickAdjust(pendingDeltaMinutes)
+                  pendingDeltaMinutes = 0
+                },
+                modifier = Modifier.testTag("save_quick_adjust_slot_$slotNum"),
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = Color(0xFF10B981),
+                  contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+              ) {
+                Icon(imageVector = Icons.Default.Check, contentDescription = "Save Adjustment", modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(2.dp))
+                Text("Save", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+              }
+
+              // Prominent "Cancel" Discard Button
+              IconButton(
+                onClick = {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  pendingDeltaMinutes = 0
+                },
+                modifier = Modifier
+                  .size(34.dp)
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color.White.copy(alpha = 0.12f))
+                  .testTag("cancel_quick_adjust_slot_$slotNum")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Close,
+                  contentDescription = "Cancel Adjustment",
+                  tint = TextSecondary,
+                  modifier = Modifier.size(16.dp)
+                )
               }
             }
           }
@@ -444,7 +519,6 @@ fun DynamicTaskCard(
   task: RoutineTask,
   currentMinute: Int = -1,
   onEditClick: () -> Unit,
-  onDeleteClick: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val haptic = LocalHapticFeedback.current
@@ -556,7 +630,7 @@ fun DynamicTaskCard(
             Spacer(modifier = Modifier.width(6.dp))
           }
 
-          // Dedicated Edit Pencil Button (Requirement 5)
+          // Dedicated Edit Pencil Button (Requirement 4)
           IconButton(
             onClick = {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -570,23 +644,6 @@ fun DynamicTaskCard(
               tint = TextSecondary,
               modifier = Modifier.size(18.dp)
             )
-          }
-
-          if (onDeleteClick != null) {
-            IconButton(
-              onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onDeleteClick()
-              },
-              modifier = Modifier.size(36.dp).testTag("delete_task_${task.id}")
-            ) {
-              Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Delete Task",
-                tint = DangerRed.copy(alpha = 0.85f),
-                modifier = Modifier.size(18.dp)
-              )
-            }
           }
         }
       }
@@ -771,7 +828,7 @@ fun ActiveTaskLiveProgressBar(
 fun OverflowTaskCard(
   task: RoutineTask,
   onEditClick: () -> Unit,
-  onDeleteClick: () -> Unit,
+  onDeleteClick: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val haptic = LocalHapticFeedback.current
@@ -831,14 +888,14 @@ fun OverflowTaskCard(
 
         IconButton(
           onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            onDeleteClick()
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onEditClick()
           },
-          modifier = Modifier.size(32.dp)
+          modifier = Modifier.size(32.dp).testTag("edit_overflow_${task.id}")
         ) {
           Icon(
-            imageVector = Icons.Default.Delete,
-            contentDescription = "Dismiss Overflow",
+            imageVector = Icons.Default.Edit,
+            contentDescription = "Edit Overflow Task",
             tint = TextSecondary,
             modifier = Modifier.size(16.dp)
           )

@@ -232,11 +232,7 @@ fun TimelineScreen(
             DynamicTaskCard(
               task = task,
               currentMinute = currentMinute,
-              onEditClick = { onEditTask(task) },
-              onDeleteClick = {
-                // Safe Delete: opens Samsung One UI styled confirmation modal
-                taskToDeleteConfirm = task
-              }
+              onEditClick = { onEditTask(task) }
             )
           }
         }
@@ -316,10 +312,7 @@ fun TimelineScreen(
         ) { task ->
           OverflowTaskCard(
             task = task,
-            onEditClick = { onEditTask(task) },
-            onDeleteClick = {
-              taskToDeleteConfirm = task
-            }
+            onEditClick = { onEditTask(task) }
           )
         }
       }
@@ -405,52 +398,22 @@ fun OneUiHeader(
       .padding(top = 8.dp, bottom = 8.dp)
       .animateContentSize()
   ) {
-    // Top Row: App Title + Trash Bin Shortcut
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
+    // Top Row: App Title & Subtitle (Clean One UI 6/7)
+    Column(
+      modifier = Modifier.fillMaxWidth()
     ) {
-      Column {
-        Text(
-          text = "Chronos",
-          fontSize = 32.sp,
-          fontWeight = FontWeight.ExtraBold,
-          color = TextPrimary
-        )
-        Text(
-          text = "Smart Dynamic Routine & Device Automation",
-          fontSize = 13.sp,
-          color = TextSecondary,
-          fontWeight = FontWeight.Medium
-        )
-      }
-
-      // Trash Bin Button with badge
-      IconButton(
-        onClick = onOpenTrashBin,
-        modifier = Modifier
-          .clip(RoundedCornerShape(14.dp))
-          .background(OneUiSurfaceElevated)
-          .testTag("open_trash_bin_button")
-      ) {
-        Box(contentAlignment = Alignment.TopEnd) {
-          Icon(
-            imageVector = Icons.Default.Delete,
-            contentDescription = "Trash Bin",
-            tint = if (deletedCount > 0) WarningAmber else TextSecondary,
-            modifier = Modifier.size(22.dp)
-          )
-          if (deletedCount > 0) {
-            Box(
-              modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(WarningAmber)
-            )
-          }
-        }
-      }
+      Text(
+        text = "Chronos",
+        fontSize = 32.sp,
+        fontWeight = FontWeight.ExtraBold,
+        color = TextPrimary
+      )
+      Text(
+        text = "Smart Dynamic Routine & Device Automation",
+        fontSize = 13.sp,
+        color = TextSecondary,
+        fontWeight = FontWeight.Medium
+      )
     }
 
     Spacer(modifier = Modifier.height(14.dp))
