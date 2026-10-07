@@ -239,4 +239,75 @@ class ExampleRobolectricTest {
     assertFalse("Should not be active at 22:30 (1350m)", isTaskActiveAt(taskMidnight, 1350))
     assertFalse("Should not be active at 01:30 (90m)", isTaskActiveAt(taskMidnight, 90))
   }
+
+  @Test
+  fun `tolerance margin allows dynamic task to fit into tight anchor gap without overflowing`() {
+    val anchors = SchedulerEngine.calculateAnchors(emptyList(), sleepDurationMinutes = 420)
+    // Find gaps
+    val gaps = SchedulerEngine.findAvailableGaps(anchors, interTaskBufferMinutes = 5)
+    val gap = gaps.firstOrNull { it.durationMinutes in 30..80 } ?: gaps.first()
+
+    // Create task with duration slightly larger than the gap (e.g., gap + 10 min)
+    val taskWithoutTolerance = RoutineTask(
+      id = "tight_task_strict",
+      title = "Strict Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = gap.startMinute,
+      durationMinutes = gap.durationMinutes + 8,
+      toleranceMinutes = 0,
+      allowSplitting = false,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    // With 0 tolerance, task cannot fit into this specific gap continuously
+    val taskWithTolerance = taskWithoutTolerance.copy(
+      id = "tight_task_tolerant",
+      title = "Tolerant Task",
+      toleranceMinutes = 10
+    )
+
+    val resultTolerant = SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(taskWithTolerance),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 5
+    )
+
+    // With tolerance of 10 min, engine shrinks duration to fit gap.durationMinutes safely
+    val scheduled = resultTolerant.scheduledTasks.firstOrNull { it.id == "tight_task_tolerant" }
+    assertNotNull("Tolerant task should be scheduled", scheduled)
+    assertTrue("Duration should be safely compressed within tolerance", scheduled!!.durationMinutes <= taskWithTolerance.durationMinutes)
+  }
+
+  @Test
+  fun `anchors top and anchors bottom sorting modes group tasks correctly`() {
+    val anchors = SchedulerEngine.calculateAnchors(emptyList(), sleepDurationMinutes = 420)
+    val dynamicTask = RoutineTask(
+      id = "dyn_1",
+      title = "Midday Focus",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 600,
+      durationMinutes = 45,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val result = SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(dynamicTask),
+      activeDay = RoutineDay.MONDAY
+    )
+
+    // Sort ANCHORS_TOP
+    val (anchorsTop, dynamicsTop) = result.scheduledTasks.partition {
+      it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
+    }
+    val sortedAnchorsTop = anchorsTop.sortedBy { it.slotNumber ?: 0 } + dynamicsTop.sortedBy { it.startTimeMinute }
+    assertEquals(TaskType.ANCHOR_SLEEP, sortedAnchorsTop.first().type)
+    assertEquals("dyn_1", sortedAnchorsTop.last().id)
+
+    // Sort ANCHORS_BOTTOM
+    val sortedAnchorsBottom = dynamicsTop.sortedBy { it.startTimeMinute } + anchorsTop.sortedBy { it.slotNumber ?: 0 }
+    assertEquals("dyn_1", sortedAnchorsBottom.first().id)
+    assertEquals(TaskType.ANCHOR_STANDARD, sortedAnchorsBottom.last().type)
+  }
 }

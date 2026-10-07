@@ -2,6 +2,10 @@ package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,7 +34,10 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoNotDisturbOn
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Warning
@@ -46,10 +53,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,20 +118,54 @@ fun TimelineScreen(
 ) {
   val context = LocalContext.current
   val haptic = LocalHapticFeedback.current
+  val coroutineScope = rememberCoroutineScope()
   val listState = rememberLazyListState()
 
   // State for Confirmation Dialog (Requirement 1: Safe Delete)
   var taskToDeleteConfirm by remember { mutableStateOf<RoutineTask?>(null) }
 
-  // Auto-scroll to currently active task on launch or day shift (Requirement 3)
-  LaunchedEffect(activeDay, currentMinute) {
-    val activeIndex = scheduleResult.scheduledTasks.indexOfFirst {
+  // Header offset in LazyColumn items:
+  // Item 0: OneUiHeader
+  // Item 1 (if activeAutomation.isRunning): ActiveAutomationBanner
+  // Item 2 (if !isDndGranted): DndPermissionBanner
+  // Item: Section Title "Daily Timeline & Anchors"
+  val headerItemsOffset = 1 + (if (activeAutomation.isRunning) 1 else 0) + (if (!isDndGranted) 1 else 0) + 1
+
+  // Real-time active running task
+  val activeTaskIndex = remember(scheduleResult.scheduledTasks, currentMinute) {
+    scheduleResult.scheduledTasks.indexOfFirst {
       isTaskActiveAt(it, currentMinute)
     }
-    if (activeIndex >= 0) {
+  }
+  val activeLazyItemIndex = if (activeTaskIndex >= 0) headerItemsOffset + activeTaskIndex else -1
+
+  // Auto-scroll to currently active running task on initial launch or day shift once (Requirement 7)
+  var hasAutoScrolledInitially by remember(activeDay) { mutableStateOf(false) }
+  LaunchedEffect(activeDay, activeLazyItemIndex) {
+    if (!hasAutoScrolledInitially && activeLazyItemIndex >= 0) {
+      hasAutoScrolledInitially = true
       try {
-        listState.animateScrollToItem((activeIndex + 1).coerceAtLeast(0))
+        listState.animateScrollToItem(activeLazyItemIndex)
       } catch (_: Exception) {}
+    }
+  }
+
+  // Floating Jump Pill visibility states
+  val showScrollToTop by remember {
+    derivedStateOf {
+      val firstVisible = listState.firstVisibleItemIndex
+      if (activeLazyItemIndex >= 0) {
+        firstVisible > activeLazyItemIndex
+      } else {
+        firstVisible > 2
+      }
+    }
+  }
+
+  val showScrollToActive by remember {
+    derivedStateOf {
+      val firstVisible = listState.firstVisibleItemIndex
+      activeLazyItemIndex >= 0 && firstVisible < activeLazyItemIndex
     }
   }
 
@@ -320,6 +364,86 @@ fun TimelineScreen(
       // Bottom padding for navigation bar
       item {
         Spacer(modifier = Modifier.height(32.dp))
+      }
+    }
+
+    // Floating Jump Pills (Requirement 7)
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(end = 20.dp, bottom = 24.dp),
+      contentAlignment = Alignment.BottomEnd
+    ) {
+      // 1. "⬆️ Top" Pill Button: displayed when scrolled down past active task
+      androidx.compose.animation.AnimatedVisibility(
+        visible = showScrollToTop,
+        enter = fadeIn() + slideInVertically { it / 2 },
+        exit = fadeOut() + slideOutVertically { it / 2 }
+      ) {
+        Surface(
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            coroutineScope.launch {
+              listState.animateScrollToItem(0)
+            }
+          },
+          shape = RoundedCornerShape(20.dp),
+          color = OneUiSurfaceElevated,
+          border = BorderStroke(1.dp, AnchorGradientStart.copy(alpha = 0.6f)),
+          shadowElevation = 8.dp,
+          modifier = Modifier.testTag("jump_to_top_button")
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            Text("⬆️", fontSize = 13.sp)
+            Text(
+              text = "Top",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold,
+              color = TextPrimary
+            )
+          }
+        }
+      }
+
+      // 2. "🎯 Active Task" Pill Button: displayed when viewing top items while active task is running
+      androidx.compose.animation.AnimatedVisibility(
+        visible = showScrollToActive && !showScrollToTop,
+        enter = fadeIn() + slideInVertically { it / 2 },
+        exit = fadeOut() + slideOutVertically { it / 2 }
+      ) {
+        Surface(
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            coroutineScope.launch {
+              if (activeLazyItemIndex >= 0) {
+                listState.animateScrollToItem(activeLazyItemIndex)
+              }
+            }
+          },
+          shape = RoundedCornerShape(20.dp),
+          color = OneUiSurfaceElevated,
+          border = BorderStroke(1.dp, Color(0xFF67E8F9).copy(alpha = 0.6f)),
+          shadowElevation = 8.dp,
+          modifier = Modifier.testTag("jump_to_active_button")
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            Text("🎯", fontSize = 13.sp)
+            Text(
+              text = "Active Task",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFF67E8F9)
+            )
+          }
+        }
       }
     }
   }

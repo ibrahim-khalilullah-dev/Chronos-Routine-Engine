@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -56,6 +57,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -65,7 +68,10 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -80,6 +86,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.RoutineDay
@@ -203,6 +210,14 @@ fun TaskModalBottomSheet(
   // Confirmation dialog for delete
   var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
+  // Schedule Flexibility (Tolerance Margin) & Inter-Task Rest Buffer
+  var toleranceMinutes by remember { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
+  var interTaskBufferMinutes by remember { mutableIntStateOf(initialTask?.interTaskBufferMinutes ?: 5) }
+
+  // Material 3 TimePicker Dialog state
+  var showTimePickerDialog by remember { mutableStateOf(false) }
+  var timePickerTarget by remember { mutableIntStateOf(0) } // 0 = main/single, 1 = session 1, 2 = session 2
+
   var selectedDays by remember {
     mutableStateOf(initialTask?.selectedDays ?: RoutineDay.allDays())
   }
@@ -304,66 +319,53 @@ fun TaskModalBottomSheet(
       Spacer(modifier = Modifier.height(14.dp))
 
       // ==============================================================
-      // 1. FLUID TWIN SWITCHER (Toggle Switch)
+      // 1. FLUID TWIN SWITCHER (Compact One UI Switch)
       // ==============================================================
       if (!isAnchor) {
-        Surface(
+        Row(
           modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(OneUiSurfaceElevated)
             .border(
-              BorderStroke(1.dp, if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.6f) else OneUiBorder),
-              RoundedCornerShape(16.dp)
-            ),
-          color = OneUiSurfaceElevated
-        ) {
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-              Box(
-                modifier = Modifier
-                  .size(36.dp)
-                  .clip(CircleShape)
-                  .background(if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f)),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.Default.CallSplit,
-                  contentDescription = null,
-                  tint = if (isFluidTwinMode) Color(0xFFC4B5FD) else TextSecondary,
-                  modifier = Modifier.size(18.dp)
-                )
-              }
-              Spacer(modifier = Modifier.width(12.dp))
-              Column {
-                Text(
-                  text = "Link as Fluid Twin (2 Communicating Sessions)",
-                  color = TextPrimary,
-                  fontWeight = FontWeight.SemiBold,
-                  fontSize = 14.sp
-                )
-                Text(
-                  text = "Share duration pool dynamically across 2 separate sessions",
-                  color = TextSecondary,
-                  fontSize = 11.sp
-                )
-              }
-            }
-            Switch(
-              checked = isFluidTwinMode,
-              onCheckedChange = { isFluidTwinMode = it },
-              colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF8B5CF6)
-              ),
-              modifier = Modifier.testTag("toggle_fluid_twin_switch")
+              BorderStroke(1.dp, if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.5f) else OneUiBorder),
+              RoundedCornerShape(14.dp)
             )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Default.CallSplit,
+              contentDescription = null,
+              tint = if (isFluidTwinMode) Color(0xFFC4B5FD) else TextSecondary,
+              modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+              Text(
+                text = "Fluid Twin (2 Sessions)",
+                color = TextPrimary,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 14.sp
+              )
+              Text(
+                text = "Share duration pool dynamically across 2 sessions",
+                color = TextSecondary,
+                fontSize = 11.sp
+              )
+            }
           }
+          Switch(
+            checked = isFluidTwinMode,
+            onCheckedChange = { isFluidTwinMode = it },
+            colors = SwitchDefaults.colors(
+              checkedThumbColor = Color.White,
+              checkedTrackColor = Color(0xFF8B5CF6)
+            ),
+            modifier = Modifier.testTag("toggle_fluid_twin_switch")
+          )
         }
         Spacer(modifier = Modifier.height(14.dp))
       }
@@ -466,56 +468,51 @@ fun TaskModalBottomSheet(
               // Session 1 Start Time
               Text(text = "Preferred Start Time", fontSize = 12.sp, color = TextSecondary)
               Spacer(modifier = Modifier.height(4.dp))
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+              Surface(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(12.dp))
+                  .clickable {
+                    timePickerTarget = 1
+                    showTimePickerDialog = true
+                  },
+                color = OneUiSurface
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(18.dp))
-                  Spacer(modifier = Modifier.width(8.dp))
-                  Text(text = String.format("%02d:%02d", part1StartHour, part1StartMinute), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  OutlinedButton(
-                    onClick = { part1StartHour = (part1StartHour + 1) % 24 },
-                    shape = RoundedCornerShape(8.dp)
-                  ) { Text("+1h", fontSize = 11.sp, color = TextPrimary) }
-                  OutlinedButton(
-                    onClick = { part1StartMinute = (part1StartMinute + 15) % 60 },
-                    shape = RoundedCornerShape(8.dp)
-                  ) { Text("+15m", fontSize = 11.sp, color = TextPrimary) }
+                Row(
+                  modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = String.format("%02d:%02d", part1StartHour, part1StartMinute), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                  }
+                  Text(text = "Tap to pick 🕒", color = Color(0xFFC4B5FD), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
               }
 
               Spacer(modifier = Modifier.height(12.dp))
 
               // Session 1 Duration (Floor: 45m limit)
-              Text(text = "Duration (Min Safety Floor: 45m)", fontSize = 12.sp, color = TextSecondary)
+              val p1TotalMins = (part1DurationHours * 60 + part1DurationMins).coerceAtLeast(45)
+              Text(text = "Duration: ${part1DurationHours}h ${part1DurationMins}m ($p1TotalMins mins)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC4B5FD))
               Spacer(modifier = Modifier.height(4.dp))
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                val p1MinsTotal = part1DurationHours * 60 + part1DurationMins
-                Text(text = "${part1DurationHours}h ${part1DurationMins}m ($p1MinsTotal mins)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  OutlinedButton(
-                    onClick = { part1DurationHours = (part1DurationHours + 1).coerceAtMost(8) },
-                    shape = RoundedCornerShape(8.dp)
-                  ) { Text("+1h", fontSize = 11.sp, color = TextPrimary) }
-                  OutlinedButton(
-                    onClick = {
-                      val totalMins = part1DurationHours * 60 + part1DurationMins + 15
-                      val bounded = totalMins.coerceAtLeast(45)
-                      part1DurationHours = bounded / 60
-                      part1DurationMins = bounded % 60
-                    },
-                    shape = RoundedCornerShape(8.dp)
-                  ) { Text("+15m", fontSize = 11.sp, color = TextPrimary) }
-                }
-              }
+              Slider(
+                value = p1TotalMins.toFloat().coerceIn(45f, 360f),
+                onValueChange = { newVal ->
+                  val v = newVal.toInt().coerceAtLeast(45)
+                  part1DurationHours = v / 60
+                  part1DurationMins = v % 60
+                },
+                valueRange = 45f..360f,
+                colors = SliderDefaults.colors(
+                  thumbColor = Color(0xFF8B5CF6),
+                  activeTrackColor = Color(0xFFC4B5FD),
+                  inactiveTrackColor = Color.White.copy(alpha = 0.1f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+              )
 
               Spacer(modifier = Modifier.height(12.dp))
 
@@ -573,56 +570,51 @@ fun TaskModalBottomSheet(
               // Session 2 Start Time
               Text(text = "Preferred Start Time", fontSize = 12.sp, color = TextSecondary)
               Spacer(modifier = Modifier.height(4.dp))
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+              Surface(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(12.dp))
+                  .clickable {
+                    timePickerTarget = 2
+                    showTimePickerDialog = true
+                  },
+                color = OneUiSurface
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(18.dp))
-                  Spacer(modifier = Modifier.width(8.dp))
-                  Text(text = String.format("%02d:%02d", part2StartHour, part2StartMinute), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  OutlinedButton(
-                    onClick = { part2StartHour = (part2StartHour + 1) % 24 },
-                    shape = RoundedCornerShape(8.dp)
-                  ) { Text("+1h", fontSize = 11.sp, color = TextPrimary) }
-                  OutlinedButton(
-                    onClick = { part2StartMinute = (part2StartMinute + 15) % 60 },
-                    shape = RoundedCornerShape(8.dp)
-                  ) { Text("+15m", fontSize = 11.sp, color = TextPrimary) }
+                Row(
+                  modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = String.format("%02d:%02d", part2StartHour, part2StartMinute), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                  }
+                  Text(text = "Tap to pick 🕒", color = Color(0xFFC4B5FD), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
               }
 
               Spacer(modifier = Modifier.height(12.dp))
 
               // Session 2 Duration (Floor: 45m limit)
-              Text(text = "Duration (Min Safety Floor: 45m)", fontSize = 12.sp, color = TextSecondary)
+              val p2TotalMins = (part2DurationHours * 60 + part2DurationMins).coerceAtLeast(45)
+              Text(text = "Duration: ${part2DurationHours}h ${part2DurationMins}m ($p2TotalMins mins)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC4B5FD))
               Spacer(modifier = Modifier.height(4.dp))
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                val p2MinsTotal = part2DurationHours * 60 + part2DurationMins
-                Text(text = "${part2DurationHours}h ${part2DurationMins}m ($p2MinsTotal mins)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                  OutlinedButton(
-                    onClick = { part2DurationHours = (part2DurationHours + 1).coerceAtMost(8) },
-                    shape = RoundedCornerShape(8.dp)
-                  ) { Text("+1h", fontSize = 11.sp, color = TextPrimary) }
-                  OutlinedButton(
-                    onClick = {
-                      val totalMins = part2DurationHours * 60 + part2DurationMins + 15
-                      val bounded = totalMins.coerceAtLeast(45)
-                      part2DurationHours = bounded / 60
-                      part2DurationMins = bounded % 60
-                    },
-                    shape = RoundedCornerShape(8.dp)
-                  ) { Text("+15m", fontSize = 11.sp, color = TextPrimary) }
-                }
-              }
+              Slider(
+                value = p2TotalMins.toFloat().coerceIn(45f, 360f),
+                onValueChange = { newVal ->
+                  val v = newVal.toInt().coerceAtLeast(45)
+                  part2DurationHours = v / 60
+                  part2DurationMins = v % 60
+                },
+                valueRange = 45f..360f,
+                colors = SliderDefaults.colors(
+                  thumbColor = Color(0xFF8B5CF6),
+                  activeTrackColor = Color(0xFFC4B5FD),
+                  inactiveTrackColor = Color.White.copy(alpha = 0.1f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+              )
 
               Spacer(modifier = Modifier.height(12.dp))
 
@@ -699,7 +691,7 @@ fun TaskModalBottomSheet(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Preferred Start Time
+        // Preferred Start Time with Interactive TimePicker Dialog
         Text(
           text = if (isAnchor) "Anchor Start Time" else "Preferred Start Time",
           fontSize = 13.sp,
@@ -709,43 +701,55 @@ fun TaskModalBottomSheet(
         Spacer(modifier = Modifier.height(6.dp))
 
         Surface(
-          modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable {
+              timePickerTarget = 0
+              showTimePickerDialog = true
+            }
+            .testTag("open_time_picker_button"),
           color = OneUiSurfaceElevated
         ) {
           Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(20.dp))
-              Spacer(modifier = Modifier.width(10.dp))
-              Text(
-                text = String.format("%02d:%02d", startHour, startMinute),
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-              )
+              Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(22.dp))
+              Spacer(modifier = Modifier.width(12.dp))
+              Column {
+                Text(
+                  text = RoutineTask.formatTime(startHour * 60 + startMinute),
+                  fontSize = 20.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary
+                )
+                Text(
+                  text = "24h: ${String.format("%02d:%02d", startHour, startMinute)} • Tap to open clock picker",
+                  fontSize = 11.sp,
+                  color = TextSecondary
+                )
+              }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              OutlinedButton(
-                onClick = { startHour = (startHour + 1) % 24 },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, OneUiBorder)
-              ) { Text("+1h", fontSize = 12.sp, color = TextPrimary) }
-              OutlinedButton(
-                onClick = { startMinute = (startMinute + 15) % 60 },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, OneUiBorder)
-              ) { Text("+15m", fontSize = 12.sp, color = TextPrimary) }
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(AnchorGradientStart.copy(alpha = 0.2f))
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+              Text(text = "Change 🕒", color = Color(0xFFA5B4FC), fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
           }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Duration Pickers
+        // Duration Picker with Direct Numeric Keyboard Entry & Smooth Volume Slider
         Text(
           text = "Duration",
           fontSize = 13.sp,
@@ -755,36 +759,129 @@ fun TaskModalBottomSheet(
         Spacer(modifier = Modifier.height(6.dp))
 
         Surface(
-          modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp)),
           color = OneUiSurfaceElevated
         ) {
-          Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(imageVector = Icons.Default.AccessTime, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(20.dp))
-              Spacer(modifier = Modifier.width(10.dp))
-              Text(
-                text = "${durationHours}h ${durationMins}m",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
+          Column(modifier = Modifier.padding(16.dp)) {
+            // Live Readout Bar
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(imageVector = Icons.Default.AccessTime, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                val totalMins = durationHours * 60 + durationMins
+                Text(
+                  text = "${durationHours}h ${durationMins}m ($totalMins mins)",
+                  fontSize = 18.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Smooth volume-slider style Slider (15m to 360m)
+            val currentTotalMins = (durationHours * 60 + durationMins).coerceIn(15, 360)
+            Slider(
+              value = currentTotalMins.toFloat(),
+              onValueChange = { newVal ->
+                val v = newVal.toInt().coerceIn(15, 360)
+                durationHours = v / 60
+                durationMins = v % 60
+              },
+              valueRange = 15f..360f,
+              colors = SliderDefaults.colors(
+                thumbColor = AnchorGradientStart,
+                activeTrackColor = Color(0xFFA5B4FC),
+                inactiveTrackColor = Color.White.copy(alpha = 0.1f)
+              ),
+              modifier = Modifier.fillMaxWidth().testTag("duration_slider")
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Direct Numeric Keyboard Entry for Hours & Minutes
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(12.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              OutlinedTextField(
+                value = if (durationHours > 0) durationHours.toString() else "",
+                onValueChange = { input ->
+                  val clean = input.filter { it.isDigit() }.take(2)
+                  durationHours = clean.toIntOrNull()?.coerceIn(0, 12) ?: 0
+                },
+                label = { Text("Hours", fontSize = 11.sp) },
+                placeholder = { Text("0", color = TextTertiary) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("duration_hours_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = OneUiSurfaceHigh,
+                  unfocusedContainerColor = OneUiSurfaceHigh,
+                  focusedBorderColor = AnchorGradientStart,
+                  unfocusedBorderColor = OneUiBorder
+                ),
+                shape = RoundedCornerShape(12.dp)
+              )
+
+              OutlinedTextField(
+                value = if (durationMins > 0) durationMins.toString() else "",
+                onValueChange = { input ->
+                  val clean = input.filter { it.isDigit() }.take(2)
+                  durationMins = clean.toIntOrNull()?.coerceIn(0, 59) ?: 0
+                },
+                label = { Text("Minutes", fontSize = 11.sp) },
+                placeholder = { Text("0", color = TextTertiary) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("duration_minutes_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = OneUiSurfaceHigh,
+                  unfocusedContainerColor = OneUiSurfaceHigh,
+                  focusedBorderColor = AnchorGradientStart,
+                  unfocusedBorderColor = OneUiBorder
+                ),
+                shape = RoundedCornerShape(12.dp)
               )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              OutlinedButton(
-                onClick = { durationHours = ((durationHours + 1) % 12).coerceAtLeast(0) },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, OneUiBorder)
-              ) { Text("+1h", fontSize = 12.sp, color = TextPrimary) }
-              OutlinedButton(
-                onClick = { durationMins = (durationMins + 15) % 60 },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, OneUiBorder)
-              ) { Text("+15m", fontSize = 12.sp, color = TextPrimary) }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Quick Preset Chips
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              listOf(25, 45, 60, 90, 120).forEach { presetMins ->
+                val isSelected = (durationHours * 60 + durationMins) == presetMins
+                Box(
+                  modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isSelected) AnchorGradientStart else OneUiSurfaceHigh)
+                    .clickable {
+                      durationHours = presetMins / 60
+                      durationMins = presetMins % 60
+                    }
+                    .padding(vertical = 6.dp),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(
+                    text = "${presetMins}m",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isSelected) Color.White else TextSecondary
+                  )
+                }
+              }
             }
           }
         }
@@ -814,6 +911,145 @@ fun TaskModalBottomSheet(
           shape = RoundedCornerShape(14.dp),
           maxLines = 2
         )
+
+        // Schedule Float / Tolerance Margin (±5m to ±15m)
+        if (!isAnchor) {
+          Spacer(modifier = Modifier.height(14.dp))
+          Text(
+            text = "Schedule Flexibility (Tolerance Margin)",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextSecondary
+          )
+          Spacer(modifier = Modifier.height(6.dp))
+
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(16.dp)),
+            color = OneUiSurfaceElevated
+          ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = if (toleranceMinutes == 0) "Strict Timing (±0 min)" else "Adaptive Float (±$toleranceMinutes min)",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (toleranceMinutes == 0) TextPrimary else Color(0xFF67E8F9)
+                  )
+                  Text(
+                    text = if (toleranceMinutes == 0) "Must fit exact duration or moves to overflow" else "Engine can safely shrink/expand up to ±$toleranceMinutes min to fit tight anchor gaps",
+                    fontSize = 11.sp,
+                    color = TextSecondary
+                  )
+                }
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (toleranceMinutes == 0) Color.White.copy(alpha = 0.08f) else Color(0xFF06B6D4).copy(alpha = 0.2f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                  Text(
+                    text = "±${toleranceMinutes}m",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = if (toleranceMinutes == 0) TextSecondary else Color(0xFF67E8F9)
+                  )
+                }
+              }
+
+              Spacer(modifier = Modifier.height(8.dp))
+
+              Slider(
+                value = toleranceMinutes.toFloat(),
+                onValueChange = { toleranceMinutes = it.toInt() },
+                valueRange = 0f..15f,
+                steps = 2, // 0, 5, 10, 15
+                colors = SliderDefaults.colors(
+                  thumbColor = Color(0xFF06B6D4),
+                  activeTrackColor = Color(0xFF67E8F9),
+                  inactiveTrackColor = Color.White.copy(alpha = 0.1f)
+                ),
+                modifier = Modifier.fillMaxWidth().testTag("tolerance_margin_slider")
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          // Inter-Task Rest Buffer Slider (0 to 30 minutes, 5-minute steps)
+          Text(
+            text = "Inter-Task Rest Buffer",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextSecondary
+          )
+          Spacer(modifier = Modifier.height(6.dp))
+
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(16.dp)),
+            color = OneUiSurfaceElevated
+          ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = if (interTaskBufferMinutes == 0) "0 min (Continuous)" else "$interTaskBufferMinutes min Rest Buffer",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (interTaskBufferMinutes == 0) TextPrimary else Color(0xFF10B981)
+                  )
+                  Text(
+                    text = "Protected buffer gap after this task",
+                    fontSize = 11.sp,
+                    color = TextSecondary
+                  )
+                }
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (interTaskBufferMinutes == 0) Color.White.copy(alpha = 0.08f) else Color(0xFF10B981).copy(alpha = 0.2f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                  Text(
+                    text = "${interTaskBufferMinutes}m",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = if (interTaskBufferMinutes == 0) TextSecondary else Color(0xFF10B981)
+                  )
+                }
+              }
+
+              Spacer(modifier = Modifier.height(8.dp))
+
+              Slider(
+                value = interTaskBufferMinutes.toFloat(),
+                onValueChange = { newVal ->
+                  interTaskBufferMinutes = (newVal / 5).toInt() * 5
+                },
+                valueRange = 0f..30f,
+                steps = 5, // 0, 5, 10, 15, 20, 25, 30
+                colors = SliderDefaults.colors(
+                  thumbColor = Color(0xFF10B981),
+                  activeTrackColor = Color(0xFF34D399),
+                  inactiveTrackColor = Color.White.copy(alpha = 0.1f)
+                ),
+                modifier = Modifier.fillMaxWidth().testTag("rest_buffer_slider")
+              )
+            }
+          }
+        }
       }
 
       Spacer(modifier = Modifier.height(16.dp))
@@ -1073,166 +1309,318 @@ fun TaskModalBottomSheet(
         }
       }
 
-      // Weekly Recurrence: Sat-Fri
+      // Simplified Recurrence: "Every Day" vs "Specific Days"
       Spacer(modifier = Modifier.height(14.dp))
       Text(
-        text = "Weekly Recurrence (Sat - Fri)",
+        text = "Recurrence Schedule",
         fontSize = 13.sp,
         fontWeight = FontWeight.SemiBold,
         color = TextSecondary
       )
       Spacer(modifier = Modifier.height(6.dp))
 
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+      var isEveryDayMode by remember { mutableStateOf(selectedDays.size == 7) }
+
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(16.dp)),
+        color = OneUiSurfaceElevated
       ) {
-        RoutineDay.entries.forEach { day ->
-          val isSelected = selectedDays.contains(day)
-          Box(
-            modifier = Modifier
-              .size(40.dp)
-              .clip(CircleShape)
-              .background(if (isSelected) AnchorGradientStart else OneUiSurfaceElevated)
-              .border(
-                BorderStroke(1.dp, if (isSelected) Color.White.copy(alpha = 0.3f) else OneUiBorder),
-                CircleShape
-              )
-              .clickable {
-                selectedDays = if (isSelected) {
-                  if (selectedDays.size > 1) selectedDays - day else selectedDays
-                } else {
-                  selectedDays + day
-                }
-              },
-            contentAlignment = Alignment.Center
+        Column(modifier = Modifier.padding(14.dp)) {
+          // Two Clear Options: "Every Day" vs "Specific Days"
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            Text(
-              text = day.shortName.take(2),
-              color = if (isSelected) Color.White else TextSecondary,
-              fontSize = 12.sp,
-              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-            )
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                  isEveryDayMode = true
+                  selectedDays = RoutineDay.allDays()
+                }
+                .testTag("recurrence_every_day_button"),
+              color = if (isEveryDayMode) AnchorGradientStart else OneUiSurfaceHigh
+            ) {
+              Box(modifier = Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                Text(
+                  text = "Every Day (Daily)",
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (isEveryDayMode) Color.White else TextSecondary
+                )
+              }
+            }
+
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                  isEveryDayMode = false
+                }
+                .testTag("recurrence_specific_days_button"),
+              color = if (!isEveryDayMode) AnchorGradientStart else OneUiSurfaceHigh
+            ) {
+              Box(modifier = Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                Text(
+                  text = "Specific Days",
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (!isEveryDayMode) Color.White else TextSecondary
+                )
+              }
+            }
+          }
+
+          // Mon-Sun weekly chip selector for "Specific Days"
+          if (!isEveryDayMode) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              val daysInOrder = listOf(
+                RoutineDay.MONDAY, RoutineDay.TUESDAY, RoutineDay.WEDNESDAY,
+                RoutineDay.THURSDAY, RoutineDay.FRIDAY, RoutineDay.SATURDAY, RoutineDay.SUNDAY
+              )
+              daysInOrder.forEach { day ->
+                val isSelected = selectedDays.contains(day)
+                Box(
+                  modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) AnchorGradientStart else OneUiSurfaceHigh)
+                    .border(
+                      BorderStroke(1.dp, if (isSelected) Color.White.copy(alpha = 0.3f) else OneUiBorder),
+                      CircleShape
+                    )
+                    .clickable {
+                      selectedDays = if (isSelected) {
+                        if (selectedDays.size > 1) selectedDays - day else selectedDays
+                      } else {
+                        selectedDays + day
+                      }
+                    }
+                    .testTag("day_chip_${day.name.lowercase()}"),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(
+                    text = day.shortName.take(2),
+                    color = if (isSelected) Color.White else TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                  )
+                }
+              }
+            }
           }
         }
       }
 
       Spacer(modifier = Modifier.height(24.dp))
 
-      // Primary Save Button
-      Button(
-        onClick = {
-          if (title.isBlank()) {
-            title = if (isAnchor) "Anchor Slot $slotNum" else "New Task"
-          }
-
-          val calculatedDuration = durationHours * 60 + durationMins
-          val calculatedStart = startHour * 60 + startMinute
-
-          if (isSlot5) {
-            onSaveSlot5(title, voiceMessage)
-          } else if (isAnchor && slotNum != null) {
-            onSaveAnchorDetails(
-              slotNum,
-              title,
-              calculatedStart,
-              calculatedDuration,
-              voiceMessage,
-              enableDnd,
-              enableHaptic,
-              selectedDays,
-              isVoiceEnabled,
-              customNotificationTitle,
-              customNotificationBody,
-              customRingtoneUri,
-              customRingtoneTitle,
-              isSoundAlertEnabled
-            )
-          } else if (isFluidTwinMode) {
-            val p1Dur = (part1DurationHours * 60 + part1DurationMins).coerceAtLeast(45)
-            val p2Dur = (part2DurationHours * 60 + part2DurationMins).coerceAtLeast(45)
-            val totalPool = (p1Dur + p2Dur).coerceAtLeast(90)
-            val p1Start = part1StartHour * 60 + part1StartMinute
-            val p2Start = part2StartHour * 60 + part2StartMinute
-
-            onSaveFluidTwin(
-              title,
-              totalPool,
-              part1Title,
-              p1Start,
-              p1Dur,
-              part1VoiceMessage,
-              part2Title,
-              p2Start,
-              p2Dur,
-              part2VoiceMessage,
-              enableDnd,
-              selectedDays,
-              isVoiceEnabled,
-              customNotificationTitle,
-              customNotificationBody,
-              customRingtoneUri,
-              customRingtoneTitle,
-              isSoundAlertEnabled
-            )
-          } else {
-            val task = RoutineTask(
-              id = initialTask?.id ?: "dynamic_${UUID.randomUUID().toString().take(8)}",
-              title = title,
-              type = TaskType.DYNAMIC,
-              startTimeMinute = calculatedStart,
-              durationMinutes = calculatedDuration,
-              voiceMessage = voiceMessage,
-              enableDnd = enableDnd,
-              enableHaptic = enableHaptic,
-              allowSplitting = allowSplitting,
-              selectedDays = selectedDays,
-              isVoiceEnabled = isVoiceEnabled,
-              customNotificationTitle = customNotificationTitle,
-              customNotificationBody = customNotificationBody,
-              customRingtoneUri = customRingtoneUri,
-              customRingtoneTitle = customRingtoneTitle,
-              isSoundAlertEnabled = isSoundAlertEnabled
-            )
-            onSaveTask(task)
-          }
-          onDismiss()
-        },
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(52.dp)
-          .testTag("save_task_button"),
-        colors = ButtonDefaults.buttonColors(
-          containerColor = if (isFluidTwinMode) Color(0xFF8B5CF6) else AnchorGradientStart,
-          contentColor = Color.White
-        ),
-        shape = RoundedCornerShape(16.dp)
+      // Bottom Action Row: Save & Apply Schedule + Compact Corner Delete Button
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
       ) {
-        Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(text = "Save & Apply Schedule", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-      }
+        Button(
+          onClick = {
+            if (title.isBlank()) {
+              title = if (isAnchor) "Anchor Slot $slotNum" else "New Task"
+            }
 
-      // ==============================================================
-      // 4. MOVE TO TRASH ACTION (Inside Edit Form Only, Requirement 4)
-      // ==============================================================
-      if (isEditing && !isAnchor && initialTask != null) {
-        Spacer(modifier = Modifier.height(14.dp))
-        OutlinedButton(
-          onClick = { showDeleteConfirmDialog = true },
+            val calculatedDuration = durationHours * 60 + durationMins
+            val calculatedStart = startHour * 60 + startMinute
+
+            if (isSlot5) {
+              onSaveSlot5(title, voiceMessage)
+            } else if (isAnchor && slotNum != null) {
+              onSaveAnchorDetails(
+                slotNum,
+                title,
+                calculatedStart,
+                calculatedDuration,
+                voiceMessage,
+                enableDnd,
+                enableHaptic,
+                selectedDays,
+                isVoiceEnabled,
+                customNotificationTitle,
+                customNotificationBody,
+                customRingtoneUri,
+                customRingtoneTitle,
+                isSoundAlertEnabled
+              )
+            } else if (isFluidTwinMode) {
+              val p1Dur = (part1DurationHours * 60 + part1DurationMins).coerceAtLeast(45)
+              val p2Dur = (part2DurationHours * 60 + part2DurationMins).coerceAtLeast(45)
+              val totalPool = (p1Dur + p2Dur).coerceAtLeast(90)
+              val p1Start = part1StartHour * 60 + part1StartMinute
+              val p2Start = part2StartHour * 60 + part2StartMinute
+
+              onSaveFluidTwin(
+                title,
+                totalPool,
+                part1Title,
+                p1Start,
+                p1Dur,
+                part1VoiceMessage,
+                part2Title,
+                p2Start,
+                p2Dur,
+                part2VoiceMessage,
+                enableDnd,
+                selectedDays,
+                isVoiceEnabled,
+                customNotificationTitle,
+                customNotificationBody,
+                customRingtoneUri,
+                customRingtoneTitle,
+                isSoundAlertEnabled
+              )
+            } else {
+              val task = RoutineTask(
+                id = initialTask?.id ?: "dynamic_${UUID.randomUUID().toString().take(8)}",
+                title = title,
+                type = TaskType.DYNAMIC,
+                startTimeMinute = calculatedStart,
+                durationMinutes = calculatedDuration,
+                voiceMessage = voiceMessage,
+                enableDnd = enableDnd,
+                enableHaptic = enableHaptic,
+                allowSplitting = allowSplitting,
+                selectedDays = selectedDays,
+                isVoiceEnabled = isVoiceEnabled,
+                customNotificationTitle = customNotificationTitle,
+                customNotificationBody = customNotificationBody,
+                customRingtoneUri = customRingtoneUri,
+                customRingtoneTitle = customRingtoneTitle,
+                isSoundAlertEnabled = isSoundAlertEnabled,
+                toleranceMinutes = toleranceMinutes,
+                interTaskBufferMinutes = interTaskBufferMinutes
+              )
+              onSaveTask(task)
+            }
+            onDismiss()
+          },
           modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .testTag("move_to_trash_edit_form_button"),
-          shape = RoundedCornerShape(14.dp),
-          border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+            .weight(1f)
+            .height(52.dp)
+            .testTag("save_task_button"),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (isFluidTwinMode) Color(0xFF8B5CF6) else AnchorGradientStart,
+            contentColor = Color.White
+          ),
+          shape = RoundedCornerShape(16.dp)
         ) {
-          Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = DangerRed, modifier = Modifier.size(18.dp))
+          Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
           Spacer(modifier = Modifier.width(8.dp))
-          Text(text = "Move Task to Trash Bin", color = DangerRed, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+          Text(text = "Save & Apply Schedule", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+
+        // Compact Destructive Delete Button in Bottom-Right Corner (Requirement 6)
+        if (isEditing && !isAnchor && initialTask != null) {
+          Spacer(modifier = Modifier.width(10.dp))
+          OutlinedButton(
+            onClick = { showDeleteConfirmDialog = true },
+            modifier = Modifier
+              .height(52.dp)
+              .testTag("move_to_trash_edit_form_button"),
+            colors = ButtonDefaults.outlinedButtonColors(
+              contentColor = DangerRed
+            ),
+            border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.6f)),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 0.dp)
+          ) {
+            Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = DangerRed, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(text = "Delete", color = DangerRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+          }
         }
       }
     }
+  }
+
+  // Material 3 Interactive TimePicker Dialog
+  if (showTimePickerDialog) {
+    val initialH = when (timePickerTarget) {
+      1 -> part1StartHour
+      2 -> part2StartHour
+      else -> startHour
+    }
+    val initialM = when (timePickerTarget) {
+      1 -> part1StartMinute
+      2 -> part2StartMinute
+      else -> startMinute
+    }
+    val timePickerState = rememberTimePickerState(
+      initialHour = initialH,
+      initialMinute = initialM,
+      is24Hour = false
+    )
+
+    AlertDialog(
+      onDismissRequest = { showTimePickerDialog = false },
+      title = {
+        Text("Select Start Time", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+      },
+      text = {
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+          TimePicker(
+            state = timePickerState,
+            colors = TimePickerDefaults.colors(
+              clockDialColor = OneUiSurfaceElevated,
+              selectorColor = AnchorGradientStart,
+              timeSelectorSelectedContainerColor = AnchorGradientStart,
+              timeSelectorUnselectedContainerColor = OneUiSurfaceElevated,
+              timeSelectorSelectedContentColor = Color.White,
+              timeSelectorUnselectedContentColor = TextPrimary
+            )
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            when (timePickerTarget) {
+              1 -> {
+                part1StartHour = timePickerState.hour
+                part1StartMinute = timePickerState.minute
+              }
+              2 -> {
+                part2StartHour = timePickerState.hour
+                part2StartMinute = timePickerState.minute
+              }
+              else -> {
+                startHour = timePickerState.hour
+                startMinute = timePickerState.minute
+              }
+            }
+            showTimePickerDialog = false
+          },
+          colors = ButtonDefaults.buttonColors(
+            containerColor = AnchorGradientStart,
+            contentColor = Color.White
+          ),
+          shape = RoundedCornerShape(12.dp)
+        ) {
+          Text("Set Time", fontWeight = FontWeight.Bold)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showTimePickerDialog = false }) {
+          Text("Cancel", color = TextSecondary)
+        }
+      },
+      containerColor = OneUiSurfaceElevated,
+      shape = RoundedCornerShape(24.dp)
+    )
   }
 
   // Delete Confirmation Dialog inside Edit Form

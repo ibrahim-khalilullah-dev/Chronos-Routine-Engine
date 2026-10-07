@@ -462,7 +462,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Card 3: In-App Architecture Guide Button (Requirement 6)
+            // Card 3: In-App Architecture Guide Button (Requirement 9)
             Surface(
               modifier = Modifier
                 .fillMaxWidth()
@@ -492,13 +492,13 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
                 Spacer(modifier = Modifier.width(14.dp))
                 Column {
                   Text(
-                    text = "📖 How Chronos Works",
+                    text = "📖 App Guide",
                     color = TextPrimary,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                   )
                   Text(
-                    text = "Architecture & Engine Guide • 7 Anchors, Buffer & Fluid Twins",
+                    text = "How Chronos Works • 7 Anchors, Buffer & Fluid Twins",
                     color = TextSecondary,
                     fontSize = 12.sp
                   )
@@ -569,9 +569,10 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
         )
       }
 
-      // In-App Architecture Guide Modal Sheet
+      // In-App Architecture Guide Modal Sheet (Requirement 9)
       if (showArchitectureGuideSheet) {
         ChronosArchitectureGuideSheet(
+          anchors = anchors,
           onDismiss = { showArchitectureGuideSheet = false }
         )
       }

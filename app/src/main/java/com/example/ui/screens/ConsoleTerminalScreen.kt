@@ -105,7 +105,6 @@ fun ConsoleTerminalScreen(
   var consoleText by remember { mutableStateOf(ConsoleParser.DEFAULT_CONSOLE_TEMPLATE) }
   var replaceExisting by remember { mutableStateOf(false) }
   var isAnchorsPanelExpanded by remember { mutableStateOf(true) }
-  var isGuideExpanded by remember { mutableStateOf(false) }
 
   // Real-time parsed syntax analysis
   val parseResult = remember(consoleText) {
@@ -364,94 +363,34 @@ fun ConsoleTerminalScreen(
     Spacer(modifier = Modifier.height(14.dp))
 
     // ==============================================================
-    // 3. ADVANCED IN-APP DOCUMENTATION & TEMPLATES (Accordion)
+    // 3. COMPACT 1-LINE SYNTAX FORMAT BANNER (Requirement 9)
     // ==============================================================
     Surface(
       modifier = Modifier
         .fillMaxWidth()
-        .clip(RoundedCornerShape(18.dp))
-        .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(18.dp))
-        .clickable { isGuideExpanded = !isGuideExpanded }
-        .testTag("interactive_syntax_guide_card"),
+        .clip(RoundedCornerShape(14.dp))
+        .border(BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.35f)), RoundedCornerShape(14.dp))
+        .testTag("compact_syntax_format_banner"),
       color = OneUiSurfaceElevated
     ) {
-      Column(
-        modifier = Modifier
-          .animateContentSize()
-          .padding(14.dp)
+      Row(
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-              imageVector = Icons.Default.HelpOutline,
-              contentDescription = null,
-              tint = Color(0xFF06B6D4),
-              modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-              text = "Syntax Guide & Scheduling Rules",
-              color = TextPrimary,
-              fontSize = 14.sp,
-              fontWeight = FontWeight.Bold
-            )
-          }
-
-          Icon(
-            imageVector = if (isGuideExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-            contentDescription = null,
-            tint = TextSecondary,
-            modifier = Modifier.size(20.dp)
-          )
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
+        Icon(
+          imageVector = Icons.Default.Code,
+          contentDescription = null,
+          tint = Color(0xFF06B6D4),
+          modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
         Text(
-          text = "Format: Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message",
-          color = Color(0xFF06B6D4),
+          text = "Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message",
+          color = Color(0xFF67E8F9),
           fontFamily = FontFamily.Monospace,
           fontSize = 11.sp,
           fontWeight = FontWeight.SemiBold
         )
-
-        AnimatedVisibility(visible = isGuideExpanded) {
-          Column(modifier = Modifier.padding(top = 10.dp)) {
-            Text(
-              text = "Parameter Standards:",
-              color = TextPrimary,
-              fontWeight = FontWeight.Bold,
-              fontSize = 12.sp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            SyntaxFieldDesc("1. Name", "Task title, e.g., 'Client Review', 'Deep Coding'")
-            SyntaxFieldDesc("2. Duration", "Duration in minutes, e.g. 45, 90")
-            SyntaxFieldDesc("3. Start Time", "Preferred time: 24-hr (14:30) or 12-hr (02:30 PM)")
-            SyntaxFieldDesc("4. DND Mode", "Y (engage priority Do Not Disturb) or N (normal)")
-            SyntaxFieldDesc("5. Days", "ALL, WEEKDAYS, WEEKENDS, or comma-separated: Mon,Wed,Fri")
-            SyntaxFieldDesc("6. Voice (TTS)", "Y (read aloud over lock screen) or N (silent popup banner)")
-            SyntaxFieldDesc("7. Custom Text", "Message displayed in popup and announced by TTS")
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-              text = "Mathematical Engine Rules:",
-              color = Color(0xFF10B981),
-              fontWeight = FontWeight.Bold,
-              fontSize = 12.sp
-            )
-            Text(
-              text = "• Auto-Splitting: Tasks > 60m are dynamically split across open gaps with a strict 15m minimum chunk threshold.\n" +
-                "• Buffer Guard: An automatic buffer is preserved before/after each scheduled task.\n" +
-                "• Immutability: Dynamic tasks will NEVER override any of the 7 core anchors.",
-              color = Color(0xFFCBD5E1),
-              fontSize = 11.sp,
-              lineHeight = 16.sp
-            )
-          }
-        }
       }
     }
 
@@ -771,23 +710,5 @@ fun ConsoleTerminalScreen(
     }
 
     Spacer(modifier = Modifier.height(32.dp))
-  }
-}
-
-@Composable
-private fun SyntaxFieldDesc(title: String, desc: String) {
-  Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-    Text(
-      text = "$title: ",
-      color = TextPrimary,
-      fontWeight = FontWeight.Bold,
-      fontSize = 11.sp,
-      fontFamily = FontFamily.Monospace
-    )
-    Text(
-      text = desc,
-      color = TextSecondary,
-      fontSize = 11.sp
-    )
   }
 }

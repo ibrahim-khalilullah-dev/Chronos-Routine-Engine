@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.RoutineTask
 import com.example.ui.theme.AnchorGradientStart
 import com.example.ui.theme.ElasticGradientStart
 import com.example.ui.theme.OneUiBorder
@@ -56,6 +57,7 @@ import com.example.ui.theme.TextTertiary
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChronosArchitectureGuideSheet(
+  anchors: List<RoutineTask> = emptyList(),
   onDismiss: () -> Unit,
   modifier: Modifier = Modifier
 ) {
@@ -132,7 +134,7 @@ fun ChronosArchitectureGuideSheet(
 
       Spacer(modifier = Modifier.height(20.dp))
 
-      // Section 1: The 7 Immutable Anchors
+      // Section 1: The 7 Immutable Anchors (Dynamically renders real-time titles and timings)
       GuideSectionCard(
         icon = Icons.Default.Lock,
         iconTint = AnchorGradientStart,
@@ -146,13 +148,64 @@ fun ChronosArchitectureGuideSheet(
           lineHeight = 18.sp
         )
         Spacer(modifier = Modifier.height(10.dp))
-        AnchorPillRow(slot = 1, name = "Reverse Sleep", desc = "Auto-links backwards from Slot 2 wake time with midnight rollover math.", color = SleepGradientStart)
-        AnchorPillRow(slot = 2, name = "Wake & Morning", desc = "Fixed morning anchor initiating circadian activation.", color = AnchorGradientStart)
-        AnchorPillRow(slot = 3, name = "Deep Focus 1", desc = "High-energy morning productivity block.", color = AnchorGradientStart)
-        AnchorPillRow(slot = 4, name = "Midday Reset", desc = "Nutritional & cognitive restorative window.", color = AnchorGradientStart)
-        AnchorPillRow(slot = 5, name = "Elastic Rubber Buffer", desc = "Auto-scales between Slot 4 & 6 with a strict 15m minimum floor.", color = ElasticGradientStart)
-        AnchorPillRow(slot = 6, name = "Evening Reset", desc = "Day closure and decompression transition.", color = AnchorGradientStart)
-        AnchorPillRow(slot = 7, name = "Night Rest", desc = "Pre-sleep buffer establishing biological sleep hygiene.", color = AnchorGradientStart)
+
+        val anchor1 = anchors.find { it.slotNumber == 1 }
+        val anchor2 = anchors.find { it.slotNumber == 2 }
+        val anchor3 = anchors.find { it.slotNumber == 3 }
+        val anchor4 = anchors.find { it.slotNumber == 4 }
+        val anchor5 = anchors.find { it.slotNumber == 5 }
+        val anchor6 = anchors.find { it.slotNumber == 6 }
+        val anchor7 = anchors.find { it.slotNumber == 7 }
+
+        DynamicAnchorPillRow(
+          slot = 1,
+          task = anchor1,
+          defaultName = "Reverse Sleep",
+          desc = "Auto-links backwards from Slot 2 wake time with midnight rollover math (% 1440).",
+          color = SleepGradientStart
+        )
+        DynamicAnchorPillRow(
+          slot = 2,
+          task = anchor2,
+          defaultName = "Wake & Morning",
+          desc = "Fixed morning anchor initiating circadian activation.",
+          color = AnchorGradientStart
+        )
+        DynamicAnchorPillRow(
+          slot = 3,
+          task = anchor3,
+          defaultName = "Deep Focus 1",
+          desc = "High-energy morning productivity block.",
+          color = AnchorGradientStart
+        )
+        DynamicAnchorPillRow(
+          slot = 4,
+          task = anchor4,
+          defaultName = "Midday Reset",
+          desc = "Nutritional & cognitive restorative window.",
+          color = AnchorGradientStart
+        )
+        DynamicAnchorPillRow(
+          slot = 5,
+          task = anchor5,
+          defaultName = "Elastic Rubber Buffer",
+          desc = "Auto-scales between Slot 4 & 6 with a strict 15m minimum floor.",
+          color = ElasticGradientStart
+        )
+        DynamicAnchorPillRow(
+          slot = 6,
+          task = anchor6,
+          defaultName = "Evening Reset",
+          desc = "Day closure and decompression transition.",
+          color = AnchorGradientStart
+        )
+        DynamicAnchorPillRow(
+          slot = 7,
+          task = anchor7,
+          defaultName = "Night Rest",
+          desc = "Pre-sleep buffer establishing biological sleep hygiene.",
+          color = AnchorGradientStart
+        )
       }
 
       Spacer(modifier = Modifier.height(16.dp))
@@ -291,38 +344,68 @@ private fun GuideSectionCard(
 }
 
 @Composable
-private fun AnchorPillRow(
+private fun DynamicAnchorPillRow(
   slot: Int,
-  name: String,
+  task: RoutineTask?,
+  defaultName: String,
   desc: String,
   color: Color
 ) {
+  val title = task?.title ?: defaultName
+  val timeInfo = task?.let { "${it.formattedStartTime} → ${it.formattedEndTime} (${it.formattedDuration})" } ?: ""
+
   Surface(
     modifier = Modifier
       .fillMaxWidth()
       .padding(vertical = 4.dp)
-      .clip(RoundedCornerShape(12.dp)),
+      .clip(RoundedCornerShape(14.dp)),
     color = OneUiSurfaceHigh
   ) {
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 10.dp, vertical = 8.dp),
+        .padding(horizontal = 12.dp, vertical = 9.dp),
       verticalAlignment = Alignment.CenterVertically
     ) {
       Box(
         modifier = Modifier
-          .size(24.dp)
+          .size(28.dp)
           .clip(CircleShape)
           .background(color),
         contentAlignment = Alignment.Center
       ) {
-        Text(text = "$slot", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+          text = if (slot == 1) "🌙" else if (slot == 5) "🛡️" else "$slot",
+          color = Color.White,
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold
+        )
       }
       Spacer(modifier = Modifier.width(10.dp))
       Column(modifier = Modifier.weight(1f)) {
-        Text(text = "Slot $slot: $name", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Text(text = desc, color = TextSecondary, fontSize = 10.sp, lineHeight = 13.sp)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = "Slot $slot: $title",
+            color = TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+          )
+          if (timeInfo.isNotBlank()) {
+            Text(
+              text = timeInfo,
+              color = Color(0xFFA5B4FC),
+              fontFamily = FontFamily.Monospace,
+              fontSize = 10.sp,
+              fontWeight = FontWeight.Bold
+            )
+          }
+        }
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(text = desc, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
       }
     }
   }

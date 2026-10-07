@@ -30,7 +30,7 @@
     <path
         android:strokeColor="#6366F1"
         android:strokeWidth="3.2"
-        android:strokeCap="round"
+        android:strokeLineCap="round"
         android:fillColor="#00000000"
         android:pathData="M54,30 A24,24 0 0,1 78,54" />
 
@@ -38,7 +38,7 @@
     <path
         android:strokeColor="#06B6D4"
         android:strokeWidth="3.2"
-        android:strokeCap="round"
+        android:strokeLineCap="round"
         android:fillColor="#00000000"
         android:pathData="M78,54 A24,24 0 0,1 54,78" />
 
@@ -46,7 +46,7 @@
     <path
         android:strokeColor="#10B981"
         android:strokeWidth="3.2"
-        android:strokeCap="round"
+        android:strokeLineCap="round"
         android:fillColor="#00000000"
         android:pathData="M54,78 A24,24 0 0,1 33,66" />
 
@@ -54,28 +54,28 @@
     <path
         android:strokeColor="#C7D2FE"
         android:strokeWidth="1.8"
-        android:strokeCap="round"
+        android:strokeLineCap="round"
         android:pathData="M54,32v3.5 M76,54h-3.5 M54,76v-3.5 M32,54h3.5" />
 
     <!-- Inner Dial Secondary Markers -->
     <path
         android:strokeColor="#64748B"
         android:strokeWidth="1.2"
-        android:strokeCap="round"
+        android:strokeLineCap="round"
         android:pathData="M69.5,38.5l-2.5,2.5 M69.5,69.5l-2.5,-2.5 M38.5,69.5l2.5,-2.5 M38.5,38.5l2.5,2.5" />
 
     <!-- Hour Hand pointing to 10 o'clock -->
     <path
         android:strokeColor="#FFFFFF"
         android:strokeWidth="2.8"
-        android:strokeCap="round"
+        android:strokeLineCap="round"
         android:pathData="M54,54 L44,44" />
 
     <!-- Minute Hand pointing to 2 o'clock -->
     <path
         android:strokeColor="#67E8F9"
         android:strokeWidth="2.2"
-        android:strokeCap="round"
+        android:strokeLineCap="round"
         android:pathData="M54,54 L68,40" />
 
     <!-- Center Precision Pivot Pin -->

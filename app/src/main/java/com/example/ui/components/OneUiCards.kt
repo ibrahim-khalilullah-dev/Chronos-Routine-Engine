@@ -306,14 +306,15 @@ fun AnchorSlotCard(
               Box(
                 modifier = Modifier
                   .clip(RoundedCornerShape(8.dp))
-                  .background(WarningAmber.copy(alpha = 0.25f))
-                  .padding(horizontal = 6.dp, vertical = 3.dp)
+                  .background(if (pendingDeltaMinutes > 0) Color(0xFF10B981).copy(alpha = 0.25f) else WarningAmber.copy(alpha = 0.25f))
+                  .border(1.dp, if (pendingDeltaMinutes > 0) Color(0xFF10B981) else WarningAmber, RoundedCornerShape(8.dp))
+                  .padding(horizontal = 8.dp, vertical = 3.dp)
               ) {
                 Text(
-                  text = "${if (pendingDeltaMinutes > 0) "+$pendingDeltaMinutes" else "$pendingDeltaMinutes"} min (Pending)",
-                  color = WarningAmber,
+                  text = "${if (pendingDeltaMinutes > 0) "+$pendingDeltaMinutes" else "$pendingDeltaMinutes"} min",
+                  color = if (pendingDeltaMinutes > 0) Color(0xFF10B981) else WarningAmber,
                   fontSize = 11.sp,
-                  fontWeight = FontWeight.Bold
+                  fontWeight = FontWeight.ExtraBold
                 )
               }
             }
@@ -367,87 +368,91 @@ fun AnchorSlotCard(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
           ) {
             // Minus 5m Button (accumulative: allows consecutive taps)
-            FilledTonalIconButton(
+            Surface(
               onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 pendingDeltaMinutes -= 5
               },
+              shape = RoundedCornerShape(12.dp),
+              color = Color.White.copy(alpha = 0.12f),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
               modifier = Modifier
-                .size(38.dp)
-                .testTag("quick_minus_slot_$slotNum"),
-              colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = Color.White.copy(alpha = 0.14f),
-                contentColor = TextPrimary
-              ),
-              shape = RoundedCornerShape(12.dp)
+                .height(34.dp)
+                .testTag("quick_minus_slot_$slotNum")
             ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.Remove, contentDescription = "Minus 5 min", modifier = Modifier.size(15.dp))
-                Text(text = "5m", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 8.dp)
+              ) {
+                Icon(imageVector = Icons.Default.Remove, contentDescription = "Minus 5 min", tint = TextPrimary, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(text = "5m", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
               }
             }
 
             // Plus 5m Button (accumulative: allows consecutive taps)
-            FilledTonalIconButton(
+            Surface(
               onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 pendingDeltaMinutes += 5
               },
+              shape = RoundedCornerShape(12.dp),
+              color = Color.White.copy(alpha = 0.12f),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
               modifier = Modifier
-                .size(38.dp)
-                .testTag("quick_plus_slot_$slotNum"),
-              colors = IconButtonDefaults.filledTonalIconButtonColors(
-                containerColor = Color.White.copy(alpha = 0.14f),
-                contentColor = TextPrimary
-              ),
-              shape = RoundedCornerShape(12.dp)
+                .height(34.dp)
+                .testTag("quick_plus_slot_$slotNum")
             ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "Plus 5 min", modifier = Modifier.size(15.dp))
-                Text(text = "5m", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 8.dp)
+              ) {
+                Icon(imageVector = Icons.Default.Add, contentDescription = "Plus 5 min", tint = TextPrimary, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(text = "5m", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
               }
             }
 
             // In-place Action Pill: "Save (✓)" and "Cancel (✕)" (Shown whenever pendingDeltaMinutes != 0)
             if (pendingDeltaMinutes != 0) {
-              // Prominent "Save" Checkmark Gradient Pill Button
-              Button(
-                onClick = {
-                  haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                  onQuickAdjust(pendingDeltaMinutes)
-                  pendingDeltaMinutes = 0
-                },
-                modifier = Modifier.testTag("save_quick_adjust_slot_$slotNum"),
-                colors = ButtonDefaults.buttonColors(
-                  containerColor = Color(0xFF10B981),
-                  contentColor = Color.White
-                ),
+              Surface(
                 shape = RoundedCornerShape(12.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                color = Color(0xFF10B981).copy(alpha = 0.18f),
+                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f))
               ) {
-                Icon(imageVector = Icons.Default.Check, contentDescription = "Save Adjustment", modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(2.dp))
-                Text("Save", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-              }
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                  Button(
+                    onClick = {
+                      haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                      onQuickAdjust(pendingDeltaMinutes)
+                      pendingDeltaMinutes = 0
+                    },
+                    modifier = Modifier.height(30.dp).testTag("save_quick_adjust_slot_$slotNum"),
+                    colors = ButtonDefaults.buttonColors(
+                      containerColor = Color(0xFF10B981),
+                      contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                  ) {
+                    Text("Save ✓", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                  }
 
-              // Prominent "Cancel" Discard Button
-              IconButton(
-                onClick = {
-                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                  pendingDeltaMinutes = 0
-                },
-                modifier = Modifier
-                  .size(34.dp)
-                  .clip(RoundedCornerShape(10.dp))
-                  .background(Color.White.copy(alpha = 0.12f))
-                  .testTag("cancel_quick_adjust_slot_$slotNum")
-              ) {
-                Icon(
-                  imageVector = Icons.Default.Close,
-                  contentDescription = "Cancel Adjustment",
-                  tint = TextSecondary,
-                  modifier = Modifier.size(16.dp)
-                )
+                  Spacer(modifier = Modifier.width(4.dp))
+
+                  IconButton(
+                    onClick = {
+                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                      pendingDeltaMinutes = 0
+                    },
+                    modifier = Modifier.size(30.dp).testTag("cancel_quick_adjust_slot_$slotNum")
+                  ) {
+                    Text("✕", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
               }
             }
           }

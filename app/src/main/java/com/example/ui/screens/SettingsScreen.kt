@@ -258,18 +258,37 @@ fun SettingsScreen(
           )
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Inter-Task Rest Buffer Slider (0 to 30 minutes, 5-minute steps)
+        Slider(
+          value = bufferMinutes.toFloat().coerceIn(0f, 30f),
+          onValueChange = { newVal ->
+            val v = ((newVal / 5f).toInt() * 5).coerceIn(0, 30)
+            onUpdateBufferMinutes(v)
+          },
+          valueRange = 0f..30f,
+          steps = 5,
+          colors = SliderDefaults.colors(
+            thumbColor = Color(0xFF10B981),
+            activeTrackColor = Color(0xFF34D399),
+            inactiveTrackColor = Color.White.copy(alpha = 0.1f)
+          ),
+          modifier = Modifier.fillMaxWidth().testTag("settings_rest_buffer_slider")
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-          listOf(0, 5, 10, 15).forEach { mins ->
+          listOf(0, 5, 10, 15, 20, 30).forEach { mins ->
             val isSelected = bufferMinutes == mins
             FilterChip(
               selected = isSelected,
               onClick = { onUpdateBufferMinutes(mins) },
-              label = { Text("${mins} min") },
+              label = { Text("${mins}m") },
               colors = FilterChipDefaults.filterChipColors(
                 selectedContainerColor = Color(0xFF10B981),
                 selectedLabelColor = Color.Black,
