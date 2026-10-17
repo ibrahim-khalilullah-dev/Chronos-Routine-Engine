@@ -1,5 +1,5 @@
 {
-  "name": "Chronos Routine Engine",
+  "name": "Chronos",
   "description": "Smart Dynamic Routine & Device Automation Engine with strict anchor slot architecture, auto task-splitting, DND automation, and TTS reminders.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

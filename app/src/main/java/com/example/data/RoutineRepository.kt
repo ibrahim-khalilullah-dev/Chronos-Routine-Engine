@@ -75,40 +75,7 @@ class RoutineRepository(context: Context) {
   fun getDynamicTasks(): List<RoutineTask> {
     val rawJson = prefs.getString(KEY_DYNAMIC_TASKS, null)
     if (rawJson.isNullOrEmpty()) {
-      val sampleDynamic = listOf(
-        RoutineTask(
-          id = "dyn_sample_1",
-          title = "Email Inbox & Comms Clearing",
-          type = TaskType.DYNAMIC,
-          startTimeMinute = 480, // 08:00 AM
-          durationMinutes = 45,
-          voiceMessage = "Morning comms clearing starting now.",
-          enableDnd = false,
-          enableHaptic = true,
-          allowSplitting = false,
-          selectedDays = RoutineDay.allDays(),
-          isVoiceEnabled = true,
-          customNotificationTitle = "Email Inbox & Comms Clearing",
-          customNotificationBody = "Morning comms clearing starting now."
-        ),
-        RoutineTask(
-          id = "dyn_sample_2",
-          title = "High-Intensity Deep Sprint",
-          type = TaskType.DYNAMIC,
-          startTimeMinute = 750, // 12:30 PM
-          durationMinutes = 90, // > 60m to demonstrate auto-splitting!
-          voiceMessage = "Deep sprint session starting. Focus mode engaged.",
-          enableDnd = true,
-          enableHaptic = true,
-          allowSplitting = true,
-          selectedDays = RoutineDay.allDays(),
-          isVoiceEnabled = true,
-          customNotificationTitle = "Deep Sprint Focus Session",
-          customNotificationBody = "Focus sprint engaged. All distractions muted."
-        )
-      )
-      saveDynamicTasks(sampleDynamic)
-      return sampleDynamic
+      return emptyList()
     }
 
     return try {
@@ -213,6 +180,8 @@ class RoutineRepository(context: Context) {
         if (t.customRingtoneUri != null) put("customRingtoneUri", t.customRingtoneUri)
         if (t.customRingtoneTitle != null) put("customRingtoneTitle", t.customRingtoneTitle)
         put("isSoundAlertEnabled", t.isSoundAlertEnabled)
+        put("toleranceMinutes", t.toleranceMinutes)
+        put("interTaskBufferMinutes", t.interTaskBufferMinutes)
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -264,7 +233,9 @@ class RoutineRepository(context: Context) {
         fluidTotalPoolMinutes = if (obj.has("fluidTotalPoolMinutes")) obj.getInt("fluidTotalPoolMinutes") else null,
         customRingtoneUri = if (obj.has("customRingtoneUri")) obj.getString("customRingtoneUri") else null,
         customRingtoneTitle = if (obj.has("customRingtoneTitle")) obj.getString("customRingtoneTitle") else null,
-        isSoundAlertEnabled = obj.optBoolean("isSoundAlertEnabled", true)
+        isSoundAlertEnabled = obj.optBoolean("isSoundAlertEnabled", true),
+        toleranceMinutes = obj.optInt("toleranceMinutes", 0),
+        interTaskBufferMinutes = obj.optInt("interTaskBufferMinutes", 5)
       )
       list.add(task)
     }

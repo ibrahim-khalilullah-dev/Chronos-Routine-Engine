@@ -30,11 +30,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.FormatListBulleted
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -163,7 +163,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             viewModel.selectTab(NavigationTab.TIMELINE)
           },
-          icon = { Icon(Icons.Default.FormatListBulleted, contentDescription = "Timeline") },
+          icon = { Icon(Icons.AutoMirrored.Filled.FormatListBulleted, contentDescription = "Timeline") },
           label = { Text("Timeline", fontSize = 11.sp) },
           colors = NavigationBarItemDefaults.colors(
             selectedIconColor = Color.White,
@@ -287,6 +287,9 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             onApplyTasks = { newTasks, replaceAll ->
               viewModel.applyBulkConsoleTasks(newTasks, replaceAll)
               viewModel.selectTab(NavigationTab.TIMELINE)
+            },
+            onExportRoutine = {
+              viewModel.exportFullRoutineScript()
             },
             onBack = {
               viewModel.selectTab(NavigationTab.TIMELINE)
@@ -487,7 +490,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
                     .background(Color(0xFF6366F1).copy(alpha = 0.2f)),
                   contentAlignment = Alignment.Center
                 ) {
-                  Icon(imageVector = Icons.Default.MenuBook, contentDescription = null, tint = Color(0xFFA5B4FC))
+                  Icon(imageVector = Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = Color(0xFFA5B4FC))
                 }
                 Spacer(modifier = Modifier.width(14.dp))
                 Column {

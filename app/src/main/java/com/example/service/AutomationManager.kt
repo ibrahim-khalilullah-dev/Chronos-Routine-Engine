@@ -228,6 +228,19 @@ object AutomationManager {
     if (pendingStart != null) {
       am.cancel(pendingStart)
     }
+
+    val endIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
+      action = ACTION_END_TASK
+    }
+    val pendingEnd = PendingIntent.getBroadcast(
+      context,
+      (taskId + "_end").hashCode(),
+      endIntent,
+      PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+    )
+    if (pendingEnd != null) {
+      am.cancel(pendingEnd)
+    }
   }
 
   fun rescheduleAllAlarms(context: Context) {

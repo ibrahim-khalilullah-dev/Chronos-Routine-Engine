@@ -19,11 +19,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.automirrored.filled.CallSplit
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -102,7 +102,7 @@ fun ChronosArchitectureGuideSheet(
             contentAlignment = Alignment.Center
           ) {
             Icon(
-              imageVector = Icons.Default.MenuBook,
+              imageVector = Icons.AutoMirrored.Filled.MenuBook,
               contentDescription = null,
               tint = AnchorGradientStart,
               modifier = Modifier.size(22.dp)
@@ -231,7 +231,7 @@ fun ChronosArchitectureGuideSheet(
 
       // Section 3: 2-Session Fluid Twins
       GuideSectionCard(
-        icon = Icons.Default.CallSplit,
+        icon = Icons.AutoMirrored.Filled.CallSplit,
         iconTint = Color(0xFF8B5CF6),
         title = "3. Fluid Twins: Communicating Vessels",
         subtitle = "Linked 2-Session Duration Pool"
