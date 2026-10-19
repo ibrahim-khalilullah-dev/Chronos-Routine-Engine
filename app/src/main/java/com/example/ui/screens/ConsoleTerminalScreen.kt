@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Code
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
@@ -67,9 +69,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.engine.ConsoleParser
@@ -102,19 +106,23 @@ fun ConsoleTerminalScreen(
   BackHandler { onBack() }
 
   // Starts clean and empty with no preloaded dummy tasks
-  var consoleText by remember { mutableStateOf(ConsoleParser.DEFAULT_CONSOLE_TEMPLATE) }
-  var replaceExisting by remember { mutableStateOf(false) }
-  var isAnchorsPanelExpanded by remember { mutableStateOf(true) }
+  var consoleTextFieldValue by remember {
+    mutableStateOf(TextFieldValue(ConsoleParser.DEFAULT_CONSOLE_TEMPLATE))
+  }
+  val consoleText = consoleTextFieldValue.text
+
+  // Real-time active typing line & syntax prediction
+  val currentCursor = consoleTextFieldValue.selection.end.coerceIn(0, consoleText.length)
+  val textBeforeCursor = consoleText.take(currentCursor)
+  val activeLine = textBeforeCursor.substringAfterLast('\n')
+  val ghostPrediction = remember(activeLine) {
+    ConsoleParser.getSyntaxPrediction(activeLine)
+  }
 
   // Real-time parsed syntax analysis
   val parseResult = remember(consoleText) {
     ConsoleParser.parse(consoleText)
   }
-
-  // Cyan-to-Emerald gradient for primary action button
-  val processButtonGradient = Brush.horizontalGradient(
-    listOf(Color(0xFF06B6D4), Color(0xFF10B981))
-  )
 
   Column(
     modifier = modifier
@@ -177,189 +185,6 @@ fun ConsoleTerminalScreen(
       }
     }
 
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // ==============================================================
-    // 2. 7 PROTECTED ANCHORS OVERVIEW PANEL (Prominent & Expandable)
-    // ==============================================================
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(20.dp))
-        .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.35f)), RoundedCornerShape(20.dp))
-        .clickable { isAnchorsPanelExpanded = !isAnchorsPanelExpanded }
-        .testTag("protected_anchors_overview_card"),
-      color = OneUiSurfaceElevated
-    ) {
-      Column(
-        modifier = Modifier
-          .animateContentSize()
-          .padding(16.dp)
-      ) {
-        // Panel Header
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-              modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF6366F1).copy(alpha = 0.2f)),
-              contentAlignment = Alignment.Center
-            ) {
-              Icon(
-                imageVector = Icons.Default.Security,
-                contentDescription = null,
-                tint = Color(0xFFA5B4FC),
-                modifier = Modifier.size(18.dp)
-              )
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-              Text(
-                text = "Protected Anchors Overview",
-                color = TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold
-              )
-              Text(
-                text = "7 Core Pillars • Mathematically locked",
-                color = TextSecondary,
-                fontSize = 11.sp
-              )
-            }
-          }
-
-          Icon(
-            imageVector = if (isAnchorsPanelExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-            contentDescription = null,
-            tint = TextSecondary,
-            modifier = Modifier.size(22.dp)
-          )
-        }
-
-        // Expanded Anchors Content
-        AnimatedVisibility(visible = isAnchorsPanelExpanded) {
-          Column(modifier = Modifier.padding(top = 12.dp)) {
-            // Immutability Notice Banner
-            Surface(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp)),
-              color = WarningAmber.copy(alpha = 0.12f),
-              border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.35f))
-            ) {
-              Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.Top
-              ) {
-                Icon(
-                  imageVector = Icons.Default.Lock,
-                  contentDescription = null,
-                  tint = WarningAmber,
-                  modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                  text = "Protected Anchors Notice: These 7 core slots are mathematically locked and active on your timeline. They cannot be created, modified, or deleted via the terminal. Dynamic tasks entered below will automatically schedule around these slots.",
-                  color = TextPrimary,
-                  fontSize = 11.sp,
-                  lineHeight = 16.sp
-                )
-              }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 7 Anchors Timeline Grid
-            val sortedAnchors = anchors.sortedBy { it.slotNumber ?: 0 }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-              sortedAnchors.forEach { anchor ->
-                val slot = anchor.slotNumber ?: 0
-                val slotAccent = when (anchor.type) {
-                  TaskType.ANCHOR_SLEEP -> SleepGradientStart
-                  TaskType.ANCHOR_ELASTIC -> ElasticGradientStart
-                  else -> AnchorGradientStart
-                }
-
-                Surface(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp)),
-                  color = OneUiSurfaceHigh
-                ) {
-                  Row(
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .padding(horizontal = 12.dp, vertical = 9.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Row(
-                      verticalAlignment = Alignment.CenterVertically,
-                      modifier = Modifier.weight(1f)
-                    ) {
-                      Box(
-                        modifier = Modifier
-                          .size(24.dp)
-                          .clip(CircleShape)
-                          .background(slotAccent),
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Text(
-                          text = if (slot == 1) "🌙" else if (slot == 5) "🛡️" else "$slot",
-                          color = Color.White,
-                          fontSize = 10.sp,
-                          fontWeight = FontWeight.Bold
-                        )
-                      }
-                      Spacer(modifier = Modifier.width(10.dp))
-                      Column {
-                        Text(
-                          text = anchor.title,
-                          color = TextPrimary,
-                          fontSize = 13.sp,
-                          fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                          text = when (slot) {
-                            1 -> "Reverse Sleep Tracker (Bedtime to Wake)"
-                            5 -> "Rubber Elastic Buffer (Auto-Scaled)"
-                            else -> "Anchor Pillar Slot $slot"
-                          },
-                          color = TextTertiary,
-                          fontSize = 10.sp
-                        )
-                      }
-                    }
-
-                    // Time Interval
-                    Box(
-                      modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black.copy(alpha = 0.3f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                      Text(
-                        text = "${anchor.formattedStartTime} → ${anchor.formattedEndTime} (${anchor.formattedDuration})",
-                        color = Color(0xFFA5B4FC),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                      )
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
     Spacer(modifier = Modifier.height(14.dp))
 
     // ==============================================================
@@ -404,7 +229,8 @@ fun ConsoleTerminalScreen(
       OutlinedButton(
         onClick = {
           haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          consoleText = ConsoleParser.SAMPLE_SNIPPET
+          val template = ConsoleParser.SAMPLE_SNIPPET
+          consoleTextFieldValue = TextFieldValue(template, TextRange(template.length))
         },
         modifier = Modifier.weight(1f).testTag("quick_copy_template_button"),
         shape = RoundedCornerShape(12.dp),
@@ -437,7 +263,7 @@ fun ConsoleTerminalScreen(
         OutlinedButton(
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            consoleText = ""
+            consoleTextFieldValue = TextFieldValue("", TextRange.Zero)
           },
           modifier = Modifier.testTag("clear_console_button"),
           shape = RoundedCornerShape(12.dp),
@@ -454,6 +280,7 @@ fun ConsoleTerminalScreen(
 
     // ==============================================================
     // 4. ULTRA-CLEAN OBSIDIAN CODE EDITOR (#121620 with Gutter Numbers)
+    // Maximize height to full vertical prominence (min 450dp)
     // ==============================================================
     Surface(
       modifier = Modifier
@@ -493,7 +320,7 @@ fun ConsoleTerminalScreen(
               .width(24.dp),
             horizontalAlignment = Alignment.End
           ) {
-            for (i in 1..lineCount.coerceAtMost(40)) {
+            for (i in 1..lineCount.coerceAtMost(60)) {
               Text(
                 text = "$i",
                 color = Color(0xFF475569),
@@ -505,11 +332,11 @@ fun ConsoleTerminalScreen(
           }
 
           OutlinedTextField(
-            value = consoleText,
-            onValueChange = { consoleText = it },
+            value = consoleTextFieldValue,
+            onValueChange = { consoleTextFieldValue = it },
             modifier = Modifier
               .weight(1f)
-              .height(240.dp)
+              .height(460.dp)
               .testTag("console_text_input"),
             textStyle = TextStyle(
               fontFamily = FontFamily.Monospace,
@@ -533,6 +360,65 @@ fun ConsoleTerminalScreen(
             ),
             shape = RoundedCornerShape(12.dp)
           )
+        }
+
+        // Intelligent Inline Ghost Text (Context-Aware Syntax Autocomplete Prediction)
+        if (!ghostPrediction.isNullOrBlank()) {
+          Spacer(modifier = Modifier.height(10.dp))
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(10.dp))
+              .border(BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.45f)), RoundedCornerShape(10.dp))
+              .clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                val newText = textBeforeCursor + ghostPrediction + consoleText.drop(currentCursor)
+                val newCursor = currentCursor + ghostPrediction.length
+                consoleTextFieldValue = TextFieldValue(newText, TextRange(newCursor))
+              }
+              .testTag("ghost_syntax_prediction_bar"),
+            color = Color(0xFF0F172A)
+          ) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = "Ghost: ",
+                  color = Color(0xFF06B6D4),
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace
+                )
+                Text(
+                  text = activeLine,
+                  color = Color(0xFFF8FAFC),
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace
+                )
+                Text(
+                  text = ghostPrediction,
+                  color = Color(0xFF64748B),
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace
+                )
+              }
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = "Tap to Complete ⇥",
+                color = Color(0xFF38BDF8),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+              )
+            }
+          }
         }
       }
     }
@@ -623,88 +509,101 @@ fun ConsoleTerminalScreen(
 
     Spacer(modifier = Modifier.height(18.dp))
 
-    // Application Mode Toggle: Append vs Replace
+    // Dual Schedule Action Buttons
+    val isProcessEnabled = parseResult.validTasks.isNotEmpty() && parseResult.errorCount == 0
+
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      FilterChip(
-        selected = !replaceExisting,
-        onClick = { replaceExisting = false },
-        label = { Text("Append to Schedule") },
-        colors = FilterChipDefaults.filterChipColors(
-          selectedContainerColor = AnchorGradientStart,
-          selectedLabelColor = Color.White,
-          containerColor = OneUiSurfaceElevated,
-          labelColor = TextSecondary
-        ),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.weight(1f)
-      )
-
-      FilterChip(
-        selected = replaceExisting,
-        onClick = { replaceExisting = true },
-        label = { Text("Replace Dynamic Tasks") },
-        colors = FilterChipDefaults.filterChipColors(
-          selectedContainerColor = AnchorGradientStart,
-          selectedLabelColor = Color.White,
-          containerColor = OneUiSurfaceElevated,
-          labelColor = TextSecondary
-        ),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.weight(1f)
-      )
-    }
-
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // Process & Schedule Action Button (Vibrant Cyan-to-Emerald Gradient)
-    val isProcessEnabled = parseResult.validTasks.isNotEmpty() && parseResult.errorCount == 0
-
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(54.dp)
-        .clip(RoundedCornerShape(16.dp))
-        .then(
-          if (isProcessEnabled) {
-            Modifier.clickable {
-              haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-              onApplyTasks(parseResult.validTasks, replaceExisting)
-            }
-          } else {
-            Modifier
-          }
-        )
-        .testTag("apply_console_tasks_button"),
-      color = if (isProcessEnabled) Color.Transparent else OneUiSurfaceElevated,
-      shape = RoundedCornerShape(16.dp)
-    ) {
-      Box(
+      // 1. [ Append to Schedule ] (Cyan/Indigo theme) -> Appends new valid tasks to schedule
+      Surface(
         modifier = Modifier
-          .fillMaxSize()
-          .background(if (isProcessEnabled) processButtonGradient else Brush.linearGradient(listOf(OneUiSurfaceElevated, OneUiSurfaceElevated))),
-        contentAlignment = Alignment.Center
+          .weight(1f)
+          .height(54.dp)
+          .clip(RoundedCornerShape(16.dp))
+          .then(
+            if (isProcessEnabled) {
+              Modifier.clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onApplyTasks(parseResult.validTasks, false)
+              }
+            } else Modifier
+          )
+          .testTag("append_to_schedule_button")
+          .testTag("apply_console_tasks_button"),
+        color = if (isProcessEnabled) Color.Transparent else OneUiSurfaceElevated,
+        shape = RoundedCornerShape(16.dp)
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = Icons.Default.PlayArrow,
-            contentDescription = null,
-            tint = if (isProcessEnabled) Color.White else TextTertiary,
-            modifier = Modifier.size(20.dp)
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(
+              if (isProcessEnabled) Brush.horizontalGradient(listOf(Color(0xFF06B6D4), Color(0xFF6366F1)))
+              else Brush.linearGradient(listOf(OneUiSurfaceElevated, OneUiSurfaceElevated))
+            ),
+          contentAlignment = Alignment.Center
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Default.Add,
+              contentDescription = null,
+              tint = if (isProcessEnabled) Color.White else TextTertiary,
+              modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = if (isProcessEnabled) "Append (${parseResult.successCount})" else "Append Tasks",
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp,
+              color = if (isProcessEnabled) Color.White else TextTertiary
+            )
+          }
+        }
+      }
+
+      // 2. [ Replace Dynamic Tasks ] (Warning Amber/Destructive tone) -> Clears and replaces
+      Surface(
+        modifier = Modifier
+          .weight(1f)
+          .height(54.dp)
+          .clip(RoundedCornerShape(16.dp))
+          .then(
+            if (isProcessEnabled) {
+              Modifier.clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onApplyTasks(parseResult.validTasks, true)
+              }
+            } else Modifier
           )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            text = if (isProcessEnabled) {
-              "Process & Schedule (${parseResult.successCount} Tasks)"
-            } else {
-              "Process & Schedule"
-            },
-            fontWeight = FontWeight.Bold,
-            fontSize = 15.sp,
-            color = if (isProcessEnabled) Color.White else TextTertiary
-          )
+          .testTag("replace_dynamic_tasks_button"),
+        color = if (isProcessEnabled) Color.Transparent else OneUiSurfaceElevated,
+        shape = RoundedCornerShape(16.dp)
+      ) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(
+              if (isProcessEnabled) Brush.horizontalGradient(listOf(Color(0xFFD97706), Color(0xFFEF4444)))
+              else Brush.linearGradient(listOf(OneUiSurfaceElevated, OneUiSurfaceElevated))
+            ),
+          contentAlignment = Alignment.Center
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Default.Refresh,
+              contentDescription = null,
+              tint = if (isProcessEnabled) Color.White else TextTertiary,
+              modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = if (isProcessEnabled) "Replace (${parseResult.successCount})" else "Replace All",
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp,
+              color = if (isProcessEnabled) Color.White else TextTertiary
+            )
+          }
         }
       }
     }

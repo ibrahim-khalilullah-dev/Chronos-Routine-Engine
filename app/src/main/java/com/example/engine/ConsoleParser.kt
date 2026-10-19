@@ -298,4 +298,41 @@ Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and fin
     }
     return result
   }
+
+  /**
+   * Evaluates how many pipe '|' delimiters exist in the active typing line
+   * and generates a context-aware inline syntax ghost prediction recommendation.
+   * E.g., if line is "Study |", returns " 45 | 10:00 | N | ALL | Y | Focus session".
+   */
+  fun getSyntaxPrediction(currentLine: String): String? {
+    val trimmed = currentLine.trim()
+    if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("//")) {
+      return null
+    }
+
+    val pipeCount = currentLine.count { it == '|' }
+    val endsWithPipe = currentLine.trimEnd().endsWith("|")
+    val endsWithSpace = currentLine.endsWith(" ")
+
+    return when (pipeCount) {
+      0 -> " | 45 | 10:00 | N | ALL | Y | Focus session"
+      1 -> if (endsWithPipe) " 45 | 10:00 | N | ALL | Y | Focus session"
+           else if (endsWithSpace) "| 10:00 | N | ALL | Y | Focus session"
+           else " | 10:00 | N | ALL | Y | Focus session"
+      2 -> if (endsWithPipe) " 10:00 | N | ALL | Y | Focus session"
+           else if (endsWithSpace) "| N | ALL | Y | Focus session"
+           else " | N | ALL | Y | Focus session"
+      3 -> if (endsWithPipe) " N | ALL | Y | Focus session"
+           else if (endsWithSpace) "| ALL | Y | Focus session"
+           else " | ALL | Y | Focus session"
+      4 -> if (endsWithPipe) " ALL | Y | Focus session"
+           else if (endsWithSpace) "| Y | Focus session"
+           else " | Y | Focus session"
+      5 -> if (endsWithPipe) " Y | Focus session"
+           else if (endsWithSpace) "| Focus session"
+           else " | Focus session"
+      6 -> if (endsWithPipe) " Focus session" else null
+      else -> null
+    }
+  }
 }

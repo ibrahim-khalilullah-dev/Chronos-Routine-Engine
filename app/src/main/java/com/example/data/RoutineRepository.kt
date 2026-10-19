@@ -182,6 +182,7 @@ class RoutineRepository(context: Context) {
         put("isSoundAlertEnabled", t.isSoundAlertEnabled)
         put("toleranceMinutes", t.toleranceMinutes)
         put("interTaskBufferMinutes", t.interTaskBufferMinutes)
+        if (t.category != null) put("category", t.category)
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -235,7 +236,8 @@ class RoutineRepository(context: Context) {
         customRingtoneTitle = if (obj.has("customRingtoneTitle")) obj.getString("customRingtoneTitle") else null,
         isSoundAlertEnabled = obj.optBoolean("isSoundAlertEnabled", true),
         toleranceMinutes = obj.optInt("toleranceMinutes", 0),
-        interTaskBufferMinutes = obj.optInt("interTaskBufferMinutes", 5)
+        interTaskBufferMinutes = obj.optInt("interTaskBufferMinutes", 5),
+        category = if (obj.has("category")) obj.getString("category") else null
       )
       list.add(task)
     }

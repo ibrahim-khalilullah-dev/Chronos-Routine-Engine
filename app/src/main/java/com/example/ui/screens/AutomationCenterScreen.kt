@@ -73,17 +73,14 @@ import com.example.ui.theme.WarningAmber
 fun AutomationCenterScreen(
   isDndGranted: Boolean,
   isBatteryOptimizationIgnored: Boolean = true,
-  activeAutomation: ActiveAutomationState,
-  onRefreshDndPermission: () -> Unit,
+  activeAutomation: ActiveAutomationState = ActiveAutomationState(),
+  onRefreshDndPermission: () -> Unit = {},
   onRequestBatteryOptimization: () -> Unit = {},
-  onTestVoice: (RoutineTask) -> Unit,
-  onStopAutomation: () -> Unit,
+  onTestVoice: (RoutineTask) -> Unit = {},
+  onStopAutomation: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
-  var testCustomMessage by remember {
-    mutableStateOf("Attention! Deep work focus block starting now. Do not disturb mode is activated.")
-  }
 
   Column(
     modifier = modifier
@@ -104,13 +101,13 @@ fun AutomationCenterScreen(
         color = TextPrimary
       )
       Text(
-        text = "Hardware DND automation, Lock-Screen TTS, and Exact Alarm Engine",
+        text = "Hardware DND automation, background execution, and Exact Alarm Engine",
         fontSize = 12.sp,
         color = TextSecondary
       )
     }
 
-    // DND Automation Card
+    // Streamlined DND Automation Card
     Surface(
       modifier = Modifier
         .fillMaxWidth()
@@ -124,260 +121,123 @@ fun AutomationCenterScreen(
         ),
       color = OneUiSurfaceElevated
     ) {
-      Column(modifier = Modifier.padding(18.dp)) {
+      if (isDndGranted) {
+        // Compact single-row status card matching Alarm and Battery Whitelist cards
         Row(
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(18.dp),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
             Icon(
               imageVector = Icons.Default.DoNotDisturbOn,
               contentDescription = null,
               tint = Color(0xFFA5B4FC),
               modifier = Modifier.size(24.dp)
             )
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Column {
               Text(
                 text = "Do Not Disturb (DND) Policy",
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
               )
               Text(
-                text = if (isDndGranted) "Granted • Automation Active" else "Permission Required",
-                fontSize = 12.sp,
-                color = if (isDndGranted) Color(0xFF10B981) else WarningAmber,
+                text = "Granted • Automation Active",
+                fontSize = 11.sp,
+                color = Color(0xFF10B981),
                 fontWeight = FontWeight.Medium
               )
             }
           }
 
           Icon(
-            imageVector = if (isDndGranted) Icons.Default.CheckCircle else Icons.Default.Warning,
-            contentDescription = null,
-            tint = if (isDndGranted) Color(0xFF10B981) else WarningAmber,
+            imageVector = Icons.Default.CheckCircle,
+            contentDescription = "Granted",
+            tint = Color(0xFF10B981),
             modifier = Modifier.size(22.dp)
           )
         }
+      } else {
+        // Permission not granted: show explanation and button to grant
+        Column(modifier = Modifier.padding(18.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              modifier = Modifier.weight(1f),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(
+                imageVector = Icons.Default.DoNotDisturbOn,
+                contentDescription = null,
+                tint = WarningAmber,
+                modifier = Modifier.size(24.dp)
+              )
+              Spacer(modifier = Modifier.width(12.dp))
+              Column {
+                Text(
+                  text = "Do Not Disturb (DND) Policy",
+                  fontSize = 15.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary
+                )
+                Text(
+                  text = "Permission Required",
+                  fontSize = 11.sp,
+                  color = WarningAmber,
+                  fontWeight = FontWeight.Medium
+                )
+              }
+            }
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Icon(
+              imageVector = Icons.Default.Warning,
+              contentDescription = null,
+              tint = WarningAmber,
+              modifier = Modifier.size(22.dp)
+            )
+          }
 
-        Text(
-          text = "Chronos engages PRIORITY DND mode automatically when an enabled task starts, and restores normal interruption settings immediately when it concludes.",
-          color = TextSecondary,
-          fontSize = 12.sp,
-          lineHeight = 17.sp
-        )
+          Spacer(modifier = Modifier.height(10.dp))
 
-        Spacer(modifier = Modifier.height(14.dp))
+          Text(
+            text = "Chronos engages PRIORITY DND mode automatically when an enabled task starts, and restores normal interruption settings immediately when it concludes.",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+          )
 
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+          Spacer(modifier = Modifier.height(14.dp))
+
           Button(
             onClick = {
               AutomationManager.openDndSettings(context)
               onRefreshDndPermission()
             },
-            modifier = Modifier.weight(1f).testTag("open_dnd_settings_button"),
+            modifier = Modifier.fillMaxWidth().testTag("open_dnd_settings_button"),
             colors = ButtonDefaults.buttonColors(
-              containerColor = if (isDndGranted) OneUiSurfaceHigh else WarningAmber,
-              contentColor = if (isDndGranted) TextPrimary else Color.Black
+              containerColor = WarningAmber,
+              contentColor = Color.Black
             ),
             shape = RoundedCornerShape(14.dp)
           ) {
             Icon(imageVector = Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-              text = if (isDndGranted) "DND Settings" else "Grant Permission",
+              text = "Grant Permission",
               fontWeight = FontWeight.Bold,
               fontSize = 12.sp
             )
           }
-
-          if (isDndGranted) {
-            OutlinedButton(
-              onClick = {
-                // Test momentary DND toggle
-                AutomationManager.setDndMode(context, true)
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                  AutomationManager.setDndMode(context, false)
-                }, 3000)
-              },
-              modifier = Modifier.weight(1f).testTag("test_dnd_toggle_button"),
-              shape = RoundedCornerShape(14.dp),
-              border = BorderStroke(1.dp, OneUiBorder)
-            ) {
-              Text("Test 3s DND", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-          }
-        }
-      }
-    }
-
-    // Lock-Screen Custom Text-to-Speech (TTS) Voice Alarm Card
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(22.dp))
-        .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(22.dp)),
-      color = OneUiSurfaceElevated
-    ) {
-      Column(modifier = Modifier.padding(18.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-            contentDescription = null,
-            tint = Color(0xFF67E8F9),
-            modifier = Modifier.size(24.dp)
-          )
-          Spacer(modifier = Modifier.width(10.dp))
-          Column {
-            Text(
-              text = "Lock-Screen TTS Voice Reminder",
-              fontSize = 16.sp,
-              fontWeight = FontWeight.Bold,
-              color = TextPrimary
-            )
-            Text(
-              text = "Partial WakeLock & Foreground Audio Service",
-              fontSize = 12.sp,
-              color = TextSecondary
-            )
-          }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Text(
-          text = "Uses Android Text-To-Speech engine. Triggered via AlarmManager with PARTIAL_WAKE_LOCK to speak your custom routine instructions even if your device is locked or in your pocket.",
-          color = TextSecondary,
-          fontSize = 12.sp,
-          lineHeight = 17.sp
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        OutlinedTextField(
-          value = testCustomMessage,
-          onValueChange = { testCustomMessage = it },
-          label = { Text("Test Voice Message") },
-          modifier = Modifier.fillMaxWidth().testTag("tts_test_input"),
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = Color(0xFF0F141F),
-            unfocusedContainerColor = Color(0xFF0F141F),
-            focusedBorderColor = AnchorGradientStart,
-            unfocusedBorderColor = OneUiBorder
-          ),
-          shape = RoundedCornerShape(14.dp),
-          maxLines = 2
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-          Button(
-            onClick = {
-              val testTask = RoutineTask(
-                id = "test_preview_task",
-                title = "Automation Test Session",
-                type = TaskType.DYNAMIC,
-                startTimeMinute = 0,
-                durationMinutes = 15,
-                voiceMessage = testCustomMessage,
-                enableDnd = true,
-                enableHaptic = true
-              )
-              onTestVoice(testTask)
-            },
-            modifier = Modifier.weight(1f).testTag("trigger_test_voice_button"),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = AnchorGradientStart,
-              contentColor = Color.White
-            ),
-            shape = RoundedCornerShape(14.dp)
-          ) {
-            Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Speak Now", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-          }
-
-          if (activeAutomation.isRunning) {
-            Button(
-              onClick = onStopAutomation,
-              colors = ButtonDefaults.buttonColors(
-                containerColor = DangerRed,
-                contentColor = Color.White
-              ),
-              shape = RoundedCornerShape(14.dp),
-              modifier = Modifier.testTag("stop_voice_test_button")
-            ) {
-              Icon(imageVector = Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("Stop", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            }
-          }
-        }
-      }
-    }
-
-    // Gentle Haptic Alert Engine
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(22.dp))
-        .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(22.dp)),
-      color = OneUiSurfaceElevated
-    ) {
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(18.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Row(
-          modifier = Modifier.weight(1f),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Icon(
-            imageVector = Icons.Default.Vibration,
-            contentDescription = null,
-            tint = Color(0xFF10B981),
-            modifier = Modifier.size(24.dp)
-          )
-          Spacer(modifier = Modifier.width(12.dp))
-          Column {
-            Text(
-              text = "Gentle Vibration Engine",
-              fontSize = 15.sp,
-              fontWeight = FontWeight.Bold,
-              color = TextPrimary
-            )
-            Text(
-              text = "Precision multi-step haptic pulses",
-              fontSize = 12.sp,
-              color = TextSecondary
-            )
-          }
-        }
-
-        Button(
-          onClick = { AutomationManager.triggerHaptic(context) },
-          colors = ButtonDefaults.buttonColors(
-            containerColor = OneUiSurfaceHigh,
-            contentColor = TextPrimary
-          ),
-          shape = RoundedCornerShape(12.dp),
-          modifier = Modifier.testTag("test_haptic_button")
-        ) {
-          Text("Pulse", fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
       }
     }

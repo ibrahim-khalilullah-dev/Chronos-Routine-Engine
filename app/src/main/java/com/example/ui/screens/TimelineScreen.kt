@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoNotDisturbOn
+import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.RecordVoiceOver
@@ -367,14 +369,14 @@ fun TimelineScreen(
       }
     }
 
-    // Floating Jump Pills (Requirement 7)
+    // Pure Icon Floating Jump Pills
     Box(
       modifier = Modifier
         .fillMaxSize()
         .padding(end = 20.dp, bottom = 24.dp),
       contentAlignment = Alignment.BottomEnd
     ) {
-      // 1. "⬆️ Top" Pill Button: displayed when scrolled down past active task
+      // 1. Pure Icon "Scroll to Top" Button: displayed when scrolled down past active task
       androidx.compose.animation.AnimatedVisibility(
         visible = showScrollToTop,
         enter = fadeIn() + slideInVertically { it / 2 },
@@ -387,29 +389,29 @@ fun TimelineScreen(
               listState.animateScrollToItem(0)
             }
           },
-          shape = RoundedCornerShape(20.dp),
+          shape = CircleShape,
           color = OneUiSurfaceElevated,
           border = BorderStroke(1.dp, AnchorGradientStart.copy(alpha = 0.6f)),
           shadowElevation = 8.dp,
-          modifier = Modifier.testTag("jump_to_top_button")
+          modifier = Modifier
+            .size(48.dp)
+            .testTag("jump_to_top_button")
         ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize()
           ) {
-            Text("⬆️", fontSize = 13.sp)
-            Text(
-              text = "Top",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Bold,
-              color = TextPrimary
+            Icon(
+              imageVector = Icons.Default.KeyboardArrowUp,
+              contentDescription = "Scroll to Top",
+              tint = AnchorGradientStart,
+              modifier = Modifier.size(24.dp)
             )
           }
         }
       }
 
-      // 2. "🎯 Active Task" Pill Button: displayed when viewing top items while active task is running
+      // 2. Pure Icon "Active Task" Button: displayed when viewing top items while active task is running
       androidx.compose.animation.AnimatedVisibility(
         visible = showScrollToActive && !showScrollToTop,
         enter = fadeIn() + slideInVertically { it / 2 },
@@ -424,23 +426,23 @@ fun TimelineScreen(
               }
             }
           },
-          shape = RoundedCornerShape(20.dp),
+          shape = CircleShape,
           color = OneUiSurfaceElevated,
           border = BorderStroke(1.dp, Color(0xFF67E8F9).copy(alpha = 0.6f)),
           shadowElevation = 8.dp,
-          modifier = Modifier.testTag("jump_to_active_button")
+          modifier = Modifier
+            .size(48.dp)
+            .testTag("jump_to_active_button")
         ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize()
           ) {
-            Text("🎯", fontSize = 13.sp)
-            Text(
-              text = "Active Task",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color(0xFF67E8F9)
+            Icon(
+              imageVector = Icons.Default.GpsFixed,
+              contentDescription = "Jump to Active Task",
+              tint = Color(0xFF67E8F9),
+              modifier = Modifier.size(22.dp)
             )
           }
         }

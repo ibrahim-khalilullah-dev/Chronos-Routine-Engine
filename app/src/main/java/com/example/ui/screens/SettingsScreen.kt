@@ -1,15 +1,17 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,36 +22,50 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bedtime
-import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timelapse
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.RoutineTask
-import com.example.ui.theme.AnchorGradientStart
+import com.example.model.TaskType
+import com.example.ui.components.taskRatingCache
 import com.example.ui.theme.DangerRed
-import com.example.ui.theme.DynamicGradientStart
 import com.example.ui.theme.OneUiBackground
 import com.example.ui.theme.OneUiBorder
 import com.example.ui.theme.OneUiSurfaceElevated
@@ -58,260 +74,967 @@ import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
 import com.example.ui.theme.WarningAmber
+import kotlin.math.atan2
+import kotlin.math.sqrt
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Analytics Category definition for 24-Hour Donut and Progress Bars.
+ */
+data class AnalyticsCategory(
+  val id: String,
+  val icon: String,
+  val name: String,
+  val color: Color
+)
+
+val ANALYTICS_CATEGORIES = mapOf(
+  "sleep" to AnalyticsCategory("sleep", "☁️", "Sleep Recovery", Color(0xFF6366F1)),
+  "work" to AnalyticsCategory("work", "💼", "Productive Work", Color(0xFF3B82F6)),
+  "studying" to AnalyticsCategory("studying", "👓", "Deep Study", Color(0xFF06B6D4)),
+  "break" to AnalyticsCategory("break", "☕", "Rest & Break", Color(0xFFF97316)),
+  "training" to AnalyticsCategory("training", "🏃", "Fitness & Health", Color(0xFF10B981)),
+  "eating" to AnalyticsCategory("eating", "🍴", "Nutrition & Meals", Color(0xFFF59E0B)),
+  "goals" to AnalyticsCategory("goals", "🎯", "Personal Goals", Color(0xFFA855F7)),
+  "reading" to AnalyticsCategory("reading", "📖", "Deep Reading", Color(0xFF14B8A6)),
+  "family" to AnalyticsCategory("family", "🏠", "Home & Family", Color(0xFFEC4899)),
+  "relationship" to AnalyticsCategory("relationship", "❤️", "Relationships", Color(0xFFF43F5E)),
+  "commuting" to AnalyticsCategory("commuting", "🚗", "Commute & Transit", Color(0xFF64748B)),
+  "internet" to AnalyticsCategory("internet", "🖥️", "Web & Research", Color(0xFF8B5CF6)),
+  "tv" to AnalyticsCategory("tv", "📺", "Leisure & Media", Color(0xFF6B7280)),
+  "anchor_elastic" to AnalyticsCategory("anchor_elastic", "🛡️", "Elastic Buffer", Color(0xFF8B5CF6)),
+  "anchor_standard" to AnalyticsCategory("anchor_standard", "⚓", "Anchor Pillar", Color(0xFF3B82F6))
+)
+
+fun resolveTaskCategory(task: RoutineTask): AnalyticsCategory {
+  if (task.type == TaskType.ANCHOR_SLEEP || task.slotNumber == 1) {
+    return ANALYTICS_CATEGORIES["sleep"]!!
+  }
+  if (task.type == TaskType.ANCHOR_ELASTIC || task.slotNumber == 5) {
+    return ANALYTICS_CATEGORIES["anchor_elastic"]!!
+  }
+  val catId = task.category?.lowercase()
+  if (catId != null && ANALYTICS_CATEGORIES.containsKey(catId)) {
+    return ANALYTICS_CATEGORIES[catId]!!
+  }
+  val titleLower = task.title.lowercase()
+  return when {
+    titleLower.contains("sleep") || titleLower.contains("bed") || titleLower.contains("nap") ->
+      ANALYTICS_CATEGORIES["sleep"]!!
+    titleLower.contains("work") || titleLower.contains("code") || titleLower.contains("job") ->
+      ANALYTICS_CATEGORIES["work"]!!
+    titleLower.contains("study") || titleLower.contains("learn") || titleLower.contains("exam") ->
+      ANALYTICS_CATEGORIES["studying"]!!
+    titleLower.contains("break") || titleLower.contains("coffee") || titleLower.contains("tea") ->
+      ANALYTICS_CATEGORIES["break"]!!
+    titleLower.contains("train") || titleLower.contains("gym") || titleLower.contains("run") || titleLower.contains("workout") ->
+      ANALYTICS_CATEGORIES["training"]!!
+    titleLower.contains("eat") || titleLower.contains("lunch") || titleLower.contains("dinner") || titleLower.contains("breakfast") || titleLower.contains("meal") ->
+      ANALYTICS_CATEGORIES["eating"]!!
+    titleLower.contains("read") || titleLower.contains("book") ->
+      ANALYTICS_CATEGORIES["reading"]!!
+    titleLower.contains("goal") ->
+      ANALYTICS_CATEGORIES["goals"]!!
+    titleLower.contains("family") || titleLower.contains("home") ->
+      ANALYTICS_CATEGORIES["family"]!!
+    task.type == TaskType.ANCHOR_STANDARD ->
+      ANALYTICS_CATEGORIES["anchor_standard"]!!
+    else ->
+      AnalyticsCategory(id = "general", icon = "⚡", name = task.title.take(18), color = Color(0xFF06B6D4))
+  }
+}
+
+enum class AnalyticsTimeRange(val label: String) {
+  DAY("Day"),
+  WEEK("Week"),
+  MONTH("Month"),
+  YEAR("Year")
+}
+
+enum class AnalyticsViewMode {
+  DONUT_CHART,
+  PROGRESS_BARS
+}
+
+data class CategoryAggregate(
+  val category: AnalyticsCategory,
+  val totalMinutes: Int,
+  val percentage: Float,
+  val taskCount: Int,
+  val avgRating: Int?
+)
+
+/**
+ * PHASE 5B: 24-Hour Circular Donut & Dual-Mode Analytics Chart Engine in SettingsScreen.
+ * Preserves Inter-Task Rest Buffer and Trash Bin recovery.
+ */
 @Composable
 fun SettingsScreen(
-  sleepDurationMinutes: Int,
+  sleepDurationMinutes: Int = 420,
   bufferMinutes: Int,
-  slot1Task: RoutineTask?,
-  slot2Task: RoutineTask?,
+  slot1Task: RoutineTask? = null,
+  slot2Task: RoutineTask? = null,
   deletedCount: Int = 0,
-  onUpdateSleepDuration: (Float) -> Unit,
+  scheduledTasks: List<RoutineTask> = emptyList(),
+  onUpdateSleepDuration: (Float) -> Unit = {},
   onUpdateBufferMinutes: (Int) -> Unit,
   onOpenTrashBin: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
+  var restBufferInput by remember(bufferMinutes) {
+    mutableStateOf(bufferMinutes.toString())
+  }
+
+  // Analytics State
+  var selectedRange by remember { mutableStateOf(AnalyticsTimeRange.DAY) }
+  var viewMode by remember { mutableStateOf(AnalyticsViewMode.DONUT_CHART) }
+  var inspectedTaskId by remember { mutableStateOf<String?>(null) }
+
+  // Effective tasks to visualize
+  val effectiveTasks = remember(scheduledTasks, slot1Task, slot2Task) {
+    if (scheduledTasks.isNotEmpty()) {
+      scheduledTasks.filter { !it.isDeleted }
+    } else {
+      listOfNotNull(slot1Task, slot2Task)
+    }
+  }
+
+  // Calculate day metrics
+  val totalScheduledDayMinutes = remember(effectiveTasks) {
+    effectiveTasks.sumOf { it.durationMinutes }.coerceAtMost(1440)
+  }
+
+  // Aggregated Categories
+  val categoryAggregates = remember(effectiveTasks, selectedRange) {
+    val multiplier = when (selectedRange) {
+      AnalyticsTimeRange.DAY -> 1
+      AnalyticsTimeRange.WEEK -> 7
+      AnalyticsTimeRange.MONTH -> 30
+      AnalyticsTimeRange.YEAR -> 365
+    }
+    val totalTimePool = 1440 * multiplier
+
+    val grouped = effectiveTasks.groupBy { resolveTaskCategory(it) }
+    grouped.map { (category, tasks) ->
+      val totalMins = tasks.sumOf { it.durationMinutes } * multiplier
+      val pct = if (totalTimePool > 0) (totalMins.toFloat() / totalTimePool.toFloat()) * 100f else 0f
+      val ratings = tasks.mapNotNull { taskRatingCache[it.id] }
+      val avgRating = if (ratings.isNotEmpty()) ratings.average().toInt() else null
+      CategoryAggregate(
+        category = category,
+        totalMinutes = totalMins,
+        percentage = pct,
+        taskCount = tasks.size * multiplier,
+        avgRating = avgRating
+      )
+    }.sortedByDescending { it.totalMinutes }
+  }
+
+  // Overall Focus Rating average from all tasks with ratings
+  val overallAvgRating = remember(effectiveTasks) {
+    val ratings = effectiveTasks.mapNotNull { taskRatingCache[it.id] }
+    if (ratings.isNotEmpty()) ratings.average().toInt() else null
+  }
+
+  // Currently inspected task
+  val inspectedTask = remember(inspectedTaskId, effectiveTasks) {
+    effectiveTasks.firstOrNull { it.id == inspectedTaskId }
+  }
+
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(OneUiBackground)
+      .background(Color(0xFF080A0F)) // Pure AMOLED Deep Obsidian
       .statusBarsPadding()
       .animateContentSize()
       .verticalScroll(rememberScrollState())
-      .padding(20.dp),
+      .padding(horizontal = 20.dp, vertical = 16.dp)
+      .padding(bottom = 36.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
-    // Header
+    // ==============================================================
+    // 1. HEADER
+    // ==============================================================
     Column {
       Text(
-        text = "Sleep & Routine Engine",
-        fontSize = 26.sp,
+        text = "Engine Analytics & Routine Insights",
+        fontSize = 24.sp,
         fontWeight = FontWeight.Bold,
         color = TextPrimary
       )
+      Spacer(modifier = Modifier.height(2.dp))
       Text(
-        text = "Reverse sleep mathematics, rest buffers, and slot protection rules",
+        text = "24-hour circadian visualizer, category balance & engine buffers",
         fontSize = 12.sp,
         color = TextSecondary
       )
     }
 
-    // Slot 1: Reverse Sleep Settings Card
+    // ==============================================================
+    // 2. 24-HOUR CIRCULAR DONUT & DUAL-MODE ANALYTICS CARD
+    // ==============================================================
     Surface(
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(22.dp))
-        .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.35f)), RoundedCornerShape(22.dp)),
-      color = OneUiSurfaceElevated
+        .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(22.dp))
+        .testTag("analytics_engine_card"),
+      color = Color(0xFF121620)
     ) {
-      Column(modifier = Modifier.padding(18.dp)) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(18.dp)
+      ) {
+        // Card Top Bar: Title & View Mode Toggle
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-              imageVector = Icons.Default.Bedtime,
-              contentDescription = null,
-              tint = Color(0xFFA5B4FC),
-              modifier = Modifier.size(24.dp)
-            )
+            Box(
+              modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.Default.Timelapse,
+                contentDescription = null,
+                tint = Color(0xFF60A5FA),
+                modifier = Modifier.size(20.dp)
+              )
+            }
             Spacer(modifier = Modifier.width(10.dp))
             Column {
               Text(
-                text = "Reverse Sleep Duration",
-                fontSize = 16.sp,
+                text = "Circadian Distribution",
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                color = Color(0xFFF8FAFC)
               )
               Text(
-                text = "Directly links Slot 1 bedtime to Slot 2 wake-up",
+                text = if (viewMode == AnalyticsViewMode.DONUT_CHART) "24h Donut Clock" else "Category Progress",
                 fontSize = 11.sp,
                 color = TextSecondary
               )
             }
           }
 
-          Text(
-            text = "${sleepDurationMinutes / 60}h ${sleepDurationMinutes % 60}m",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = Color(0xFFA5B4FC)
-          )
+          // Dual-View Mode Segmented Toggle Buttons
+          Row(
+            modifier = Modifier
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFF1A2232))
+              .border(1.dp, Color(0xFF1F2637), RoundedCornerShape(12.dp))
+              .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            // View 1: Donut Chart
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                  if (viewMode == AnalyticsViewMode.DONUT_CHART) Color(0xFF3B82F6) else Color.Transparent
+                )
+                .clickable { viewMode = AnalyticsViewMode.DONUT_CHART }
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .testTag("view_mode_donut_button")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Timelapse,
+                contentDescription = "Donut View",
+                tint = if (viewMode == AnalyticsViewMode.DONUT_CHART) Color.White else TextSecondary,
+                modifier = Modifier.size(16.dp)
+              )
+            }
+
+            // View 2: Horizontal Progress Bars
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                  if (viewMode == AnalyticsViewMode.PROGRESS_BARS) Color(0xFF3B82F6) else Color.Transparent
+                )
+                .clickable { viewMode = AnalyticsViewMode.PROGRESS_BARS }
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .testTag("view_mode_progress_button")
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.FormatListBulleted,
+                contentDescription = "List View",
+                tint = if (viewMode == AnalyticsViewMode.PROGRESS_BARS) Color.White else TextSecondary,
+                modifier = Modifier.size(16.dp)
+              )
+            }
+          }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Preset Chips
-        FlowRow(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalArrangement = Arrangement.spacedBy(6.dp),
-          modifier = Modifier.fillMaxWidth()
+        // Time Range Filter Chips: [ Day ] | [ Week ] | [ Month ] | [ Year ]
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          val presets = listOf(6.0f, 6.5f, 7.0f, 7.5f, 8.0f, 8.5f)
-          presets.forEach { hours ->
-            val isSelected = (hours * 60).toInt() == sleepDurationMinutes
-            FilterChip(
-              selected = isSelected,
-              onClick = { onUpdateSleepDuration(hours) },
-              label = { Text("${hours}h") },
-              colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = AnchorGradientStart,
-                selectedLabelColor = Color.White,
-                containerColor = OneUiSurfaceHigh,
-                labelColor = TextPrimary
-              ),
-              shape = RoundedCornerShape(12.dp)
+          AnalyticsTimeRange.entries.forEach { range ->
+            val isSelected = selectedRange == range
+            val chipBg by animateColorAsState(
+              targetValue = if (isSelected) Color(0xFF3B82F6).copy(alpha = 0.2f) else Color(0xFF161B26),
+              label = "chip_bg"
+            )
+            val chipBorder by animateColorAsState(
+              targetValue = if (isSelected) Color(0xFF3B82F6) else Color(0xFF1F2637),
+              label = "chip_border"
+            )
+            val chipText by animateColorAsState(
+              targetValue = if (isSelected) Color(0xFF93C5FD) else TextSecondary,
+              label = "chip_text"
+            )
+
+            Box(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(chipBg)
+                .border(1.dp, chipBorder, RoundedCornerShape(12.dp))
+                .clickable {
+                  selectedRange = range
+                  inspectedTaskId = null
+                }
+                .padding(vertical = 8.dp)
+                .testTag("filter_range_${range.name.lowercase()}"),
+              contentAlignment = Alignment.Center
+            ) {
+              Text(
+                text = range.label,
+                fontSize = 12.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = chipText
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // ==========================================================
+        // VIEW 1: 24-HOUR CIRCULAR DONUT CHART CANVAS
+        // ==========================================================
+        if (viewMode == AnalyticsViewMode.DONUT_CHART) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(270.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Canvas(
+              modifier = Modifier
+                .size(250.dp)
+                .pointerInput(effectiveTasks) {
+                  detectTapGestures { tapOffset ->
+                    val centerX = size.width / 2f
+                    val centerY = size.height / 2f
+                    val dx = tapOffset.x - centerX
+                    val dy = tapOffset.y - centerY
+                    val dist = sqrt(dx * dx + dy * dy)
+                    val strokePx = 34.dp.toPx()
+                    val outerR = (size.width / 2f) - 10.dp.toPx()
+                    val innerR = outerR - strokePx
+
+                    if (dist in (innerR - 10f)..(outerR + 10f)) {
+                      // Tap inside donut ring: calculate angle from 00:00 (top, -90 deg)
+                      val rawAngle = (Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) + 90.0 + 360.0) % 360.0
+                      val tapMinute = ((rawAngle / 360.0) * 1440.0).toInt() % 1440
+
+                      // Find matching task
+                      val matched = effectiveTasks.firstOrNull { t ->
+                        val start = t.startTimeMinute
+                        val end = (start + t.durationMinutes)
+                        if (end <= 1440) {
+                          tapMinute in start until end
+                        } else {
+                          // Spans midnight
+                          tapMinute >= start || tapMinute < (end % 1440)
+                        }
+                      }
+                      inspectedTaskId = if (inspectedTaskId == matched?.id) null else matched?.id
+                    } else {
+                      // Tapped in hole or outside ring: unselect
+                      inspectedTaskId = null
+                    }
+                  }
+                }
+                .testTag("circular_donut_canvas")
+            ) {
+              val strokeWidthPx = 32.dp.toPx()
+              val paddingPx = 16.dp.toPx()
+              val chartDiameter = size.minDimension - paddingPx * 2
+              val topLeft = Offset(
+                x = (size.width - chartDiameter) / 2f,
+                y = (size.height - chartDiameter) / 2f
+              )
+              val arcSize = Size(chartDiameter, chartDiameter)
+
+              // 1. Draw 360-degree subtle background track
+              drawArc(
+                color = Color(0xFF161C28),
+                startAngle = 0f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = strokeWidthPx)
+              )
+
+              // 2. Draw 24-hour dial hour markers (00h, 06h, 12h, 18h)
+              val center = Offset(size.width / 2f, size.height / 2f)
+              val markerRadiusOuter = (chartDiameter / 2f) + (strokeWidthPx / 2f) + 4.dp.toPx()
+              val markerRadiusInner = markerRadiusOuter - 6.dp.toPx()
+
+              for (hour in listOf(0, 6, 12, 18)) {
+                val hourAngle = Math.toRadians((hour * 15.0 - 90.0))
+                val p1 = Offset(
+                  x = center.x + (markerRadiusInner * kotlin.math.cos(hourAngle)).toFloat(),
+                  y = center.y + (markerRadiusInner * kotlin.math.sin(hourAngle)).toFloat()
+                )
+                val p2 = Offset(
+                  x = center.x + (markerRadiusOuter * kotlin.math.cos(hourAngle)).toFloat(),
+                  y = center.y + (markerRadiusOuter * kotlin.math.sin(hourAngle)).toFloat()
+                )
+                drawLine(
+                  color = Color(0xFF475569),
+                  start = p1,
+                  end = p2,
+                  strokeWidth = 2.dp.toPx()
+                )
+              }
+
+              // 3. Draw active task segments
+              effectiveTasks.forEach { task ->
+                val isSelected = task.id == inspectedTaskId
+                val category = resolveTaskCategory(task)
+                val startAngle = ((task.startTimeMinute / 1440f) * 360f) - 90f
+                val sweepAngle = ((task.durationMinutes / 1440f) * 360f).coerceAtLeast(1f)
+
+                val effectiveStroke = if (isSelected) strokeWidthPx + 8.dp.toPx() else strokeWidthPx
+                val effectiveColor = if (inspectedTaskId == null || isSelected) {
+                  category.color
+                } else {
+                  category.color.copy(alpha = 0.35f)
+                }
+
+                drawArc(
+                  color = effectiveColor,
+                  startAngle = startAngle,
+                  sweepAngle = sweepAngle,
+                  useCenter = false,
+                  topLeft = topLeft,
+                  size = arcSize,
+                  style = Stroke(
+                    width = effectiveStroke,
+                    cap = if (sweepAngle > 4f) StrokeCap.Round else StrokeCap.Butt
+                  )
+                )
+
+                // Highlight border when inspected
+                if (isSelected) {
+                  drawArc(
+                    color = Color.White,
+                    startAngle = startAngle,
+                    sweepAngle = sweepAngle,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = 2.dp.toPx())
+                  )
+                }
+              }
+            }
+
+            // Central Hole Readout
+            Column(
+              modifier = Modifier
+                .size(145.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF0C1017))
+                .border(1.dp, Color(0xFF1F2637), CircleShape)
+                .padding(10.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.Center
+            ) {
+              if (inspectedTask != null) {
+                val cat = resolveTaskCategory(inspectedTask)
+                Text(
+                  text = "${cat.icon} ${cat.name}",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = cat.color,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                val h = inspectedTask.durationMinutes / 60
+                val m = inspectedTask.durationMinutes % 60
+                Text(
+                  text = if (h > 0 && m > 0) "${h}h ${m}m" else if (h > 0) "${h}h" else "${m}m",
+                  fontSize = 19.sp,
+                  fontWeight = FontWeight.Black,
+                  color = Color.White
+                )
+                val share = ((inspectedTask.durationMinutes.toFloat() / 1440f) * 100f).toInt()
+                Text(
+                  text = "${inspectedTask.formattedStartTime} • $share%",
+                  fontSize = 10.sp,
+                  color = Color(0xFF94A3B8)
+                )
+              } else {
+                Text(
+                  text = when (selectedRange) {
+                    AnalyticsTimeRange.DAY -> "TODAY 24H"
+                    AnalyticsTimeRange.WEEK -> "WEEK TOTAL"
+                    AnalyticsTimeRange.MONTH -> "MONTH TOTAL"
+                    AnalyticsTimeRange.YEAR -> "YEAR TOTAL"
+                  },
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  letterSpacing = 1.sp,
+                  color = Color(0xFF94A3B8)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                val totalH = when (selectedRange) {
+                  AnalyticsTimeRange.DAY -> totalScheduledDayMinutes / 60
+                  AnalyticsTimeRange.WEEK -> (totalScheduledDayMinutes * 7) / 60
+                  AnalyticsTimeRange.MONTH -> (totalScheduledDayMinutes * 30) / 60
+                  AnalyticsTimeRange.YEAR -> (totalScheduledDayMinutes * 365) / 60
+                }
+                val totalM = when (selectedRange) {
+                  AnalyticsTimeRange.DAY -> totalScheduledDayMinutes % 60
+                  AnalyticsTimeRange.WEEK -> (totalScheduledDayMinutes * 7) % 60
+                  AnalyticsTimeRange.MONTH -> (totalScheduledDayMinutes * 30) % 60
+                  AnalyticsTimeRange.YEAR -> (totalScheduledDayMinutes * 365) % 60
+                }
+                Text(
+                  text = "${totalH}h ${totalM}m",
+                  fontSize = 19.sp,
+                  fontWeight = FontWeight.Black,
+                  color = Color.White
+                )
+                val activePct = ((totalScheduledDayMinutes.toFloat() / 1440f) * 100f).toInt()
+                Text(
+                  text = if (totalScheduledDayMinutes > 0) "$activePct% Scheduled" else "0% Pristine",
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Medium,
+                  color = Color(0xFF10B981)
+                )
+              }
+            }
+          }
+
+          // Inline Floating Inspection Badge below Donut
+          AnimatedVisibility(visible = inspectedTask != null) {
+            inspectedTask?.let { task ->
+              val cat = resolveTaskCategory(task)
+              Spacer(modifier = Modifier.height(10.dp))
+              Surface(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(14.dp))
+                  .border(1.5.dp, cat.color.copy(alpha = 0.8f), RoundedCornerShape(14.dp)),
+                color = Color(0xFF161C28)
+              ) {
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Text(text = cat.icon, fontSize = 18.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                      Text(
+                        text = task.title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                      )
+                      Text(
+                        text = "${task.formattedStartTime} → ${task.formattedEndTime} • ${task.formattedDuration}",
+                        fontSize = 11.sp,
+                        color = cat.color
+                      )
+                    }
+                  }
+
+                  IconButton(
+                    onClick = { inspectedTaskId = null },
+                    modifier = Modifier.size(28.dp)
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Close,
+                      contentDescription = "Clear Inspection",
+                      tint = TextSecondary,
+                      modifier = Modifier.size(16.dp)
+                    )
+                  }
+                }
+              }
+            }
+          }
+
+          if (inspectedTask == null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = "Tap on any circular dial segment to inspect duration and time",
+              fontSize = 11.sp,
+              color = Color(0xFF64748B),
+              textAlign = TextAlign.Center,
+              modifier = Modifier.fillMaxWidth()
             )
           }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        // ==========================================================
+        // VIEW 2: HORIZONTAL CATEGORY PROGRESS BARS
+        // ==========================================================
+        if (viewMode == AnalyticsViewMode.PROGRESS_BARS) {
+          Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+          ) {
+            if (categoryAggregates.isEmpty()) {
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(vertical = 24.dp),
+                contentAlignment = Alignment.Center
+              ) {
+                Text(
+                  text = "No scheduled tasks in pristine schedule",
+                  color = TextTertiary,
+                  fontSize = 13.sp
+                )
+              }
+            } else {
+              categoryAggregates.forEach { item ->
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF161B26))
+                    .border(1.dp, Color(0xFF1F2637), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+                ) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      Text(text = item.category.icon, fontSize = 16.sp)
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Text(
+                        text = item.category.name,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                      )
+                    }
 
-        // Slider (4h to 10h)
-        Slider(
-          value = sleepDurationMinutes.toFloat() / 60f,
-          onValueChange = { onUpdateSleepDuration(it) },
-          valueRange = 4.0f..10.0f,
-          steps = 11, // 30 min intervals
-          colors = SliderDefaults.colors(
-            thumbColor = AnchorGradientStart,
-            activeTrackColor = Color(0xFFA5B4FC),
-            inactiveTrackColor = Color.White.copy(alpha = 0.1f)
-          ),
-          modifier = Modifier.testTag("sleep_duration_slider")
-        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      val h = item.totalMinutes / 60
+                      val m = item.totalMinutes % 60
+                      val durStr = if (h > 0 && m > 0) "${h}h ${m}m" else if (h > 0) "${h}h" else "${m}m"
+                      Text(
+                        text = "$durStr • ${String.format("%.1f", item.percentage)}%",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = item.category.color
+                      )
 
-        // Live calculation preview
-        Box(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.3f))
-            .padding(12.dp)
-        ) {
-          Column {
-            Text(
-              text = "Mathematical Linkage Preview:",
-              color = Color(0xFFA5B4FC),
-              fontWeight = FontWeight.Bold,
-              fontSize = 11.sp
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-              text = "Slot 2 (Wake Up): ${slot2Task?.formattedStartTime ?: "05:00 AM"}\n" +
-                "Minus Sleep (${sleepDurationMinutes / 60}h ${sleepDurationMinutes % 60}m) =\n" +
-                "Slot 1 Bedtime: ${slot1Task?.formattedStartTime ?: "10:00 PM"}",
-              color = TextPrimary,
-              fontSize = 12.sp,
-              lineHeight = 18.sp
-            )
+                      if (item.avgRating != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                          modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF10B981).copy(alpha = 0.2f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                          Text(
+                            text = "★ ${item.avgRating}%",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF10B981)
+                          )
+                        }
+                      }
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  // Linear Progress Bar
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .height(7.dp)
+                      .clip(RoundedCornerShape(4.dp))
+                      .background(Color(0xFF222B3D))
+                  ) {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxWidth(fraction = (item.percentage / 100f).coerceIn(0.02f, 1f))
+                        .height(7.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(item.category.color)
+                    )
+                  }
+                }
+              }
+
+              // Free Unscheduled Gap Bar
+              val freeMinutes = (1440 - totalScheduledDayMinutes).coerceAtLeast(0)
+              val freePct = (freeMinutes.toFloat() / 1440f) * 100f
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(Color(0xFF161B26).copy(alpha = 0.6f))
+                  .border(1.dp, Color(0xFF1F2637), RoundedCornerShape(12.dp))
+                  .padding(12.dp)
+              ) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "⚡", fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                      text = "Free Inter-Task Buffer",
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.Medium,
+                      color = TextSecondary
+                    )
+                  }
+
+                  val freeH = freeMinutes / 60
+                  val freeM = freeMinutes % 60
+                  Text(
+                    text = "${freeH}h ${freeM}m • ${String.format("%.1f", freePct)}%",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                  )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF222B3D))
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth(fraction = (freePct / 100f).coerceIn(0.01f, 1f))
+                      .height(6.dp)
+                      .clip(RoundedCornerShape(4.dp))
+                      .background(Color(0xFF475569))
+                  )
+                }
+              }
+            }
+          }
+        }
+
+        // ==========================================================
+        // HISTORICAL METRIC SUMMARY (Week, Month, Year mode)
+        // ==========================================================
+        if (selectedRange != AnalyticsTimeRange.DAY) {
+          Spacer(modifier = Modifier.height(14.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            // Card A: Total Focus Rating
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .border(1.dp, Color(0xFF1F2637), RoundedCornerShape(14.dp)),
+              color = Color(0xFF161B26)
+            ) {
+              Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                  text = "AVG FOCUS RATING",
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextTertiary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    tint = Color(0xFFF59E0B),
+                    modifier = Modifier.size(16.dp)
+                  )
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = if (overallAvgRating != null) "$overallAvgRating%" else "Unrated",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (overallAvgRating != null) Color(0xFFF59E0B) else TextSecondary
+                  )
+                }
+              }
+            }
+
+            // Card B: Routine Efficiency
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .border(1.dp, Color(0xFF1F2637), RoundedCornerShape(14.dp)),
+              color = Color(0xFF161B26)
+            ) {
+              Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                  text = "SCHEDULE EFFICIENCY",
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextTertiary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                val effPct = ((totalScheduledDayMinutes.toFloat() / 1440f) * 100f).toInt()
+                Text(
+                  text = "$effPct% Active",
+                  fontSize = 14.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFF10B981)
+                )
+              }
+            }
           }
         }
       }
     }
 
-    // Inter-Task Buffer Time
+    // ==============================================================
+    // 3. PRESERVED INTER-TASK REST BUFFER CARD
+    // ==============================================================
     Surface(
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(22.dp))
-        .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(22.dp)),
-      color = OneUiSurfaceElevated
+        .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(22.dp)),
+      color = Color(0xFF121620)
     ) {
-      Column(modifier = Modifier.padding(18.dp)) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(18.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
         Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier.weight(1f),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Box(
+            modifier = Modifier
+              .size(42.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+          ) {
             Icon(
               imageVector = Icons.Default.Timelapse,
               contentDescription = null,
               tint = Color(0xFF10B981),
               modifier = Modifier.size(24.dp)
             )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-              Text(
-                text = "Inter-Task Rest Buffer",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-              )
-              Text(
-                text = "Gap between consecutive dynamic tasks",
-                fontSize = 11.sp,
-                color = TextSecondary
-              )
-            }
           }
-
-          Text(
-            text = "${bufferMinutes}m",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = Color(0xFF10B981)
-          )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Inter-Task Rest Buffer Slider (0 to 30 minutes, 5-minute steps)
-        Slider(
-          value = bufferMinutes.toFloat().coerceIn(0f, 30f),
-          onValueChange = { newVal ->
-            val v = ((newVal / 5f).toInt() * 5).coerceIn(0, 30)
-            onUpdateBufferMinutes(v)
-          },
-          valueRange = 0f..30f,
-          steps = 5,
-          colors = SliderDefaults.colors(
-            thumbColor = Color(0xFF10B981),
-            activeTrackColor = Color(0xFF34D399),
-            inactiveTrackColor = Color.White.copy(alpha = 0.1f)
-          ),
-          modifier = Modifier.fillMaxWidth().testTag("settings_rest_buffer_slider")
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          listOf(0, 5, 10, 15, 20, 30).forEach { mins ->
-            val isSelected = bufferMinutes == mins
-            FilterChip(
-              selected = isSelected,
-              onClick = { onUpdateBufferMinutes(mins) },
-              label = { Text("${mins}m") },
-              colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = Color(0xFF10B981),
-                selectedLabelColor = Color.Black,
-                containerColor = OneUiSurfaceHigh,
-                labelColor = TextPrimary
-              ),
-              shape = RoundedCornerShape(12.dp),
-              modifier = Modifier.weight(1f)
+          Spacer(modifier = Modifier.width(14.dp))
+          Column {
+            Text(
+              text = "Inter-Task Rest Buffer",
+              fontSize = 15.sp,
+              fontWeight = FontWeight.Bold,
+              color = TextPrimary
+            )
+            Text(
+              text = "Gap between consecutive dynamic tasks",
+              fontSize = 11.sp,
+              color = TextSecondary
             )
           }
         }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        OutlinedTextField(
+          value = restBufferInput,
+          onValueChange = { newVal ->
+            val clean = newVal.filter { it.isDigit() }.take(3)
+            restBufferInput = clean
+            val parsed = clean.toIntOrNull() ?: 0
+            onUpdateBufferMinutes(parsed)
+          },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+          trailingIcon = {
+            Text(
+              text = "min",
+              color = Color(0xFF10B981),
+              fontWeight = FontWeight.SemiBold,
+              fontSize = 12.sp,
+              modifier = Modifier.padding(end = 8.dp)
+            )
+          },
+          singleLine = true,
+          shape = RoundedCornerShape(12.dp),
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = OneUiSurfaceHigh,
+            unfocusedContainerColor = OneUiSurfaceHigh,
+            focusedBorderColor = Color(0xFF10B981),
+            unfocusedBorderColor = OneUiBorder,
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary
+          ),
+          textStyle = LocalTextStyle.current.copy(
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+          ),
+          modifier = Modifier
+            .width(105.dp)
+            .testTag("settings_rest_buffer_input")
+        )
       }
     }
 
-    // Trash Bin Navigation Card
+    // ==============================================================
+    // 4. PRESERVED TRASH BIN NAVIGATION CARD
+    // ==============================================================
     Surface(
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(22.dp))
-        .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(22.dp))
+        .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(22.dp))
         .clickable { onOpenTrashBin() }
         .testTag("settings_trash_bin_card"),
-      color = OneUiSurfaceElevated
+      color = Color(0xFF121620)
     ) {
       Row(
         modifier = Modifier
@@ -331,7 +1054,12 @@ fun SettingsScreen(
               .background(DangerRed.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center
           ) {
-            Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = DangerRed, modifier = Modifier.size(22.dp))
+            Icon(
+              imageVector = Icons.Default.Delete,
+              contentDescription = null,
+              tint = DangerRed,
+              modifier = Modifier.size(22.dp)
+            )
           }
           Spacer(modifier = Modifier.width(14.dp))
           Column {
@@ -349,37 +1077,14 @@ fun SettingsScreen(
           }
         }
 
-        Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = TextSecondary)
-      }
-    }
-
-    // Architecture Specifications Explanatory Card
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(22.dp))
-        .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(22.dp)),
-      color = OneUiSurfaceElevated
-    ) {
-      Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(20.dp))
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(text = "Engine Architecture Blueprint", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        }
-
-        Text(
-          text = "• 7 Immutable Anchors: Core daily pillars cannot be deleted or overridden.\n" +
-            "• Slot 5 Elastic Buffer: Dynamically spans 100% of the duration between Anchor 4 end and Anchor 6 start.\n" +
-            "• Auto-Splitting (> 60m): Splits heavy tasks across open slots with a strict 15m minimum chunk safety limit.\n" +
-            "• Overflow Pool: Automatically isolates tasks that exceed available day capacity without disrupting fixed anchors.",
-          color = TextSecondary,
-          fontSize = 12.sp,
-          lineHeight = 18.sp
+        Icon(
+          imageVector = Icons.Default.ChevronRight,
+          contentDescription = null,
+          tint = TextSecondary
         )
       }
     }
 
-    Spacer(modifier = Modifier.height(30.dp))
+    Spacer(modifier = Modifier.height(20.dp))
   }
 }

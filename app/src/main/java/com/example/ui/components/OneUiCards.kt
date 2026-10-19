@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -34,6 +35,8 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.Warning
@@ -49,6 +52,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -103,6 +108,158 @@ fun isTaskActiveAt(task: RoutineTask, currentMinute: Int): Boolean {
   }
 }
 
+fun isTaskCompletedAt(task: RoutineTask, currentMinute: Int): Boolean {
+  if (currentMinute < 0) return false
+  val start = task.startTimeMinute
+  val end = task.startTimeMinute + task.durationMinutes
+  return if (end <= 1440) {
+    currentMinute >= end && currentMinute >= start
+  } else {
+    currentMinute >= (end % 1440) && currentMinute < start
+  }
+}
+
+val taskRatingCache = mutableStateMapOf<String, Int>()
+
+@Composable
+fun TaskCompletionRatingBar(
+  task: RoutineTask,
+  onRate: (Int) -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val haptic = LocalHapticFeedback.current
+  val existingRating = taskRatingCache[task.id]
+  var pendingPct by remember(task.id) { mutableStateOf<Int?>(null) }
+
+  Surface(
+    modifier = modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(14.dp))
+      .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(14.dp)),
+    color = Color.Black.copy(alpha = 0.35f),
+    shape = RoundedCornerShape(14.dp)
+  ) {
+    Column(
+      modifier = Modifier
+        .animateContentSize()
+        .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+      if (existingRating != null) {
+        // 5-Star Display State
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+              text = "Focus Rating:",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Medium,
+              color = Color(0xFF94A3B8)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            val starCount = when {
+              existingRating >= 100 -> 5
+              existingRating >= 75 -> 4
+              existingRating >= 50 -> 3
+              existingRating >= 25 -> 1
+              else -> 0
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+              for (i in 1..5) {
+                Icon(
+                  imageVector = if (i <= starCount) Icons.Default.Star else Icons.Default.StarBorder,
+                  contentDescription = null,
+                  tint = if (i <= starCount) Color(0xFFFBBF24) else Color(0xFF475569),
+                  modifier = Modifier.size(16.dp)
+                )
+              }
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = "$existingRating%",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFF10B981)
+            )
+          }
+
+          IconButton(
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              taskRatingCache.remove(task.id)
+            },
+            modifier = Modifier.size(24.dp).testTag("re_rate_task_${task.id}")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Edit,
+              contentDescription = "Change Rating",
+              tint = TextTertiary,
+              modifier = Modifier.size(13.dp)
+            )
+          }
+        }
+      } else {
+        // Selection State
+        Text(
+          text = "Rate Performance & Focus Level:",
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Medium,
+          color = Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val percentages = listOf(0, 25, 50, 75, 100)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          percentages.forEach { pct ->
+            val isPending = pendingPct == pct
+            Surface(
+              onClick = {
+                if (isPending) {
+                  haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                  taskRatingCache[task.id] = pct
+                  onRate(pct)
+                  pendingPct = null
+                } else {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  pendingPct = pct
+                }
+              },
+              shape = RoundedCornerShape(10.dp),
+              color = if (isPending) Color(0xFF10B981).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f),
+              border = BorderStroke(
+                width = if (isPending) 1.5.dp else 1.dp,
+                color = if (isPending) Color(0xFF10B981) else Color.White.copy(alpha = 0.15f)
+              ),
+              modifier = Modifier
+                .weight(1f)
+                .height(32.dp)
+                .testTag("rate_pill_${task.id}_$pct")
+            ) {
+              Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+              ) {
+                Text(
+                  text = if (isPending) "Save ✓" else "$pct%",
+                  fontSize = 11.sp,
+                  fontWeight = if (isPending) FontWeight.ExtraBold else FontWeight.SemiBold,
+                  color = if (isPending) Color(0xFF10B981) else TextPrimary
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 @Composable
 fun AnchorSlotCard(
   task: RoutineTask,
@@ -110,6 +267,7 @@ fun AnchorSlotCard(
   currentMinute: Int = -1,
   onQuickAdjust: (deltaMinutes: Int) -> Unit,
   onEditClick: () -> Unit,
+  onRateTask: ((taskId: String, ratingPct: Int) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val slotNum = task.slotNumber ?: 0
@@ -229,27 +387,81 @@ fun AnchorSlotCard(
             Spacer(modifier = Modifier.width(6.dp))
           }
 
-          IconButton(
-            onClick = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              onEditClick()
-            },
-            modifier = Modifier.size(36.dp).testTag("edit_slot_$slotNum")
-          ) {
-            Icon(
-              imageVector = Icons.Default.Edit,
-              contentDescription = "Edit Anchor",
-              tint = TextSecondary,
-              modifier = Modifier.size(18.dp)
-            )
+          // In pending adjustment state: Replace edit pencil with [ ✓ ] and [ ✕ ]
+          if (pendingDeltaMinutes != 0) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+              // Green Checkmark [ ✓ ]
+              IconButton(
+                onClick = {
+                  haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                  onQuickAdjust(pendingDeltaMinutes)
+                  pendingDeltaMinutes = 0
+                },
+                modifier = Modifier
+                  .size(34.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF10B981).copy(alpha = 0.15f))
+                  .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f)), CircleShape)
+                  .testTag("save_quick_adjust_slot_$slotNum")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Check,
+                  contentDescription = "Confirm shift",
+                  tint = Color(0xFF10B981),
+                  modifier = Modifier.size(18.dp)
+                )
+              }
+
+              // Crimson Cross [ ✕ ]
+              IconButton(
+                onClick = {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  pendingDeltaMinutes = 0
+                },
+                modifier = Modifier
+                  .size(34.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFFEF4444).copy(alpha = 0.15f))
+                  .border(BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.6f)), CircleShape)
+                  .testTag("cancel_quick_adjust_slot_$slotNum")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Close,
+                  contentDescription = "Cancel shift",
+                  tint = Color(0xFFEF4444),
+                  modifier = Modifier.size(18.dp)
+                )
+              }
+            }
+          } else {
+            IconButton(
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onEditClick()
+              },
+              modifier = Modifier.size(36.dp).testTag("edit_slot_$slotNum")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Edit,
+                contentDescription = "Edit Anchor",
+                tint = TextSecondary,
+                modifier = Modifier.size(18.dp)
+              )
+            }
           }
         }
       }
 
-      // Live progress timer if currently active
+      // Live progress timer if currently active, or task completion rating if completed
       if (isActive && currentMinute >= 0) {
         Spacer(modifier = Modifier.height(10.dp))
         ActiveTaskLiveProgressBar(task = task, currentMinute = currentMinute, accentColor = Color(0xFF10B981))
+      } else if (isTaskCompletedAt(task, currentMinute) || taskRatingCache.containsKey(task.id)) {
+        Spacer(modifier = Modifier.height(10.dp))
+        TaskCompletionRatingBar(task = task, onRate = { r -> onRateTask?.invoke(task.id, r) })
       }
 
       Spacer(modifier = Modifier.height(14.dp))
@@ -412,49 +624,6 @@ fun AnchorSlotCard(
                 Text(text = "5m", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
               }
             }
-
-            // In-place Action Pill: "Save (✓)" and "Cancel (✕)" (Shown whenever pendingDeltaMinutes != 0)
-            if (pendingDeltaMinutes != 0) {
-              Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF10B981).copy(alpha = 0.18f),
-                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f))
-              ) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                  Button(
-                    onClick = {
-                      haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                      onQuickAdjust(pendingDeltaMinutes)
-                      pendingDeltaMinutes = 0
-                    },
-                    modifier = Modifier.height(30.dp).testTag("save_quick_adjust_slot_$slotNum"),
-                    colors = ButtonDefaults.buttonColors(
-                      containerColor = Color(0xFF10B981),
-                      contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                  ) {
-                    Text("Save ✓", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                  }
-
-                  Spacer(modifier = Modifier.width(4.dp))
-
-                  IconButton(
-                    onClick = {
-                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                      pendingDeltaMinutes = 0
-                    },
-                    modifier = Modifier.size(30.dp).testTag("cancel_quick_adjust_slot_$slotNum")
-                  ) {
-                    Text("✕", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                  }
-                }
-              }
-            }
           }
         } else if (isSleepSlot) {
           Box(
@@ -524,6 +693,7 @@ fun DynamicTaskCard(
   task: RoutineTask,
   currentMinute: Int = -1,
   onEditClick: () -> Unit,
+  onRateTask: ((taskId: String, ratingPct: Int) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val haptic = LocalHapticFeedback.current
@@ -653,10 +823,13 @@ fun DynamicTaskCard(
         }
       }
 
-      // Live progress timer if currently active
+      // Live progress timer if currently active, or task completion rating if completed
       if (isActive && currentMinute >= 0) {
         Spacer(modifier = Modifier.height(10.dp))
         ActiveTaskLiveProgressBar(task = task, currentMinute = currentMinute, accentColor = DynamicGradientEnd)
+      } else if (isTaskCompletedAt(task, currentMinute) || taskRatingCache.containsKey(task.id)) {
+        Spacer(modifier = Modifier.height(10.dp))
+        TaskCompletionRatingBar(task = task, onRate = { r -> onRateTask?.invoke(task.id, r) })
       }
 
       Spacer(modifier = Modifier.height(10.dp))

@@ -323,6 +323,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             slot1Task = slot1,
             slot2Task = slot2,
             deletedCount = deletedTasks.size,
+            scheduledTasks = scheduleResult.scheduledTasks,
             onUpdateSleepDuration = { viewModel.updateSleepDuration(it) },
             onUpdateBufferMinutes = { viewModel.updateBufferMinutes(it) },
             onOpenTrashBin = { viewModel.selectTab(NavigationTab.TRASH) }
