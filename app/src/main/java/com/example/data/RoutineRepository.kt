@@ -183,6 +183,11 @@ class RoutineRepository(context: Context) {
         put("toleranceMinutes", t.toleranceMinutes)
         put("interTaskBufferMinutes", t.interTaskBufferMinutes)
         if (t.category != null) put("category", t.category)
+        if (t.fridayTitle != null) put("fridayTitle", t.fridayTitle)
+        if (t.fridayStartTimeMinute != null) put("fridayStartTimeMinute", t.fridayStartTimeMinute)
+        if (t.fridayDurationMinutes != null) put("fridayDurationMinutes", t.fridayDurationMinutes)
+        if (t.fridayVoiceMessage != null) put("fridayVoiceMessage", t.fridayVoiceMessage)
+        put("voiceVolume", t.voiceVolume.toDouble())
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -237,7 +242,12 @@ class RoutineRepository(context: Context) {
         isSoundAlertEnabled = obj.optBoolean("isSoundAlertEnabled", true),
         toleranceMinutes = obj.optInt("toleranceMinutes", 0),
         interTaskBufferMinutes = obj.optInt("interTaskBufferMinutes", 5),
-        category = if (obj.has("category")) obj.getString("category") else null
+        category = if (obj.has("category")) obj.getString("category") else null,
+        fridayTitle = if (obj.has("fridayTitle")) obj.getString("fridayTitle") else null,
+        fridayStartTimeMinute = if (obj.has("fridayStartTimeMinute")) obj.getInt("fridayStartTimeMinute") else null,
+        fridayDurationMinutes = if (obj.has("fridayDurationMinutes")) obj.getInt("fridayDurationMinutes") else null,
+        fridayVoiceMessage = if (obj.has("fridayVoiceMessage")) obj.getString("fridayVoiceMessage") else null,
+        voiceVolume = if (obj.has("voiceVolume")) obj.getDouble("voiceVolume").toFloat() else 1.0f
       )
       list.add(task)
     }

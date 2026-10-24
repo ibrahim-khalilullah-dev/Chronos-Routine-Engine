@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timelapse
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -143,11 +144,11 @@ fun resolveTaskCategory(task: RoutineTask): AnalyticsCategory {
   }
 }
 
-enum class AnalyticsTimeRange(val label: String) {
-  DAY("Day"),
-  WEEK("Week"),
-  MONTH("Month"),
-  YEAR("Year")
+enum class AnalyticsTimeRange(val label: String, val multiplier: Int, val headerLabel: String) {
+  DAY("Day", 1, "TODAY 24H"),
+  WEEK("Week", 7, "WEEK TOTAL"),
+  MONTH("Month", 30, "MONTH TOTAL"),
+  THREE_MONTHS("3 Months", 90, "3-MO TOTAL")
 }
 
 enum class AnalyticsViewMode {
@@ -164,7 +165,7 @@ data class CategoryAggregate(
 )
 
 /**
- * PHASE 5B: 24-Hour Circular Donut & Dual-Mode Analytics Chart Engine in SettingsScreen.
+ * PHASE 5B / 6C: 24-Hour Circular Donut & Dual-Mode Analytics Chart Engine in SettingsScreen.
  * Preserves Inter-Task Rest Buffer and Trash Bin recovery.
  */
 @Composable
@@ -203,14 +204,9 @@ fun SettingsScreen(
     effectiveTasks.sumOf { it.durationMinutes }.coerceAtMost(1440)
   }
 
-  // Aggregated Categories
+  // Aggregated Categories (supporting up to 3 months / 90 days cache history)
   val categoryAggregates = remember(effectiveTasks, selectedRange) {
-    val multiplier = when (selectedRange) {
-      AnalyticsTimeRange.DAY -> 1
-      AnalyticsTimeRange.WEEK -> 7
-      AnalyticsTimeRange.MONTH -> 30
-      AnalyticsTimeRange.YEAR -> 365
-    }
+    val multiplier = selectedRange.multiplier
     val totalTimePool = 1440 * multiplier
 
     val grouped = effectiveTasks.groupBy { resolveTaskCategory(it) }
@@ -426,12 +422,12 @@ fun SettingsScreen(
           Box(
             modifier = Modifier
               .fillMaxWidth()
-              .height(270.dp),
+              .height(285.dp),
             contentAlignment = Alignment.Center
           ) {
             Canvas(
               modifier = Modifier
-                .size(250.dp)
+                .size(270.dp)
                 .pointerInput(effectiveTasks) {
                   detectTapGestures { tapOffset ->
                     val centerX = size.width / 2f
@@ -439,9 +435,10 @@ fun SettingsScreen(
                     val dx = tapOffset.x - centerX
                     val dy = tapOffset.y - centerY
                     val dist = sqrt(dx * dx + dy * dy)
-                    val strokePx = 34.dp.toPx()
-                    val outerR = (size.width / 2f) - 10.dp.toPx()
-                    val innerR = outerR - strokePx
+                    val chartDiameterPx = size.width - 48.dp.toPx()
+                    val strokePx = 30.dp.toPx()
+                    val outerR = (chartDiameterPx / 2f) + (strokePx / 2f)
+                    val innerR = (chartDiameterPx / 2f) - (strokePx / 2f)
 
                     if (dist in (innerR - 10f)..(outerR + 10f)) {
                       // Tap inside donut ring: calculate angle from 00:00 (top, -90 deg)
@@ -468,8 +465,8 @@ fun SettingsScreen(
                 }
                 .testTag("circular_donut_canvas")
             ) {
-              val strokeWidthPx = 32.dp.toPx()
-              val paddingPx = 16.dp.toPx()
+              val strokeWidthPx = 28.dp.toPx()
+              val paddingPx = 24.dp.toPx()
               val chartDiameter = size.minDimension - paddingPx * 2
               val topLeft = Offset(
                 x = (size.width - chartDiameter) / 2f,
@@ -518,7 +515,7 @@ fun SettingsScreen(
                 val startAngle = ((task.startTimeMinute / 1440f) * 360f) - 90f
                 val sweepAngle = ((task.durationMinutes / 1440f) * 360f).coerceAtLeast(1f)
 
-                val effectiveStroke = if (isSelected) strokeWidthPx + 8.dp.toPx() else strokeWidthPx
+                val effectiveStroke = if (isSelected) strokeWidthPx + 6.dp.toPx() else strokeWidthPx
                 val effectiveColor = if (inspectedTaskId == null || isSelected) {
                   category.color
                 } else {
@@ -556,7 +553,7 @@ fun SettingsScreen(
             // Central Hole Readout
             Column(
               modifier = Modifier
-                .size(145.dp)
+                .size(140.dp)
                 .clip(CircleShape)
                 .background(Color(0xFF0C1017))
                 .border(1.dp, Color(0xFF1F2637), CircleShape)
@@ -591,30 +588,15 @@ fun SettingsScreen(
                 )
               } else {
                 Text(
-                  text = when (selectedRange) {
-                    AnalyticsTimeRange.DAY -> "TODAY 24H"
-                    AnalyticsTimeRange.WEEK -> "WEEK TOTAL"
-                    AnalyticsTimeRange.MONTH -> "MONTH TOTAL"
-                    AnalyticsTimeRange.YEAR -> "YEAR TOTAL"
-                  },
+                  text = selectedRange.headerLabel,
                   fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
                   letterSpacing = 1.sp,
                   color = Color(0xFF94A3B8)
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                val totalH = when (selectedRange) {
-                  AnalyticsTimeRange.DAY -> totalScheduledDayMinutes / 60
-                  AnalyticsTimeRange.WEEK -> (totalScheduledDayMinutes * 7) / 60
-                  AnalyticsTimeRange.MONTH -> (totalScheduledDayMinutes * 30) / 60
-                  AnalyticsTimeRange.YEAR -> (totalScheduledDayMinutes * 365) / 60
-                }
-                val totalM = when (selectedRange) {
-                  AnalyticsTimeRange.DAY -> totalScheduledDayMinutes % 60
-                  AnalyticsTimeRange.WEEK -> (totalScheduledDayMinutes * 7) % 60
-                  AnalyticsTimeRange.MONTH -> (totalScheduledDayMinutes * 30) % 60
-                  AnalyticsTimeRange.YEAR -> (totalScheduledDayMinutes * 365) % 60
-                }
+                val totalH = (totalScheduledDayMinutes * selectedRange.multiplier) / 60
+                val totalM = (totalScheduledDayMinutes * selectedRange.multiplier) % 60
                 Text(
                   text = "${totalH}h ${totalM}m",
                   fontSize = 19.sp,
@@ -859,7 +841,7 @@ fun SettingsScreen(
         }
 
         // ==========================================================
-        // HISTORICAL METRIC SUMMARY (Week, Month, Year mode)
+        // HISTORICAL METRIC SUMMARY (Week, Month, 3 Months mode)
         // ==========================================================
         if (selectedRange != AnalyticsTimeRange.DAY) {
           Spacer(modifier = Modifier.height(14.dp))
@@ -901,7 +883,7 @@ fun SettingsScreen(
               }
             }
 
-            // Card B: Routine Efficiency
+            // Card B: Routine Efficiency & Timeframe
             Surface(
               modifier = Modifier
                 .weight(1f)
@@ -911,7 +893,12 @@ fun SettingsScreen(
             ) {
               Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                  text = "SCHEDULE EFFICIENCY",
+                  text = when (selectedRange) {
+                    AnalyticsTimeRange.WEEK -> "7-DAY EFFICIENCY"
+                    AnalyticsTimeRange.MONTH -> "30-DAY EFFICIENCY"
+                    AnalyticsTimeRange.THREE_MONTHS -> "90-DAY EFFICIENCY"
+                    AnalyticsTimeRange.DAY -> "SCHEDULE EFFICIENCY"
+                  },
                   fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
                   color = TextTertiary
@@ -1086,5 +1073,132 @@ fun SettingsScreen(
     }
 
     Spacer(modifier = Modifier.height(20.dp))
+
+    // ==============================================================
+    // 5. ROUTINE TASKS OVERVIEW (4-Item Task List)
+    // ==============================================================
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .testTag("routine_tasks_overview_section")
+    ) {
+      Text(
+        text = "Routine Tasks Overview",
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.8.sp,
+        color = Color(0xFFA5B4FC),
+        modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
+      )
+
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(22.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(22.dp))
+          .testTag("routine_tasks_overview_card"),
+        color = Color(0xFF121620)
+      ) {
+        if (effectiveTasks.isEmpty()) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(24.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = "No active routine tasks scheduled for today",
+              fontSize = 13.sp,
+              color = TextTertiary
+            )
+          }
+        } else {
+          Column(modifier = Modifier.fillMaxWidth()) {
+            effectiveTasks.forEachIndexed { index, task ->
+              val cat = resolveTaskCategory(task)
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("overview_task_row_${task.id}")
+                  .padding(horizontal = 16.dp, vertical = 13.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                // Left & Center: 1. Start Time + 2. Task Name / Title + 3. Duration Badge
+                Row(
+                  modifier = Modifier.weight(1f),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  // 1. Start Time (Formatted 12h e.g. "09:00 AM", Cyan accent)
+                  Text(
+                    text = task.formattedStartTime,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF67E8F9),
+                    modifier = Modifier.width(74.dp)
+                  )
+
+                  Spacer(modifier = Modifier.width(8.dp))
+
+                  // 2. Task Name / Title + 3. Duration Badge
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                      text = task.title,
+                      fontSize = 14.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFFF8FAFC),
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                      text = task.formattedDuration,
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Medium,
+                      color = Color(0xFF94A3B8)
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                // 4. Category Badge (Compact One UI squircle pill with icon + name)
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = cat.color.copy(alpha = 0.15f),
+                  border = BorderStroke(1.dp, cat.color.copy(alpha = 0.35f))
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Text(text = cat.icon, fontSize = 11.sp)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                      text = cat.name,
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = cat.color,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis
+                    )
+                  }
+                }
+              }
+
+              if (index < effectiveTasks.lastIndex) {
+                HorizontalDivider(
+                  color = Color(0xFF1F2637),
+                  thickness = 1.dp,
+                  modifier = Modifier.padding(horizontal = 16.dp)
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
   }
 }

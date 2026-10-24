@@ -152,12 +152,14 @@ object SchedulerEngine {
       startTimeMinute = slot4End,
       durationMinutes = elasticDuration,
       voiceMessage = "Entering protected elastic buffer time.",
-      enableDnd = false
+      enableDnd = false,
+      selectedDays = RoutineDay.allDays()
     )).copy(
       type = TaskType.ANCHOR_ELASTIC,
       slotNumber = 5,
       startTimeMinute = slot4End,
-      durationMinutes = elasticDuration
+      durationMinutes = elasticDuration,
+      selectedDays = existingSlot5?.selectedDays ?: RoutineDay.allDays()
     )
     map[5] = slot5
 
@@ -253,7 +255,20 @@ object SchedulerEngine {
     interTaskBufferMinutes: Int = 5
   ): ScheduleResult {
     // 1. Anchors active on this day (excluding soft-deleted)
-    val dayAnchors = anchors.filter { !it.isDeleted && it.selectedDays.contains(activeDay) }
+    val dayAnchors = anchors
+      .filter { !it.isDeleted && it.selectedDays.contains(activeDay) }
+      .map { anchor ->
+        if (anchor.slotNumber == 3 && activeDay == RoutineDay.FRIDAY) {
+          anchor.copy(
+            title = anchor.fridayTitle?.ifBlank { null } ?: anchor.title,
+            startTimeMinute = anchor.fridayStartTimeMinute ?: anchor.startTimeMinute,
+            durationMinutes = anchor.fridayDurationMinutes ?: anchor.durationMinutes,
+            voiceMessage = anchor.fridayVoiceMessage?.ifBlank { null } ?: anchor.voiceMessage
+          )
+        } else {
+          anchor
+        }
+      }
 
     // List of placed tasks starting with anchors
     val scheduledTasks = ArrayList(dayAnchors)

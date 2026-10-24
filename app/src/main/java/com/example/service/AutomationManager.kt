@@ -7,12 +7,15 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import com.example.data.RoutineRepository
+import com.example.model.RoutineDay
 import com.example.model.RoutineTask
 import com.example.receiver.RoutineAlarmReceiver
 import java.util.Calendar
@@ -31,6 +34,14 @@ object AutomationManager {
   const val EXTRA_CUSTOM_RINGTONE_URI = "extra_custom_ringtone_uri"
   const val EXTRA_NOTIFICATION_TITLE = "extra_notification_title"
   const val EXTRA_NOTIFICATION_BODY = "extra_notification_body"
+  const val EXTRA_VOICE_VOLUME = "extra_voice_volume"
+
+  fun createTtsVolumeParams(volume: Float): Bundle {
+    val clamped = volume.coerceIn(0.0f, 1.0f)
+    return Bundle().apply {
+      putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, clamped)
+    }
+  }
 
   fun isDndPermissionGranted(context: Context): Boolean {
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -138,9 +149,14 @@ object AutomationManager {
     if (task.isDeleted) return
     val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
 
+    var effectiveStartMin = task.startTimeMinute
+    var effectiveDurationMin = task.durationMinutes
+    var effectiveTitle = task.title
+    var effectiveVoiceMessage = task.voiceMessage
+
     val startCal = Calendar.getInstance().apply {
-      set(Calendar.HOUR_OF_DAY, task.startTimeMinute / 60)
-      set(Calendar.MINUTE, task.startTimeMinute % 60)
+      set(Calendar.HOUR_OF_DAY, effectiveStartMin / 60)
+      set(Calendar.MINUTE, effectiveStartMin % 60)
       set(Calendar.SECOND, 0)
       set(Calendar.MILLISECOND, 0)
       if (timeInMillis <= System.currentTimeMillis()) {
@@ -148,18 +164,50 @@ object AutomationManager {
       }
     }
 
+    val targetRoutineDay = when (startCal.get(Calendar.DAY_OF_WEEK)) {
+      Calendar.SATURDAY -> RoutineDay.SATURDAY
+      Calendar.SUNDAY -> RoutineDay.SUNDAY
+      Calendar.MONDAY -> RoutineDay.MONDAY
+      Calendar.TUESDAY -> RoutineDay.TUESDAY
+      Calendar.WEDNESDAY -> RoutineDay.WEDNESDAY
+      Calendar.THURSDAY -> RoutineDay.THURSDAY
+      Calendar.FRIDAY -> RoutineDay.FRIDAY
+      else -> RoutineDay.SATURDAY
+    }
+
+    // Slot 5 deactivation check: if target day is not in selectedDays, do not schedule
+    if (task.slotNumber == 5 && !task.selectedDays.contains(targetRoutineDay)) {
+      return
+    }
+
+    // Slot 3 Friday dual-mode check: if target day is Friday, use Friday overrides
+    if (task.slotNumber == 3 && targetRoutineDay == RoutineDay.FRIDAY) {
+      effectiveTitle = task.fridayTitle?.ifBlank { null } ?: task.title
+      effectiveStartMin = task.fridayStartTimeMinute ?: task.startTimeMinute
+      effectiveDurationMin = task.fridayDurationMinutes ?: task.durationMinutes
+      effectiveVoiceMessage = task.fridayVoiceMessage?.ifBlank { null } ?: task.voiceMessage
+
+      startCal.apply {
+        set(Calendar.HOUR_OF_DAY, effectiveStartMin / 60)
+        set(Calendar.MINUTE, effectiveStartMin % 60)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+      }
+    }
+
     val startIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
       action = ACTION_START_TASK
       putExtra(EXTRA_TASK_ID, task.id)
-      putExtra(EXTRA_TASK_TITLE, task.title)
-      putExtra(EXTRA_VOICE_MESSAGE, task.voiceMessage)
+      putExtra(EXTRA_TASK_TITLE, effectiveTitle)
+      putExtra(EXTRA_VOICE_MESSAGE, effectiveVoiceMessage)
       putExtra(EXTRA_ENABLE_DND, task.enableDnd)
       putExtra(EXTRA_ENABLE_HAPTIC, task.enableHaptic)
       putExtra(EXTRA_IS_VOICE_ENABLED, task.isVoiceEnabled)
       putExtra(EXTRA_IS_SOUND_ALERT_ENABLED, task.isSoundAlertEnabled)
       putExtra(EXTRA_CUSTOM_RINGTONE_URI, task.customRingtoneUri)
-      putExtra(EXTRA_NOTIFICATION_TITLE, task.notificationDisplayTitle)
-      putExtra(EXTRA_NOTIFICATION_BODY, task.notificationDisplayBody)
+      putExtra(EXTRA_NOTIFICATION_TITLE, if (task.customNotificationTitle.isNotBlank()) task.customNotificationTitle else effectiveTitle)
+      putExtra(EXTRA_NOTIFICATION_BODY, if (task.customNotificationBody.isNotBlank()) task.customNotificationBody else effectiveVoiceMessage.ifBlank { "$effectiveTitle starting now." })
+      putExtra(EXTRA_VOICE_VOLUME, task.voiceVolume)
     }
 
     val pendingStart = PendingIntent.getBroadcast(
@@ -188,7 +236,7 @@ object AutomationManager {
     } catch (_: Exception) {}
 
     // Also schedule end alarm to automatically stop DND & automation when task completes
-    val endMinute = (task.startTimeMinute + task.durationMinutes) % 1440
+    val endMinute = (effectiveStartMin + effectiveDurationMin) % 1440
     val endCal = Calendar.getInstance().apply {
       set(Calendar.HOUR_OF_DAY, endMinute / 60)
       set(Calendar.MINUTE, endMinute % 60)
@@ -271,6 +319,7 @@ object AutomationManager {
       putExtra(EXTRA_CUSTOM_RINGTONE_URI, task.customRingtoneUri)
       putExtra(EXTRA_NOTIFICATION_TITLE, task.notificationDisplayTitle)
       putExtra(EXTRA_NOTIFICATION_BODY, task.notificationDisplayBody)
+      putExtra(EXTRA_VOICE_VOLUME, task.voiceVolume)
     }
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

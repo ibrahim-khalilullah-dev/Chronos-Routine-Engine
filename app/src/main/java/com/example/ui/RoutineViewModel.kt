@@ -226,14 +226,19 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     repository.setBufferMinutes(_bufferMinutes.value)
   }
 
-  fun updateSlot5Protected(title: String, voiceMessage: String) {
+  fun updateSlot5Protected(
+    title: String,
+    voiceMessage: String,
+    selectedDays: Set<RoutineDay> = RoutineDay.allDays()
+  ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
         val current = _anchors.value.map { task ->
           if (task.slotNumber == 5) {
             task.copy(
               title = title.ifEmpty { "Elastic Rubber Buffer" },
-              voiceMessage = voiceMessage
+              voiceMessage = voiceMessage,
+              selectedDays = selectedDays
             )
           } else {
             task
@@ -259,16 +264,27 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     customNotificationBody: String = "",
     customRingtoneUri: String? = null,
     customRingtoneTitle: String? = null,
-    isSoundAlertEnabled: Boolean = true
+    isSoundAlertEnabled: Boolean = true,
+    fridayTitle: String? = null,
+    fridayStartTimeMinute: Int? = null,
+    fridayDurationMinutes: Int? = null,
+    fridayVoiceMessage: String? = null,
+    voiceVolume: Float = 1.0f
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
+        var activeSleepMins = _sleepDurationMinutes.value
+        if (slotNumber == 1) {
+          activeSleepMins = durationMinutes.coerceIn(240, 720)
+          _sleepDurationMinutes.value = activeSleepMins
+          repository.setSleepDurationMinutes(activeSleepMins)
+        }
         val current = _anchors.value.map { task ->
           if (task.slotNumber == slotNumber) {
             task.copy(
               title = title,
               startTimeMinute = startMinute,
-              durationMinutes = durationMinutes,
+              durationMinutes = if (slotNumber == 1) activeSleepMins else durationMinutes,
               voiceMessage = voiceMessage,
               enableDnd = enableDnd,
               enableHaptic = enableHaptic,
@@ -278,13 +294,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
               customNotificationBody = customNotificationBody,
               customRingtoneUri = customRingtoneUri,
               customRingtoneTitle = customRingtoneTitle,
-              isSoundAlertEnabled = isSoundAlertEnabled
+              isSoundAlertEnabled = isSoundAlertEnabled,
+              fridayTitle = if (slotNumber == 3) fridayTitle else task.fridayTitle,
+              fridayStartTimeMinute = if (slotNumber == 3) fridayStartTimeMinute else task.fridayStartTimeMinute,
+              fridayDurationMinutes = if (slotNumber == 3) fridayDurationMinutes else task.fridayDurationMinutes,
+              fridayVoiceMessage = if (slotNumber == 3) fridayVoiceMessage else task.fridayVoiceMessage,
+              voiceVolume = voiceVolume
             )
           } else {
             task
           }
         }
-        val recalculated = SchedulerEngine.calculateAnchors(current, _sleepDurationMinutes.value)
+        val recalculated = SchedulerEngine.calculateAnchors(current, activeSleepMins)
         _anchors.value = recalculated
         repository.saveAnchors(recalculated)
       }

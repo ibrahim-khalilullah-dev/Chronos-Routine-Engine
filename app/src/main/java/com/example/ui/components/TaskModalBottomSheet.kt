@@ -6,7 +6,10 @@ import android.content.Intent
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -55,6 +58,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -76,6 +80,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -148,7 +153,17 @@ val ROUTINE_CATEGORIES = listOf(
 )
 
 /**
- * PHASE 5A: High-end AMOLED Dark "Routine Studio Form" & Preserved Anchor Editor.
+ * Sanitizes numeric string inputs preventing 0-prepending glitch (e.g. typing 5 stays 5, not 50 or 05).
+ */
+fun sanitizeNumberInput(input: String, maxDigits: Int = 2): Pair<String, Int> {
+  val digits = input.filter { it.isDigit() }.take(maxDigits)
+  val clean = if (digits.isEmpty()) "" else if (digits.all { it == '0' }) "0" else digits.trimStart('0')
+  val parsed = clean.toIntOrNull() ?: 0
+  return Pair(clean, parsed)
+}
+
+/**
+ * PHASE 5A & 6A: High-end AMOLED Dark "Routine Studio Form" & Preserved Anchor Editor.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -190,13 +205,21 @@ fun TaskModalBottomSheet(
     customNotificationBody: String,
     customRingtoneUri: String?,
     customRingtoneTitle: String?,
-    isSoundAlertEnabled: Boolean
+    isSoundAlertEnabled: Boolean,
+    fridayTitle: String?,
+    fridayStartTimeMinute: Int?,
+    fridayDurationMinutes: Int?,
+    fridayVoiceMessage: String?,
+    voiceVolume: Float
   ) -> Unit,
-  onSaveSlot5: (title: String, voiceMessage: String) -> Unit,
+  onSaveSlot5: (title: String, voiceMessage: String, selectedDays: Set<RoutineDay>) -> Unit,
   onMoveToTrash: (taskId: String) -> Unit = {}
 ) {
   val context = LocalContext.current
-  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val sheetState = rememberModalBottomSheetState(
+    skipPartiallyExpanded = true,
+    confirmValueChange = { false } // Completely disables drag/swipe-to-dismiss gestures
+  )
 
   val isEditing = initialTask != null
   val isAnchor = initialTask?.type == TaskType.ANCHOR_STANDARD ||
@@ -204,7 +227,25 @@ fun TaskModalBottomSheet(
     initialTask?.type == TaskType.ANCHOR_ELASTIC
   val slotNum = initialTask?.slotNumber
   val isSlot1 = slotNum == 1
+  val isSlot3 = slotNum == 3
   val isSlot5 = slotNum == 5
+
+  // Slot 3 Friday Dual Mode State
+  var activeSlot3Tab by remember { mutableIntStateOf(0) } // 0 = Regular Days, 1 = Friday Mode 🕌
+  var fridayTitle by remember { mutableStateOf(initialTask?.fridayTitle ?: "Friday Jumu'ah & Reflection") }
+  val initialFridayStart = initialTask?.fridayStartTimeMinute ?: (11 * 60 + 30) // 11:30 AM default
+  var fridayStartHour by remember { mutableIntStateOf(initialFridayStart / 60) }
+  var fridayStartMinute by remember { mutableIntStateOf(initialFridayStart % 60) }
+  val initialFridayDuration = initialTask?.fridayDurationMinutes ?: 150 // 2h 30m default
+  var fridayDurationHours by remember { mutableIntStateOf(initialFridayDuration / 60) }
+  var fridayDurationMins by remember { mutableIntStateOf(initialFridayDuration % 60) }
+  var fridayDurationHoursInput by remember { mutableStateOf((initialFridayDuration / 60).toString()) }
+  var fridayDurationMinsInput by remember { mutableStateOf((initialFridayDuration % 60).toString()) }
+  var fridayVoiceMessage by remember { mutableStateOf(initialTask?.fridayVoiceMessage ?: "Friday Jumu'ah session starting now.") }
+
+  // Tone Preview Player State
+  var isPlayingTonePreview by remember { mutableStateOf(false) }
+  var activeRingtone by remember { mutableStateOf<Ringtone?>(null) }
 
   // 13-Category Selector State
   var selectedCategory by remember {
@@ -222,6 +263,8 @@ fun TaskModalBottomSheet(
   val initialTotalPool = initialTask?.fluidTotalPoolMinutes ?: ((initialTask?.durationMinutes ?: 90) * 2).coerceAtLeast(180)
   var totalPoolHours by remember { mutableIntStateOf(initialTotalPool / 60) }
   var totalPoolMinutes by remember { mutableIntStateOf(initialTotalPool % 60) }
+  var totalPoolHoursInput by remember { mutableStateOf((initialTotalPool / 60).toString()) }
+  var totalPoolMinutesInput by remember { mutableStateOf((initialTotalPool % 60).toString()) }
 
   // Single Task / Master State
   var title by remember { mutableStateOf(initialTask?.title ?: "") }
@@ -229,10 +272,12 @@ fun TaskModalBottomSheet(
   var startMinute by remember { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) % 60) }
   var durationHours by remember { mutableIntStateOf((initialTask?.durationMinutes ?: 60) / 60) }
   var durationMins by remember { mutableIntStateOf((initialTask?.durationMinutes ?: 60) % 60) }
+  var durationHoursInput by remember { mutableStateOf(((initialTask?.durationMinutes ?: 60) / 60).toString()) }
+  var durationMinsInput by remember { mutableStateOf(((initialTask?.durationMinutes ?: 60) % 60).toString()) }
   var toleranceMinutes by remember { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
   var isVoiceEnabled by remember { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
   var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
-  var voiceVolume by remember { mutableFloatStateOf(1f) }
+  var voiceVolume by remember { mutableFloatStateOf(initialTask?.voiceVolume ?: 1f) }
 
   // Dual Session 1 (Cyan Theme #38BDF8)
   var part1Title by remember {
@@ -314,11 +359,200 @@ fun TaskModalBottomSheet(
         instance?.stop()
         instance?.shutdown()
       } catch (_: Exception) {}
+      try {
+        activeRingtone?.stop()
+      } catch (_: Exception) {}
     }
   }
 
+  val toggleTonePreview: () -> Unit = {
+    if (isPlayingTonePreview) {
+      try {
+        activeRingtone?.stop()
+      } catch (_: Exception) {}
+      isPlayingTonePreview = false
+      activeRingtone = null
+    } else {
+      try {
+        val uri = customRingtoneUri?.let { Uri.parse(it) } ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val r = RingtoneManager.getRingtone(context, uri)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          r?.isLooping = false
+          r?.volume = voiceVolume.coerceIn(0f, 1f)
+        }
+        r?.play()
+        activeRingtone = r
+        isPlayingTonePreview = true
+      } catch (_: Exception) {
+        isPlayingTonePreview = false
+      }
+    }
+  }
+
+  // Unsaved Changes Dismissal Guard
+  var showUnsavedChangesDialog by remember { mutableStateOf(false) }
+
+  val hasUnsavedChanges by remember(
+    title, durationHoursInput, durationMinsInput, voiceMessage, enableDnd, isSoundAlertEnabled,
+    isFluidTwinMode, part1Title, part2Title, selectedCategory,
+    fridayTitle, fridayDurationHoursInput, fridayDurationMinsInput, fridayVoiceMessage, voiceVolume, selectedDays
+  ) {
+    derivedStateOf {
+      if (initialTask == null) {
+        title.isNotBlank() || voiceMessage.isNotBlank() || (durationHoursInput != "1" && durationHoursInput.isNotBlank())
+      } else {
+        val origHours = (initialTask.durationMinutes / 60).toString()
+        val origMins = (initialTask.durationMinutes % 60).toString()
+        val origFriHours = ((initialTask.fridayDurationMinutes ?: 150) / 60).toString()
+        val origFriMins = ((initialTask.fridayDurationMinutes ?: 150) % 60).toString()
+        title != initialTask.title ||
+          durationHoursInput != origHours ||
+          durationMinsInput != origMins ||
+          voiceMessage != initialTask.voiceMessage ||
+          enableDnd != initialTask.enableDnd ||
+          isSoundAlertEnabled != initialTask.isSoundAlertEnabled ||
+          isFluidTwinMode != initialTask.isFluidTwin ||
+          (initialTask.category != null && selectedCategory.id != initialTask.category) ||
+          (isSlot3 && (fridayTitle != (initialTask.fridayTitle ?: "Friday Jumu'ah & Reflection") ||
+            fridayDurationHoursInput != origFriHours ||
+            fridayDurationMinsInput != origFriMins ||
+            fridayVoiceMessage != (initialTask.fridayVoiceMessage ?: "Friday Jumu'ah session starting now."))) ||
+          selectedDays != initialTask.selectedDays ||
+          voiceVolume != initialTask.voiceVolume
+      }
+    }
+  }
+
+  val handleDismissRequest: () -> Unit = {
+    if (hasUnsavedChanges) {
+      showUnsavedChangesDialog = true
+    } else {
+      onDismiss()
+    }
+  }
+
+  BackHandler {
+    handleDismissRequest()
+  }
+
+  val triggerSave: () -> Unit = {
+    if (isAnchor) {
+      val calculatedDuration = durationHours * 60 + durationMins
+      val calculatedStart = startHour * 60 + startMinute
+      val calculatedFriDuration = fridayDurationHours * 60 + fridayDurationMins
+      val calculatedFriStart = fridayStartHour * 60 + fridayStartMinute
+      if (isSlot5) {
+        onSaveSlot5(title.ifBlank { "Elastic Rubber Buffer" }, voiceMessage, selectedDays)
+      } else if (slotNum != null) {
+        if (isSlot1) {
+          val finalSleepDuration = calculatedDuration.coerceIn(240, 720) // 4h to 12h
+          val slot2WakeMinute = initialTask?.endTimeMinute ?: 300 // default 05:00 AM = 300m
+          val calculatedBedtime = ((slot2WakeMinute - finalSleepDuration) % 1440 + 1440) % 1440
+          onSaveAnchorDetails(
+            1,
+            title.ifBlank { "Reverse Sleep Recovery" },
+            calculatedBedtime,
+            finalSleepDuration,
+            voiceMessage,
+            enableDnd,
+            enableHaptic,
+            selectedDays,
+            isVoiceEnabled,
+            title.ifBlank { "Reverse Sleep Recovery" },
+            voiceMessage,
+            customRingtoneUri,
+            customRingtoneTitle,
+            isSoundAlertEnabled,
+            null,
+            null,
+            null,
+            null,
+            voiceVolume
+          )
+        } else {
+          onSaveAnchorDetails(
+            slotNum,
+            title.ifBlank { "Anchor Slot $slotNum" },
+            calculatedStart,
+            calculatedDuration,
+            voiceMessage,
+            enableDnd,
+            enableHaptic,
+            selectedDays,
+            isVoiceEnabled,
+            title,
+            voiceMessage,
+            customRingtoneUri,
+            customRingtoneTitle,
+            isSoundAlertEnabled,
+            if (isSlot3) fridayTitle.ifBlank { null } else null,
+            if (isSlot3) calculatedFriStart else null,
+            if (isSlot3) calculatedFriDuration else null,
+            if (isSlot3) fridayVoiceMessage.ifBlank { null } else null,
+            voiceVolume
+          )
+        }
+      }
+    } else if (isFluidTwinMode) {
+      val p1Dur = (part1DurationHours * 60 + part1DurationMins).coerceAtLeast(part1SafetyFloor)
+      val p2Dur = (part2DurationHours * 60 + part2DurationMins).coerceAtLeast(part2SafetyFloor)
+      val totalPool = (p1Dur + p2Dur).coerceAtLeast(part1SafetyFloor + part2SafetyFloor)
+      val p1Start = part1StartHour * 60 + part1StartMinute
+      val p2Start = part2StartHour * 60 + part2StartMinute
+      val masterTitle = selectedCategory.title
+
+      onSaveFluidTwin(
+        masterTitle,
+        totalPool,
+        part1Title.ifBlank { "${selectedCategory.title} (Part 1)" },
+        p1Start,
+        p1Dur,
+        part1VoiceMessage,
+        part2Title.ifBlank { "${selectedCategory.title} (Part 2)" },
+        p2Start,
+        p2Dur,
+        part2VoiceMessage,
+        enableDnd,
+        selectedDays,
+        isVoiceEnabled,
+        masterTitle,
+        "",
+        customRingtoneUri,
+        customRingtoneTitle,
+        isSoundAlertEnabled
+      )
+    } else {
+      val calculatedDuration = durationHours * 60 + durationMins
+      val calculatedStart = startHour * 60 + startMinute
+      val actualTitle = title.ifBlank { "${selectedCategory.icon} ${selectedCategory.defaultName}" }
+
+      val task = RoutineTask(
+        id = initialTask?.id ?: "dynamic_${UUID.randomUUID().toString().take(8)}",
+        title = actualTitle,
+        type = TaskType.DYNAMIC,
+        startTimeMinute = calculatedStart,
+        durationMinutes = calculatedDuration,
+        voiceMessage = voiceMessage,
+        enableDnd = enableDnd,
+        enableHaptic = enableHaptic,
+        allowSplitting = true,
+        selectedDays = selectedDays,
+        isVoiceEnabled = isVoiceEnabled,
+        customNotificationTitle = actualTitle,
+        customNotificationBody = voiceMessage,
+        customRingtoneUri = customRingtoneUri,
+        customRingtoneTitle = customRingtoneTitle,
+        isSoundAlertEnabled = isSoundAlertEnabled,
+        toleranceMinutes = toleranceMinutes,
+        category = selectedCategory.id
+      )
+      onSaveTask(task)
+    }
+    onDismiss()
+  }
+
   ModalBottomSheet(
-    onDismissRequest = onDismiss,
+    onDismissRequest = { handleDismissRequest() },
     sheetState = sheetState,
     containerColor = Color(0xFF080A0F), // True AMOLED Deep Dark
     contentColor = TextPrimary,
@@ -351,7 +585,7 @@ fun TaskModalBottomSheet(
         ) {
           Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(
-              onClick = onDismiss,
+              onClick = handleDismissRequest,
               modifier = Modifier.size(38.dp).testTag("dismiss_modal_button")
             ) {
               Icon(
@@ -432,11 +666,52 @@ fun TaskModalBottomSheet(
             onVoiceMessageChange = { voiceMessage = it },
             onTestVoice = {
               if (isTtsReady && voiceMessage.isNotBlank()) {
-                ttsInstance?.speak(voiceMessage, TextToSpeech.QUEUE_FLUSH, null, "anchor_tts")
+                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
+                ttsInstance?.speak(voiceMessage, TextToSpeech.QUEUE_FLUSH, params, "anchor_tts")
               }
             },
+            isSlot3 = isSlot3,
+            activeSlot3Tab = activeSlot3Tab,
+            onActiveSlot3TabChange = { activeSlot3Tab = it },
+            fridayTitle = fridayTitle,
+            onFridayTitleChange = { fridayTitle = it },
+            fridayStartHour = fridayStartHour,
+            fridayStartMinute = fridayStartMinute,
+            onOpenFridayClock = {
+              clockTarget = 3
+              showAnalogClockModal = true
+            },
+            fridayDurationHours = fridayDurationHours,
+            fridayDurationMins = fridayDurationMins,
+            onFridayDurationHoursChange = { fridayDurationHours = it },
+            onFridayDurationMinsChange = { fridayDurationMins = it },
+            fridayVoiceMessage = fridayVoiceMessage,
+            onFridayVoiceMessageChange = { fridayVoiceMessage = it },
+            onTestFridayVoice = {
+              if (isTtsReady && fridayVoiceMessage.isNotBlank()) {
+                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
+                ttsInstance?.speak(fridayVoiceMessage, TextToSpeech.QUEUE_FLUSH, params, "friday_tts")
+              }
+            },
+            voiceVolume = voiceVolume,
+            onVoiceVolumeChange = { voiceVolume = it },
             enableDnd = enableDnd,
-            onEnableDndChange = { enableDnd = it }
+            onEnableDndChange = { enableDnd = it },
+            isSoundAlertEnabled = isSoundAlertEnabled,
+            onIsSoundAlertEnabledChange = { isSoundAlertEnabled = it },
+            customRingtoneTitle = customRingtoneTitle,
+            onPickRingtone = {
+              val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+                putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Anchor Alert Sound")
+                customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
+              }
+              ringtonePickerLauncher.launch(intent)
+            },
+            isPlayingTonePreview = isPlayingTonePreview,
+            onToggleTonePreview = toggleTonePreview,
+            selectedDays = selectedDays,
+            onSelectedDaysChange = { selectedDays = it }
           )
         } else {
           // -----------------------------------------------------------
@@ -727,8 +1002,12 @@ fun TaskModalBottomSheet(
                   horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                   OutlinedTextField(
-                    value = durationHours.toString(),
-                    onValueChange = { durationHours = it.toIntOrNull()?.coerceIn(0, 12) ?: 0 },
+                    value = durationHoursInput,
+                    onValueChange = { raw ->
+                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                      durationHoursInput = clean
+                      durationHours = parsed.coerceIn(0, 12)
+                    },
                     label = { Text("Hours") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.weight(1f).testTag("duration_hours_input"),
@@ -745,8 +1024,12 @@ fun TaskModalBottomSheet(
                   )
 
                   OutlinedTextField(
-                    value = durationMins.toString(),
-                    onValueChange = { durationMins = it.toIntOrNull()?.coerceIn(0, 59) ?: 0 },
+                    value = durationMinsInput,
+                    onValueChange = { raw ->
+                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                      durationMinsInput = clean
+                      durationMins = parsed.coerceIn(0, 59)
+                    },
                     label = { Text("Minutes") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.weight(1f).testTag("duration_mins_input"),
@@ -873,7 +1156,8 @@ fun TaskModalBottomSheet(
                       IconButton(
                         onClick = {
                           val msg = voiceMessage.ifBlank { "${title.ifBlank { "Task" }} starting now" }
-                          ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "voice_test")
+                          val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
+                          ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "voice_test")
                         },
                         modifier = Modifier.testTag("test_voice_button")
                       ) {
@@ -995,9 +1279,11 @@ fun TaskModalBottomSheet(
                   horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                   OutlinedTextField(
-                    value = totalPoolHours.toString(),
-                    onValueChange = {
-                      val newH = it.toIntOrNull()?.coerceIn(1, 12) ?: 1
+                    value = totalPoolHoursInput,
+                    onValueChange = { raw ->
+                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                      totalPoolHoursInput = clean
+                      val newH = if (clean.isEmpty()) 1 else parsed.coerceIn(1, 12)
                       totalPoolHours = newH
                       // Auto-balance S2
                       val pool = newH * 60 + totalPoolMinutes
@@ -1022,9 +1308,11 @@ fun TaskModalBottomSheet(
                   )
 
                   OutlinedTextField(
-                    value = totalPoolMinutes.toString(),
-                    onValueChange = {
-                      val newM = it.toIntOrNull()?.coerceIn(0, 59) ?: 0
+                    value = totalPoolMinutesInput,
+                    onValueChange = { raw ->
+                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                      totalPoolMinutesInput = clean
+                      val newM = parsed.coerceIn(0, 59)
                       totalPoolMinutes = newM
                       val pool = totalPoolHours * 60 + newM
                       val s1 = part1DurationHours * 60 + part1DurationMins
@@ -1085,7 +1373,8 @@ fun TaskModalBottomSheet(
               onVoiceMessageChange = { part1VoiceMessage = it },
               onTestVoice = {
                 val msg = part1VoiceMessage.ifBlank { "${part1Title.ifBlank { "Session 1" }} starting now" }
-                ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "s1_tts")
+                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
+                ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s1_tts")
               }
             )
 
@@ -1123,7 +1412,8 @@ fun TaskModalBottomSheet(
               onVoiceMessageChange = { part2VoiceMessage = it },
               onTestVoice = {
                 val msg = part2VoiceMessage.ifBlank { "${part2Title.ifBlank { "Session 2" }} starting now" }
-                ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "s2_tts")
+                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
+                ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s2_tts")
               }
             )
           }
@@ -1409,87 +1699,7 @@ fun TaskModalBottomSheet(
         ) {
           // Luxury Gradient Save CTA Button
           Button(
-            onClick = {
-              if (isAnchor) {
-                val calculatedDuration = durationHours * 60 + durationMins
-                val calculatedStart = startHour * 60 + startMinute
-                if (isSlot5) {
-                  onSaveSlot5(title.ifBlank { "Elastic Rubber Buffer" }, voiceMessage)
-                } else if (slotNum != null) {
-                  onSaveAnchorDetails(
-                    slotNum,
-                    title.ifBlank { "Anchor Slot $slotNum" },
-                    calculatedStart,
-                    calculatedDuration,
-                    voiceMessage,
-                    enableDnd,
-                    enableHaptic,
-                    selectedDays,
-                    isVoiceEnabled,
-                    title,
-                    voiceMessage,
-                    customRingtoneUri,
-                    customRingtoneTitle,
-                    isSoundAlertEnabled
-                  )
-                }
-              } else if (isFluidTwinMode) {
-                val p1Dur = (part1DurationHours * 60 + part1DurationMins).coerceAtLeast(part1SafetyFloor)
-                val p2Dur = (part2DurationHours * 60 + part2DurationMins).coerceAtLeast(part2SafetyFloor)
-                val totalPool = (p1Dur + p2Dur).coerceAtLeast(part1SafetyFloor + part2SafetyFloor)
-                val p1Start = part1StartHour * 60 + part1StartMinute
-                val p2Start = part2StartHour * 60 + part2StartMinute
-                val masterTitle = selectedCategory.title
-
-                onSaveFluidTwin(
-                  masterTitle,
-                  totalPool,
-                  part1Title.ifBlank { "${selectedCategory.title} (Part 1)" },
-                  p1Start,
-                  p1Dur,
-                  part1VoiceMessage,
-                  part2Title.ifBlank { "${selectedCategory.title} (Part 2)" },
-                  p2Start,
-                  p2Dur,
-                  part2VoiceMessage,
-                  enableDnd,
-                  selectedDays,
-                  isVoiceEnabled,
-                  masterTitle,
-                  "",
-                  customRingtoneUri,
-                  customRingtoneTitle,
-                  isSoundAlertEnabled
-                )
-              } else {
-                val calculatedDuration = durationHours * 60 + durationMins
-                val calculatedStart = startHour * 60 + startMinute
-                val actualTitle = title.ifBlank { "${selectedCategory.icon} ${selectedCategory.defaultName}" }
-
-                val task = RoutineTask(
-                  id = initialTask?.id ?: "dynamic_${UUID.randomUUID().toString().take(8)}",
-                  title = actualTitle,
-                  type = TaskType.DYNAMIC,
-                  startTimeMinute = calculatedStart,
-                  durationMinutes = calculatedDuration,
-                  voiceMessage = voiceMessage,
-                  enableDnd = enableDnd,
-                  enableHaptic = enableHaptic,
-                  allowSplitting = true,
-                  selectedDays = selectedDays,
-                  isVoiceEnabled = isVoiceEnabled,
-                  customNotificationTitle = actualTitle,
-                  customNotificationBody = voiceMessage,
-                  customRingtoneUri = customRingtoneUri,
-                  customRingtoneTitle = customRingtoneTitle,
-                  isSoundAlertEnabled = isSoundAlertEnabled,
-                  toleranceMinutes = toleranceMinutes,
-                  category = selectedCategory.id
-                )
-                onSaveTask(task)
-              }
-              onDismiss()
-            },
+            onClick = { triggerSave() },
             modifier = Modifier
               .weight(1f)
               .height(52.dp)
@@ -1637,11 +1847,13 @@ fun TaskModalBottomSheet(
     val initialH = when (clockTarget) {
       1 -> part1StartHour
       2 -> part2StartHour
+      3 -> fridayStartHour
       else -> startHour
     }
     val initialM = when (clockTarget) {
       1 -> part1StartMinute
       2 -> part2StartMinute
+      3 -> fridayStartMinute
       else -> startMinute
     }
 
@@ -1657,6 +1869,10 @@ fun TaskModalBottomSheet(
           2 -> {
             part2StartHour = h
             part2StartMinute = m
+          }
+          3 -> {
+            fridayStartHour = h
+            fridayStartMinute = m
           }
           else -> {
             startHour = h
@@ -1703,6 +1919,81 @@ fun TaskModalBottomSheet(
       shape = RoundedCornerShape(24.dp)
     )
   }
+
+  // Unsaved Changes Dismissal Guard Dialog
+  if (showUnsavedChangesDialog) {
+    AlertDialog(
+      onDismissRequest = { showUnsavedChangesDialog = false },
+      containerColor = Color(0xFF121620),
+      titleContentColor = Color(0xFFF8FAFC),
+      textContentColor = Color(0xFF94A3B8),
+      shape = RoundedCornerShape(22.dp),
+      tonalElevation = 6.dp,
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Default.Close,
+            contentDescription = null,
+            tint = Color(0xFFEF4444),
+            modifier = Modifier.size(20.dp)
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "Discard Unsaved Changes?",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFF8FAFC)
+          )
+        }
+      },
+      text = {
+        Text(
+          text = "You have unsaved edits in this routine task. Do you want to save them before exiting?",
+          fontSize = 13.sp,
+          color = Color(0xFF94A3B8),
+          lineHeight = 18.sp
+        )
+      },
+      confirmButton = {
+        // Save & Apply (Emerald Gradient)
+        Button(
+          onClick = {
+            showUnsavedChangesDialog = false
+            triggerSave()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.testTag("dialog_save_and_apply_button")
+        ) {
+          Text("Save & Apply", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        }
+      },
+      dismissButton = {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          // Discard (Destructive Crimson)
+          TextButton(
+            onClick = {
+              showUnsavedChangesDialog = false
+              onDismiss()
+            },
+            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFEF4444)),
+            modifier = Modifier.testTag("dialog_discard_button")
+          ) {
+            Text("Discard", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+          }
+
+          // Keep Editing (Neutral)
+          TextButton(
+            onClick = { showUnsavedChangesDialog = false },
+            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF94A3B8)),
+            modifier = Modifier.testTag("dialog_keep_editing_button")
+          ) {
+            Text("Keep Editing", fontSize = 12.sp)
+          }
+        }
+      }
+    )
+  }
 }
 
 /**
@@ -1725,41 +2016,143 @@ private fun AnchorEditSection(
   voiceMessage: String,
   onVoiceMessageChange: (String) -> Unit,
   onTestVoice: () -> Unit,
+  isSlot3: Boolean,
+  activeSlot3Tab: Int,
+  onActiveSlot3TabChange: (Int) -> Unit,
+  fridayTitle: String,
+  onFridayTitleChange: (String) -> Unit,
+  fridayStartHour: Int,
+  fridayStartMinute: Int,
+  onOpenFridayClock: () -> Unit,
+  fridayDurationHours: Int,
+  fridayDurationMins: Int,
+  onFridayDurationHoursChange: (Int) -> Unit,
+  onFridayDurationMinsChange: (Int) -> Unit,
+  fridayVoiceMessage: String,
+  onFridayVoiceMessageChange: (String) -> Unit,
+  onTestFridayVoice: () -> Unit,
+  voiceVolume: Float,
+  onVoiceVolumeChange: (Float) -> Unit,
   enableDnd: Boolean,
-  onEnableDndChange: (Boolean) -> Unit
+  onEnableDndChange: (Boolean) -> Unit,
+  isSoundAlertEnabled: Boolean,
+  onIsSoundAlertEnabledChange: (Boolean) -> Unit,
+  customRingtoneTitle: String,
+  onPickRingtone: () -> Unit,
+  isPlayingTonePreview: Boolean,
+  onToggleTonePreview: () -> Unit,
+  selectedDays: Set<RoutineDay>,
+  onSelectedDaysChange: (Set<RoutineDay>) -> Unit
 ) {
-  Column {
-    Text(
-      text = "Anchor Title",
-      fontSize = 12.sp,
-      fontWeight = FontWeight.SemiBold,
-      color = Color(0xFF94A3B8)
-    )
-    Spacer(modifier = Modifier.height(6.dp))
-    OutlinedTextField(
-      value = title,
-      onValueChange = onTitleChange,
-      modifier = Modifier.fillMaxWidth().testTag("task_title_input"),
-      colors = OutlinedTextFieldDefaults.colors(
-        focusedContainerColor = Color(0xFF121620),
-        unfocusedContainerColor = Color(0xFF121620),
-        focusedBorderColor = AnchorGradientStart,
-        unfocusedBorderColor = Color(0xFF1F2637),
-        focusedTextColor = Color(0xFFF8FAFC),
-        unfocusedTextColor = Color(0xFFF8FAFC)
-      ),
-      shape = RoundedCornerShape(14.dp),
-      singleLine = true
-    )
+  var hoursInput by remember(durationHours) { mutableStateOf(durationHours.toString()) }
+  var minsInput by remember(durationMins) { mutableStateOf(durationMins.toString()) }
+  var friHoursInput by remember(fridayDurationHours) { mutableStateOf(fridayDurationHours.toString()) }
+  var friMinsInput by remember(fridayDurationMins) { mutableStateOf(fridayDurationMins.toString()) }
 
-    // Slot 1 & Slot 5: Start time is COMPLETELY HIDDEN
-    if (!isSlot1 && !isSlot5) {
+  Column {
+    // ==============================================================
+    // 1. ANCHOR SLOT 3 FRIDAY-SPECIFIC DUAL MODE (TAB SWITCHER)
+    // ==============================================================
+    if (isSlot3) {
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(16.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF0F141E)
+      ) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(4.dp),
+          horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          // Regular Days Tab (Sat-Thu)
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(12.dp))
+              .background(if (activeSlot3Tab == 0) Color(0xFF3B82F6).copy(alpha = 0.25f) else Color.Transparent)
+              .border(
+                BorderStroke(1.dp, if (activeSlot3Tab == 0) Color(0xFF3B82F6) else Color.Transparent),
+                RoundedCornerShape(12.dp)
+              )
+              .clickable { onActiveSlot3TabChange(0) }
+              .padding(vertical = 10.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = "Regular Days (Sat-Thu)",
+              fontSize = 11.sp,
+              fontWeight = if (activeSlot3Tab == 0) FontWeight.Bold else FontWeight.Medium,
+              color = if (activeSlot3Tab == 0) Color(0xFF93C5FD) else Color(0xFF94A3B8)
+            )
+          }
+
+          // Friday Mode Tab (Jumu'ah / Reflection)
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(12.dp))
+              .background(if (activeSlot3Tab == 1) Color(0xFF10B981).copy(alpha = 0.25f) else Color.Transparent)
+              .border(
+                BorderStroke(1.dp, if (activeSlot3Tab == 1) Color(0xFF10B981) else Color.Transparent),
+                RoundedCornerShape(12.dp)
+              )
+              .clickable { onActiveSlot3TabChange(1) }
+              .padding(vertical = 10.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = "Friday Mode 🕌",
+              fontSize = 11.sp,
+              fontWeight = if (activeSlot3Tab == 1) FontWeight.Bold else FontWeight.Medium,
+              color = if (activeSlot3Tab == 1) Color(0xFF6EE7B7) else Color(0xFF94A3B8)
+            )
+          }
+        }
+      }
+
       Spacer(modifier = Modifier.height(14.dp))
+    }
+
+    // ==============================================================
+    // BRANCH: FRIDAY TAB vs REGULAR TAB
+    // ==============================================================
+    if (isSlot3 && activeSlot3Tab == 1) {
+      // -----------------------------------------------------------
+      // FRIDAY MODE FORM
+      // -----------------------------------------------------------
       Text(
-        text = "Anchor Start Time",
+        text = "Friday Anchor Title",
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
-        color = Color(0xFF94A3B8)
+        color = Color(0xFF6EE7B7)
+      )
+      Spacer(modifier = Modifier.height(6.dp))
+      OutlinedTextField(
+        value = fridayTitle,
+        onValueChange = onFridayTitleChange,
+        placeholder = { Text("e.g., Friday Jumu'ah & Reflection", color = TextTertiary) },
+        modifier = Modifier.fillMaxWidth().testTag("friday_task_title_input"),
+        colors = OutlinedTextFieldDefaults.colors(
+          focusedContainerColor = Color(0xFF121620),
+          unfocusedContainerColor = Color(0xFF121620),
+          focusedBorderColor = Color(0xFF10B981),
+          unfocusedBorderColor = Color(0xFF1F2637),
+          focusedTextColor = Color(0xFFF8FAFC),
+          unfocusedTextColor = Color(0xFFF8FAFC)
+        ),
+        shape = RoundedCornerShape(14.dp),
+        singleLine = true
+      )
+
+      Spacer(modifier = Modifier.height(14.dp))
+      Text(
+        text = "Friday Start Time",
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = Color(0xFF6EE7B7)
       )
       Spacer(modifier = Modifier.height(6.dp))
 
@@ -1767,9 +2160,9 @@ private fun AnchorEditSection(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp))
-          .clickable { onOpenClock() }
-          .testTag("open_time_picker_button"),
+          .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)), RoundedCornerShape(16.dp))
+          .clickable { onOpenFridayClock() }
+          .testTag("open_friday_time_picker_button"),
         color = Color(0xFF121620)
       ) {
         Row(
@@ -1780,17 +2173,17 @@ private fun AnchorEditSection(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(20.dp))
+            Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(10.dp))
             Column {
               Text(
-                text = RoutineTask.formatTime(startHour * 60 + startMinute),
+                text = RoutineTask.formatTime(fridayStartHour * 60 + fridayStartMinute),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
               )
               Text(
-                text = "24h: ${String.format(Locale.US, "%02d:%02d", startHour, startMinute)} • Tap to open watch dial",
+                text = "Friday Dial: ${String.format(Locale.US, "%02d:%02d", fridayStartHour, fridayStartMinute)} • Tap to change",
                 fontSize = 11.sp,
                 color = TextSecondary
               )
@@ -1799,69 +2192,20 @@ private fun AnchorEditSection(
           Box(
             modifier = Modifier
               .clip(RoundedCornerShape(8.dp))
-              .background(AnchorGradientStart.copy(alpha = 0.2f))
+              .background(Color(0xFF10B981).copy(alpha = 0.2f))
               .padding(horizontal = 8.dp, vertical = 5.dp)
           ) {
-            Text(text = "Change 🕒", color = Color(0xFFA5B4FC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(text = "Change 🕒", color = Color(0xFF6EE7B7), fontSize = 11.sp, fontWeight = FontWeight.Bold)
           }
         }
       }
-    }
 
-    if (isSlot1) {
-      Spacer(modifier = Modifier.height(14.dp))
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(14.dp))
-          .background(Color(0xFF1E1B4B).copy(alpha = 0.4f))
-          .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.3f)), RoundedCornerShape(14.dp)),
-        color = Color.Transparent
-      ) {
-        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-          Icon(imageVector = Icons.Default.Bedtime, contentDescription = null, tint = Color(0xFFA5B4FC), modifier = Modifier.size(20.dp))
-          Spacer(modifier = Modifier.width(10.dp))
-          Text(
-            text = "Bedtime is mathematically computed backwards from Slot 2 wake time minus your Sleep Duration.",
-            fontSize = 11.sp,
-            color = Color(0xFFE0E7FF),
-            lineHeight = 16.sp
-          )
-        }
-      }
-    }
-
-    if (isSlot5) {
-      Spacer(modifier = Modifier.height(14.dp))
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(14.dp))
-          .background(WarningAmber.copy(alpha = 0.1f))
-          .border(BorderStroke(1.dp, WarningAmber.copy(alpha = 0.3f)), RoundedCornerShape(14.dp)),
-        color = Color.Transparent
-      ) {
-        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-          Icon(imageVector = Icons.Default.Shield, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(20.dp))
-          Spacer(modifier = Modifier.width(10.dp))
-          Text(
-            text = "Slot 5 Start Time and Duration are locked. The engine automatically spans 100% of the duration between Slot 4 completion and Slot 6 commencement.",
-            fontSize = 11.sp,
-            color = Color(0xFFFEF3C7),
-            lineHeight = 16.sp
-          )
-        }
-      }
-    }
-
-    // Duration Section: Completely hidden for Slot 5; Only numeric [H] & [M] inputs for all other anchors
-    if (!isSlot5) {
       Spacer(modifier = Modifier.height(14.dp))
       Text(
-        text = if (isSlot1) "Sleep Duration" else "Duration",
+        text = "Friday Duration",
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
-        color = Color(0xFF94A3B8)
+        color = Color(0xFF6EE7B7)
       )
       Spacer(modifier = Modifier.height(6.dp))
 
@@ -1873,12 +2217,12 @@ private fun AnchorEditSection(
         color = Color(0xFF121620)
       ) {
         Column(modifier = Modifier.padding(14.dp)) {
-          val totalMins = durationHours * 60 + durationMins
+          val totalMins = fridayDurationHours * 60 + fridayDurationMins
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.AccessTime, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(18.dp))
+            Icon(imageVector = Icons.Default.AccessTime, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-              text = "${durationHours}h ${durationMins}m ($totalMins mins)",
+              text = "${fridayDurationHours}h ${fridayDurationMins}m ($totalMins mins)",
               fontSize = 16.sp,
               fontWeight = FontWeight.Bold,
               color = TextPrimary
@@ -1892,15 +2236,19 @@ private fun AnchorEditSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
           ) {
             OutlinedTextField(
-              value = durationHours.toString(),
-              onValueChange = { onDurationHoursChange(it.toIntOrNull()?.coerceIn(0, 12) ?: 0) },
+              value = friHoursInput,
+              onValueChange = { raw ->
+                val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                friHoursInput = clean
+                onFridayDurationHoursChange(parsed.coerceIn(0, 12))
+              },
               label = { Text("Hours") },
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              modifier = Modifier.weight(1f).testTag("duration_hours_input"),
+              modifier = Modifier.weight(1f).testTag("friday_duration_hours_input"),
               colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = Color(0xFF0F141E),
                 unfocusedContainerColor = Color(0xFF0F141E),
-                focusedBorderColor = AnchorGradientStart,
+                focusedBorderColor = Color(0xFF10B981),
                 unfocusedBorderColor = Color(0xFF1F2637),
                 focusedTextColor = Color(0xFFF8FAFC),
                 unfocusedTextColor = Color(0xFFF8FAFC)
@@ -1910,15 +2258,19 @@ private fun AnchorEditSection(
             )
 
             OutlinedTextField(
-              value = durationMins.toString(),
-              onValueChange = { onDurationMinsChange(it.toIntOrNull()?.coerceIn(0, 59) ?: 0) },
+              value = friMinsInput,
+              onValueChange = { raw ->
+                val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                friMinsInput = clean
+                onFridayDurationMinsChange(parsed.coerceIn(0, 59))
+              },
               label = { Text("Minutes") },
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              modifier = Modifier.weight(1f).testTag("duration_mins_input"),
+              modifier = Modifier.weight(1f).testTag("friday_duration_mins_input"),
               colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = Color(0xFF0F141E),
                 unfocusedContainerColor = Color(0xFF0F141E),
-                focusedBorderColor = AnchorGradientStart,
+                focusedBorderColor = Color(0xFF10B981),
                 unfocusedBorderColor = Color(0xFF1F2637),
                 focusedTextColor = Color(0xFFF8FAFC),
                 unfocusedTextColor = Color(0xFFF8FAFC)
@@ -1929,11 +2281,321 @@ private fun AnchorEditSection(
           }
         }
       }
+
+      Spacer(modifier = Modifier.height(14.dp))
+
+      // Friday Voice Announcement Card
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(16.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF121620)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(text = "Friday Voice Announcement", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          OutlinedTextField(
+            value = fridayVoiceMessage,
+            onValueChange = onFridayVoiceMessageChange,
+            placeholder = { Text("Enter Friday speech announcement...", color = TextTertiary) },
+            trailingIcon = {
+              IconButton(onClick = onTestFridayVoice, modifier = Modifier.testTag("test_friday_voice_button")) {
+                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Friday Voice", tint = Color(0xFF6EE7B7))
+              }
+            },
+            modifier = Modifier.fillMaxWidth().testTag("friday_voice_message_input"),
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedContainerColor = Color(0xFF0F141E),
+              unfocusedContainerColor = Color(0xFF0F141E),
+              focusedBorderColor = Color(0xFF10B981),
+              unfocusedBorderColor = Color(0xFF1F2637),
+              focusedTextColor = Color(0xFFF8FAFC),
+              unfocusedTextColor = Color(0xFFF8FAFC)
+            ),
+            shape = RoundedCornerShape(12.dp)
+          )
+        }
+      }
+    } else {
+      // -----------------------------------------------------------
+      // REGULAR DAYS / STANDARD ANCHOR FORM
+      // -----------------------------------------------------------
+      Text(
+        text = "Anchor Title",
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = Color(0xFF94A3B8)
+      )
+      Spacer(modifier = Modifier.height(6.dp))
+      OutlinedTextField(
+        value = title,
+        onValueChange = onTitleChange,
+        modifier = Modifier.fillMaxWidth().testTag("task_title_input"),
+        colors = OutlinedTextFieldDefaults.colors(
+          focusedContainerColor = Color(0xFF121620),
+          unfocusedContainerColor = Color(0xFF121620),
+          focusedBorderColor = AnchorGradientStart,
+          unfocusedBorderColor = Color(0xFF1F2637),
+          focusedTextColor = Color(0xFFF8FAFC),
+          unfocusedTextColor = Color(0xFFF8FAFC)
+        ),
+        shape = RoundedCornerShape(14.dp),
+        singleLine = true
+      )
+
+      // Slot 1 & Slot 5: Start time is COMPLETELY HIDDEN
+      if (!isSlot1 && !isSlot5) {
+        Spacer(modifier = Modifier.height(14.dp))
+        Text(
+          text = if (isSlot3) "Regular Start Time (Sat-Thu)" else "Anchor Start Time",
+          fontSize = 12.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp))
+          .clickable { onOpenClock() }
+          .testTag("open_time_picker_button"),
+          color = Color(0xFF121620)
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(20.dp))
+              Spacer(modifier = Modifier.width(10.dp))
+              Column {
+                Text(
+                  text = RoutineTask.formatTime(startHour * 60 + startMinute),
+                  fontSize = 18.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary
+                )
+                Text(
+                  text = "24h: ${String.format(Locale.US, "%02d:%02d", startHour, startMinute)} • Tap to open watch dial",
+                  fontSize = 11.sp,
+                  color = TextSecondary
+                )
+              }
+            }
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(AnchorGradientStart.copy(alpha = 0.2f))
+                .padding(horizontal = 8.dp, vertical = 5.dp)
+            ) {
+              Text(text = "Change 🕒", color = Color(0xFFA5B4FC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      }
+
+      if (isSlot1) {
+        Spacer(modifier = Modifier.height(14.dp))
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF1E1B4B).copy(alpha = 0.4f))
+            .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.3f)), RoundedCornerShape(14.dp)),
+          color = Color.Transparent
+        ) {
+          Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(imageVector = Icons.Default.Bedtime, contentDescription = null, tint = Color(0xFFA5B4FC), modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+              text = "Bedtime is mathematically computed backwards from Slot 2 wake time minus your Sleep Duration.",
+              fontSize = 11.sp,
+              color = Color(0xFFE0E7FF),
+              lineHeight = 16.sp
+            )
+          }
+        }
+      }
+
+      if (isSlot5) {
+        Spacer(modifier = Modifier.height(14.dp))
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(WarningAmber.copy(alpha = 0.1f))
+            .border(BorderStroke(1.dp, WarningAmber.copy(alpha = 0.3f)), RoundedCornerShape(14.dp)),
+          color = Color.Transparent
+        ) {
+          Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(imageVector = Icons.Default.Shield, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+              text = "Slot 5 Start Time and Duration are locked. The engine automatically spans 100% of the duration between Slot 4 completion and Slot 6 commencement on active days.",
+              fontSize = 11.sp,
+              color = Color(0xFFFEF3C7),
+              lineHeight = 16.sp
+            )
+          }
+        }
+      }
+
+      // Duration Section: Completely hidden for Slot 5; Only numeric [H] & [M] inputs for all other anchors
+      if (!isSlot5) {
+        Spacer(modifier = Modifier.height(14.dp))
+        Text(
+          text = if (isSlot1) "Sleep Duration" else if (isSlot3) "Regular Duration (Sat-Thu)" else "Duration",
+          fontSize = 12.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
+          color = Color(0xFF121620)
+        ) {
+          Column(modifier = Modifier.padding(14.dp)) {
+            val totalMins = durationHours * 60 + durationMins
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(imageVector = Icons.Default.AccessTime, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(18.dp))
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = "${durationHours}h ${durationMins}m ($totalMins mins)",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+              )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+              OutlinedTextField(
+                value = hoursInput,
+                onValueChange = { raw ->
+                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                  hoursInput = clean
+                  onDurationHoursChange(parsed.coerceIn(0, 12))
+                },
+                label = { Text("Hours") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f).testTag("duration_hours_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = Color(0xFF0F141E),
+                  unfocusedContainerColor = Color(0xFF0F141E),
+                  focusedBorderColor = AnchorGradientStart,
+                  unfocusedBorderColor = Color(0xFF1F2637),
+                  focusedTextColor = Color(0xFFF8FAFC),
+                  unfocusedTextColor = Color(0xFFF8FAFC)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true
+              )
+
+              OutlinedTextField(
+                value = minsInput,
+                onValueChange = { raw ->
+                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                  minsInput = clean
+                  onDurationMinsChange(parsed.coerceIn(0, 59))
+                },
+                label = { Text("Minutes") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f).testTag("duration_mins_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = Color(0xFF0F141E),
+                  unfocusedContainerColor = Color(0xFF0F141E),
+                  focusedBorderColor = AnchorGradientStart,
+                  unfocusedBorderColor = Color(0xFF1F2637),
+                  focusedTextColor = Color(0xFFF8FAFC),
+                  unfocusedTextColor = Color(0xFFF8FAFC)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                singleLine = true
+              )
+            }
+          }
+        }
+      }
+
+      Spacer(modifier = Modifier.height(14.dp))
+
+      // Voice Message Announcement Card with inline TTS preview
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(16.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF121620)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(18.dp))
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(text = "Voice Announcement", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          OutlinedTextField(
+            value = voiceMessage,
+            onValueChange = onVoiceMessageChange,
+            placeholder = { Text("Enter custom speech announcement...", color = TextTertiary) },
+            trailingIcon = {
+              IconButton(onClick = onTestVoice, modifier = Modifier.testTag("test_voice_button")) {
+                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Voice", tint = Color(0xFFA5B4FC))
+              }
+            },
+            modifier = Modifier.fillMaxWidth().testTag("voice_message_input"),
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedContainerColor = Color(0xFF0F141E),
+              unfocusedContainerColor = Color(0xFF0F141E),
+              focusedBorderColor = AnchorGradientStart,
+              unfocusedBorderColor = Color(0xFF1F2637),
+              focusedTextColor = Color(0xFFF8FAFC),
+              unfocusedTextColor = Color(0xFFF8FAFC)
+            ),
+            shape = RoundedCornerShape(12.dp)
+          )
+        }
+      }
     }
 
+    // ==============================================================
+    // 2. HARDWARE TTS VOLUME SLIDER BINDING (ALL ANCHORS)
+    // ==============================================================
     Spacer(modifier = Modifier.height(14.dp))
-
-    // Voice Message Announcement Card with inline TTS preview
     Surface(
       modifier = Modifier
         .fillMaxWidth()
@@ -1948,40 +2610,66 @@ private fun AnchorEditSection(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(18.dp))
+            Icon(
+              imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+              contentDescription = null,
+              tint = Color(0xFF38BDF8),
+              modifier = Modifier.size(18.dp)
+            )
             Spacer(modifier = Modifier.width(8.dp))
-            Text(text = "Voice Announcement", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text(
+              text = "Speech Volume Output",
+              color = Color(0xFFF8FAFC),
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp
+            )
           }
+          Text(
+            text = "${(voiceVolume * 100).roundToInt()}%",
+            color = Color(0xFF38BDF8),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace
+          )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
-        OutlinedTextField(
-          value = voiceMessage,
-          onValueChange = onVoiceMessageChange,
-          placeholder = { Text("Enter custom speech announcement...", color = TextTertiary) },
-          trailingIcon = {
-            IconButton(onClick = onTestVoice, modifier = Modifier.testTag("test_voice_button")) {
-              Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Test Voice", tint = Color(0xFFA5B4FC))
-            }
-          },
-          modifier = Modifier.fillMaxWidth().testTag("voice_message_input"),
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = Color(0xFF0F141E),
-            unfocusedContainerColor = Color(0xFF0F141E),
-            focusedBorderColor = AnchorGradientStart,
-            unfocusedBorderColor = Color(0xFF1F2637),
-            focusedTextColor = Color(0xFFF8FAFC),
-            unfocusedTextColor = Color(0xFFF8FAFC)
-          ),
-          shape = RoundedCornerShape(12.dp)
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.VolumeMute,
+            contentDescription = null,
+            tint = Color(0xFF64748B),
+            modifier = Modifier.size(16.dp)
+          )
+          Slider(
+            value = voiceVolume,
+            onValueChange = onVoiceVolumeChange,
+            valueRange = 0f..1f,
+            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+            colors = SliderDefaults.colors(
+              thumbColor = Color(0xFF38BDF8),
+              activeTrackColor = Color(0xFF38BDF8),
+              inactiveTrackColor = Color(0xFF1E293B)
+            )
+          )
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+            contentDescription = null,
+            tint = Color(0xFF38BDF8),
+            modifier = Modifier.size(16.dp)
+          )
+        }
       }
     }
 
+    // ==============================================================
+    // 3. SYSTEM NOTIFICATION TONE PICKER & DND (ALL ANCHORS)
+    // ==============================================================
     Spacer(modifier = Modifier.height(14.dp))
-
-    // DND Toggle
     Surface(
       modifier = Modifier
         .fillMaxWidth()
@@ -1989,21 +2677,233 @@ private fun AnchorEditSection(
         .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
       color = Color(0xFF121620)
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(imageVector = Icons.Default.DoNotDisturbOn, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(20.dp))
-          Spacer(modifier = Modifier.width(10.dp))
-          Text(text = "Do Not Disturb (DND)", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+      Column(modifier = Modifier.padding(14.dp)) {
+        // DND Row
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(imageVector = Icons.Default.DoNotDisturbOn, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+              Text(text = "Do Not Disturb (DND)", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+              Text(text = if (enableDnd) "Engaged during this anchor" else "System alerts allowed", color = TextSecondary, fontSize = 10.sp)
+            }
+          }
+          Switch(
+            checked = enableDnd,
+            onCheckedChange = onEnableDndChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF8B5CF6))
+          )
         }
-        Switch(
-          checked = enableDnd,
-          onCheckedChange = onEnableDndChange,
-          colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF8B5CF6))
-        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+        HorizontalDivider(color = Color(0xFF1F2637))
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Sound Alert Row
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(imageVector = Icons.Default.MusicNote, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+              Text(text = "Notification Sound Alert", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+              Text(text = if (isSoundAlertEnabled) "Plays selected ringtone at initiation" else "Muted / Silent alert", color = TextSecondary, fontSize = 10.sp)
+            }
+          }
+          Switch(
+            checked = isSoundAlertEnabled,
+            onCheckedChange = onIsSoundAlertEnabledChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF38BDF8))
+          )
+        }
+
+        // Revealed Tone Selector & Play/Stop Preview Button
+        if (isSoundAlertEnabled) {
+          Spacer(modifier = Modifier.height(10.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(10.dp))
+                .clickable { onPickRingtone() }
+                .testTag("anchor_pick_ringtone_button"),
+              color = Color(0xFF0F141E)
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Icon(
+                  imageVector = Icons.Default.MusicNote,
+                  contentDescription = null,
+                  tint = Color(0xFF60A5FA),
+                  modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                  text = customRingtoneTitle.take(24),
+                  color = Color(0xFFF8FAFC),
+                  fontSize = 12.sp,
+                  maxLines = 1,
+                  fontWeight = FontWeight.Medium
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Play / Stop Tone Audio Preview
+            IconButton(
+              onClick = onToggleTonePreview,
+              modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (isPlayingTonePreview) Color(0xFFEF4444).copy(alpha = 0.2f) else Color(0xFF38BDF8).copy(alpha = 0.2f))
+                .border(BorderStroke(1.dp, if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF38BDF8)), RoundedCornerShape(10.dp))
+                .testTag("anchor_preview_tone_button")
+            ) {
+              Icon(
+                imageVector = if (isPlayingTonePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
+                contentDescription = if (isPlayingTonePreview) "Stop Tone Preview" else "Play Tone Preview",
+                tint = if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF38BDF8),
+                modifier = Modifier.size(20.dp)
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // ==============================================================
+    // 4. SLOT 5 (ELASTIC BUFFER) WEEKLY RECURRENCE SELECTOR
+    // ==============================================================
+    if (isSlot5) {
+      Spacer(modifier = Modifier.height(14.dp))
+      val isAllDaysSelected = selectedDays.size == 7
+
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(16.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF121620)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text(
+                text = "Recurrence Schedule",
+                color = Color(0xFFF8FAFC),
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+              )
+              Text(
+                text = if (isAllDaysSelected) "Buffer active all 7 days" else "Active on ${selectedDays.size} days",
+                color = Color(0xFF94A3B8),
+                fontSize = 10.sp
+              )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Surface(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .clickable {
+                    onSelectedDaysChange(RoutineDay.allDays())
+                  },
+                color = if (isAllDaysSelected) Color(0xFF3B82F6) else Color(0xFF0F141E)
+              ) {
+                Text(
+                  text = "Everyday",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (isAllDaysSelected) Color.White else Color(0xFF94A3B8),
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
+
+              Surface(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .clickable {
+                    if (isAllDaysSelected) {
+                      onSelectedDaysChange(setOf(RoutineDay.SATURDAY, RoutineDay.SUNDAY, RoutineDay.MONDAY, RoutineDay.TUESDAY, RoutineDay.WEDNESDAY, RoutineDay.THURSDAY))
+                    }
+                  },
+                color = if (!isAllDaysSelected) Color(0xFF3B82F6) else Color(0xFF0F141E)
+              ) {
+                Text(
+                  text = "Specific Days",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (!isAllDaysSelected) Color.White else Color(0xFF94A3B8),
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
+            }
+          }
+
+          if (!isAllDaysSelected) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              listOf(
+                RoutineDay.SATURDAY to "S",
+                RoutineDay.SUNDAY to "S",
+                RoutineDay.MONDAY to "M",
+                RoutineDay.TUESDAY to "T",
+                RoutineDay.WEDNESDAY to "W",
+                RoutineDay.THURSDAY to "T",
+                RoutineDay.FRIDAY to "F"
+              ).forEach { (day, label) ->
+                val isDaySelected = selectedDays.contains(day)
+                Box(
+                  modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (isDaySelected) Color(0xFF3B82F6) else Color(0xFF0F141E))
+                    .border(
+                      BorderStroke(1.dp, if (isDaySelected) Color(0xFF60A5FA) else Color(0xFF1F2637)),
+                      CircleShape
+                    )
+                    .clickable {
+                      val newSet = if (isDaySelected) {
+                        if (selectedDays.size > 1) selectedDays - day else selectedDays
+                      } else {
+                        selectedDays + day
+                      }
+                      onSelectedDaysChange(newSet)
+                    },
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(
+                    text = label,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDaySelected) Color.White else Color(0xFF94A3B8)
+                  )
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -2030,6 +2930,10 @@ private fun DualSessionCard(
   onVoiceMessageChange: (String) -> Unit,
   onTestVoice: () -> Unit
 ) {
+  var hoursInput by remember(durationHours) { mutableStateOf(durationHours.toString()) }
+  var minsInput by remember(durationMins) { mutableStateOf(durationMins.toString()) }
+  var safetyFloorInput by remember(safetyFloor) { mutableStateOf(safetyFloor.toString()) }
+
   Surface(
     modifier = Modifier
       .fillMaxWidth()
@@ -2127,10 +3031,11 @@ private fun DualSessionCard(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
       ) {
         OutlinedTextField(
-          value = durationHours.toString(),
-          onValueChange = {
-            val h = it.toIntOrNull()?.coerceIn(0, 12) ?: 0
-            onDurationChange(h, durationMins)
+          value = hoursInput,
+          onValueChange = { raw ->
+            val (clean, parsed) = sanitizeNumberInput(raw, 2)
+            hoursInput = clean
+            onDurationChange(parsed.coerceIn(0, 12), durationMins)
           },
           label = { Text("Hours") },
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -2148,10 +3053,11 @@ private fun DualSessionCard(
         )
 
         OutlinedTextField(
-          value = durationMins.toString(),
-          onValueChange = {
-            val m = it.toIntOrNull()?.coerceIn(0, 59) ?: 0
-            onDurationChange(durationHours, m)
+          value = minsInput,
+          onValueChange = { raw ->
+            val (clean, parsed) = sanitizeNumberInput(raw, 2)
+            minsInput = clean
+            onDurationChange(durationHours, parsed.coerceIn(0, 59))
           },
           label = { Text("Minutes") },
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -2169,9 +3075,11 @@ private fun DualSessionCard(
         )
 
         OutlinedTextField(
-          value = safetyFloor.toString(),
-          onValueChange = {
-            val floor = it.toIntOrNull()?.coerceIn(15, 120) ?: 45
+          value = safetyFloorInput,
+          onValueChange = { raw ->
+            val (clean, parsed) = sanitizeNumberInput(raw, 3)
+            safetyFloorInput = clean
+            val floor = if (clean.isEmpty()) 45 else parsed.coerceIn(15, 120)
             onSafetyFloorChange(floor)
           },
           label = { Text("🛡️ Safety") },

@@ -60,6 +60,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   private var activeTaskId: String? = null
   private var currentDndApplied = false
   private var isVoiceEnabled = true
+  private var voiceVolume = 1.0f
 
   override fun onCreate() {
     super.onCreate()
@@ -155,6 +156,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     val enableDnd = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_DND, false)
     val enableHaptic = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_HAPTIC, true)
     isVoiceEnabled = intent.getBooleanExtra(AutomationManager.EXTRA_IS_VOICE_ENABLED, true)
+    voiceVolume = intent.getFloatExtra(AutomationManager.EXTRA_VOICE_VOLUME, 1.0f)
 
     val isSoundAlertEnabled = intent.getBooleanExtra(AutomationManager.EXTRA_IS_SOUND_ALERT_ENABLED, true)
     val ringtoneUriString = intent.getStringExtra(AutomationManager.EXTRA_CUSTOM_RINGTONE_URI)
@@ -278,7 +280,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     if (!isVoiceEnabled) return
     try {
       requestTransientAudioFocus()
-      tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "chronos_voice_${System.currentTimeMillis()}")
+      val params = AutomationManager.createTtsVolumeParams(voiceVolume)
+      tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "chronos_voice_${System.currentTimeMillis()}")
     } catch (_: Exception) {
       abandonTransientAudioFocus()
       releaseWakeLock()

@@ -546,7 +546,10 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               isSoundAlertEnabled = isSoundAlert
             )
           },
-          onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle, isSoundAlert ->
+          onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle, isSoundAlert, friTitle, friStart, friDur, friVoice, volume ->
+            if (slot == 1) {
+              viewModel.updateSleepDuration(duration / 60f)
+            }
             viewModel.updateAnchorDetails(
               slotNumber = slot,
               title = title,
@@ -561,11 +564,16 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               customNotificationBody = notifBody,
               customRingtoneUri = ringUri,
               customRingtoneTitle = ringTitle,
-              isSoundAlertEnabled = isSoundAlert
+              isSoundAlertEnabled = isSoundAlert,
+              fridayTitle = friTitle,
+              fridayStartTimeMinute = friStart,
+              fridayDurationMinutes = friDur,
+              fridayVoiceMessage = friVoice,
+              voiceVolume = volume
             )
           },
-          onSaveSlot5 = { title, voice ->
-            viewModel.updateSlot5Protected(title, voice)
+          onSaveSlot5 = { title, voice, days ->
+            viewModel.updateSlot5Protected(title, voice, days)
           },
           onMoveToTrash = { taskId ->
             viewModel.moveToTrash(taskId)

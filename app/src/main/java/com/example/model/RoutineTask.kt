@@ -64,7 +64,12 @@ data class RoutineTask(
   val isSoundAlertEnabled: Boolean = true,
   val toleranceMinutes: Int = 0, // Schedule Flexibility (0 to 15m, default 0)
   val interTaskBufferMinutes: Int = 5, // Inter-task Rest Buffer (0 to 30m, default 5)
-  val category: String? = null
+  val category: String? = null,
+  val fridayTitle: String? = null,
+  val fridayStartTimeMinute: Int? = null,
+  val fridayDurationMinutes: Int? = null,
+  val fridayVoiceMessage: String? = null,
+  val voiceVolume: Float = 1.0f
 ) {
   val endTimeMinute: Int
     get() = (startTimeMinute + durationMinutes) % 1440
