@@ -34,15 +34,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.RoutineTask
@@ -69,7 +75,20 @@ fun ChronosArchitectureGuideSheet(
   onDismiss: () -> Unit,
   modifier: Modifier = Modifier
 ) {
-  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val sheetState = rememberModalBottomSheetState(
+    skipPartiallyExpanded = true,
+    confirmValueChange = { false } // Completely disables drag/swipe-to-dismiss gestures
+  )
+
+  // Consume all nested scroll dispatch so vertical scrolling inside the guide never collapses or dismisses the sheet
+  val consumeNestedScrollConnection = remember {
+    object : NestedScrollConnection {
+      override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = Offset.Zero
+      override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset = available
+      override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
+      override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
+    }
+  }
 
   ModalBottomSheet(
     onDismissRequest = onDismiss,
@@ -90,6 +109,7 @@ fun ChronosArchitectureGuideSheet(
     Column(
       modifier = modifier
         .fillMaxWidth()
+        .nestedScroll(consumeNestedScrollConnection)
         .verticalScroll(rememberScrollState())
         .padding(horizontal = 20.dp, vertical = 6.dp)
         .padding(bottom = 44.dp)

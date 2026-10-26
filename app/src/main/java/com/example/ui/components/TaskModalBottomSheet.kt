@@ -95,9 +95,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -389,36 +393,38 @@ fun TaskModalBottomSheet(
     }
   }
 
+  // Reliable Initial Snapshot Tracking
+  val initialTitle = remember(initialTask) { initialTask?.title ?: "" }
+  val initialDuration = remember(initialTask) { initialTask?.durationMinutes ?: 60 }
+  val initialStartMin = remember(initialTask) { initialTask?.startTimeMinute ?: 540 }
+  val initialVoice = remember(initialTask) { initialTask?.voiceMessage ?: "" }
+  val initialDnd = remember(initialTask) { initialTask?.enableDnd ?: false }
+  val initialSound = remember(initialTask) { initialTask?.isSoundAlertEnabled ?: true }
+
   // Unsaved Changes Dismissal Guard
   var showUnsavedChangesDialog by remember { mutableStateOf(false) }
 
-  val hasUnsavedChanges by remember(
-    title, durationHoursInput, durationMinsInput, voiceMessage, enableDnd, isSoundAlertEnabled,
-    isFluidTwinMode, part1Title, part2Title, selectedCategory,
-    fridayTitle, fridayDurationHoursInput, fridayDurationMinsInput, fridayVoiceMessage, voiceVolume, selectedDays
-  ) {
+  val hasUnsavedChanges by remember {
     derivedStateOf {
       if (initialTask == null) {
         title.isNotBlank() || voiceMessage.isNotBlank() || (durationHoursInput != "1" && durationHoursInput.isNotBlank())
       } else {
-        val origHours = (initialTask.durationMinutes / 60).toString()
-        val origMins = (initialTask.durationMinutes % 60).toString()
-        val origFriHours = ((initialTask.fridayDurationMinutes ?: 150) / 60).toString()
-        val origFriMins = ((initialTask.fridayDurationMinutes ?: 150) % 60).toString()
-        title != initialTask.title ||
-          durationHoursInput != origHours ||
-          durationMinsInput != origMins ||
-          voiceMessage != initialTask.voiceMessage ||
-          enableDnd != initialTask.enableDnd ||
-          isSoundAlertEnabled != initialTask.isSoundAlertEnabled ||
+        title != initialTitle ||
+          (durationHours * 60 + durationMins) != initialDuration ||
+          (startHour * 60 + startMinute) != initialStartMin ||
+          voiceMessage != initialVoice ||
+          enableDnd != initialDnd ||
+          isSoundAlertEnabled != initialSound ||
           isFluidTwinMode != initialTask.isFluidTwin ||
           (initialTask.category != null && selectedCategory.id != initialTask.category) ||
-          (isSlot3 && (fridayTitle != (initialTask.fridayTitle ?: "Friday Jumu'ah & Reflection") ||
-            fridayDurationHoursInput != origFriHours ||
-            fridayDurationMinsInput != origFriMins ||
-            fridayVoiceMessage != (initialTask.fridayVoiceMessage ?: "Friday Jumu'ah session starting now."))) ||
           selectedDays != initialTask.selectedDays ||
-          voiceVolume != initialTask.voiceVolume
+          voiceVolume != initialTask.voiceVolume ||
+          (isSlot3 && (
+            fridayTitle != (initialTask.fridayTitle ?: "Friday Jumu'ah & Reflection") ||
+            (fridayDurationHours * 60 + fridayDurationMins) != (initialTask.fridayDurationMinutes ?: 150) ||
+            (fridayStartHour * 60 + fridayStartMinute) != (initialTask.fridayStartTimeMinute ?: (11 * 60 + 30)) ||
+            fridayVoiceMessage != (initialTask.fridayVoiceMessage ?: "Friday Jumu'ah session starting now.")
+          ))
       }
     }
   }
@@ -551,6 +557,16 @@ fun TaskModalBottomSheet(
     onDismiss()
   }
 
+  // Consume all nested scroll dispatch so vertical scrolling inside the form never collapses or dismisses the sheet
+  val consumeNestedScrollConnection = remember {
+    object : NestedScrollConnection {
+      override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = Offset.Zero
+      override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset = available
+      override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
+      override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
+    }
+  }
+
   ModalBottomSheet(
     onDismissRequest = { handleDismissRequest() },
     sheetState = sheetState,
@@ -571,6 +587,7 @@ fun TaskModalBottomSheet(
       Column(
         modifier = Modifier
           .fillMaxWidth()
+          .nestedScroll(consumeNestedScrollConnection)
           .verticalScroll(rememberScrollState())
           .padding(horizontal = 20.dp, vertical = 6.dp)
           .padding(bottom = 96.dp) // Room for sticky bottom bar
@@ -1948,7 +1965,7 @@ fun TaskModalBottomSheet(
       },
       text = {
         Text(
-          text = "You have unsaved edits in this routine task. Do you want to save them before exiting?",
+          text = "You have unsaved edits in this routine task. What would you like to do?",
           fontSize = 13.sp,
           color = Color(0xFF94A3B8),
           lineHeight = 18.sp

@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.speech.tts.TextToSpeech
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
@@ -50,6 +52,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,11 +61,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.RoutineDay
@@ -125,6 +133,16 @@ fun AnchorEditBottomSheet(
   val isSlot1 = slotIdx == 1
   val isSlot5 = slotIdx == 5
 
+  // Reliable Initial Snapshot Tracking
+  val initialTitle = remember(anchor) { anchor.title }
+  val initialDuration = remember(anchor) { anchor.durationMinutes }
+  val initialStartMin = remember(anchor) { anchor.startTimeMinute }
+  val initialVoice = remember(anchor) { anchor.voiceMessage }
+  val initialDnd = remember(anchor) { anchor.enableDnd }
+  val initialSound = remember(anchor) { anchor.isSoundAlertEnabled }
+  val initialHaptic = remember(anchor) { anchor.enableHaptic }
+  val initialDays = remember(anchor) { anchor.selectedDays }
+
   var title by remember { mutableStateOf(anchor.title) }
   var startHour by remember { mutableIntStateOf(anchor.startTimeMinute / 60) }
   var startMinute by remember { mutableIntStateOf(anchor.startTimeMinute % 60) }
@@ -147,6 +165,111 @@ fun AnchorEditBottomSheet(
   var selectedDays by remember { mutableStateOf(anchor.selectedDays) }
 
   var showTimePickerDialog by remember { mutableStateOf(false) }
+  var showUnsavedChangesDialog by remember { mutableStateOf(false) }
+
+  val hasUnsavedChanges by remember {
+    derivedStateOf {
+      title != initialTitle ||
+      (durationHours * 60 + durationMins) != initialDuration ||
+      (startHour * 60 + startMinute) != initialStartMin ||
+      voiceMessage != initialVoice ||
+      isDndEnabled != initialDnd ||
+      isSoundAlertEnabled != initialSound ||
+      enableHaptic != initialHaptic ||
+      selectedDays != initialDays
+    }
+  }
+
+  val handleDismissRequest: () -> Unit = {
+    if (hasUnsavedChanges) {
+      showUnsavedChangesDialog = true
+    } else {
+      onDismiss()
+    }
+  }
+
+  BackHandler {
+    handleDismissRequest()
+  }
+
+  // Unified save execution
+  val executeSave: () -> Unit = {
+    val finalTitle = title.ifBlank {
+      when {
+        isSlot1 -> "Reverse Sleep Tracker"
+        isSlot5 -> "Elastic Rubber Buffer"
+        else -> "Anchor Slot $slotIdx"
+      }
+    }
+    val calculatedStart = startHour * 60 + startMinute
+    val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(15)
+
+    if (isSlot5) {
+      if (onSaveSlot5 != null) {
+        onSaveSlot5(finalTitle, voiceMessage)
+      } else {
+        onSaveAnchor(
+          slotIdx,
+          finalTitle,
+          anchor.startTimeMinute,
+          anchor.durationMinutes,
+          voiceMessage,
+          isDndEnabled,
+          enableHaptic,
+          selectedDays,
+          isVoiceEnabled,
+          anchor.customNotificationTitle,
+          anchor.customNotificationBody,
+          anchor.customRingtoneUri,
+          anchor.customRingtoneTitle,
+          isSoundAlertEnabled
+        )
+      }
+    } else {
+      onSaveAnchor(
+        slotIdx,
+        finalTitle,
+        if (isSlot1) anchor.startTimeMinute else calculatedStart,
+        calculatedDuration,
+        voiceMessage,
+        isDndEnabled,
+        enableHaptic,
+        selectedDays,
+        isVoiceEnabled,
+        anchor.customNotificationTitle,
+        anchor.customNotificationBody,
+        anchor.customRingtoneUri,
+        anchor.customRingtoneTitle,
+        isSoundAlertEnabled
+      )
+    }
+
+    onSave?.invoke(
+      anchor.copy(
+        title = finalTitle,
+        startTimeMinute = if (isSlot1 || isSlot5) anchor.startTimeMinute else calculatedStart,
+        durationMinutes = if (isSlot5) anchor.durationMinutes else calculatedDuration,
+        voiceMessage = voiceMessage,
+        enableDnd = isDndEnabled,
+        enableHaptic = enableHaptic,
+        isVoiceEnabled = isVoiceEnabled,
+        isSoundAlertEnabled = isSoundAlertEnabled,
+        selectedDays = selectedDays
+      )
+    )
+
+    onDismiss()
+  }
+
+  // Consume nested scrolling to prevent any sheet collapse or swipe-to-dismiss
+  val consumeNestedScrollConnection = remember {
+    object : NestedScrollConnection {
+      override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = Offset.Zero
+      override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset = available
+      override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
+      override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
+    }
+  }
 
   // Context & In-Place TTS Engine Setup
   val context = LocalContext.current
@@ -166,16 +289,19 @@ fun AnchorEditBottomSheet(
     ttsInstance = instance
     onDispose {
       try {
-        instance.stop()
-        instance.shutdown()
+        instance?.stop()
+        instance?.shutdown()
       } catch (_: Exception) {}
     }
   }
 
-  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val sheetState = rememberModalBottomSheetState(
+    skipPartiallyExpanded = true,
+    confirmValueChange = { false } // Completely disables drag/swipe-to-dismiss gestures
+  )
 
   ModalBottomSheet(
-    onDismissRequest = onDismiss,
+    onDismissRequest = { handleDismissRequest() },
     sheetState = sheetState,
     containerColor = OneUiBackground,
     scrimColor = Color.Black.copy(alpha = 0.7f),
@@ -194,6 +320,7 @@ fun AnchorEditBottomSheet(
     Column(
       modifier = Modifier
         .fillMaxWidth()
+        .nestedScroll(consumeNestedScrollConnection)
         .verticalScroll(rememberScrollState())
         .padding(horizontal = 20.dp, vertical = 8.dp)
     ) {
@@ -246,6 +373,17 @@ fun AnchorEditBottomSheet(
               color = TextSecondary
             )
           }
+        }
+
+        IconButton(
+          onClick = handleDismissRequest,
+          modifier = Modifier.size(36.dp).testTag("dismiss_anchor_modal_button")
+        ) {
+          Icon(
+            imageVector = Icons.Default.Close,
+            contentDescription = "Close",
+            tint = TextSecondary
+          )
         }
       }
 
@@ -670,67 +808,7 @@ fun AnchorEditBottomSheet(
       // SAVE & APPLY BUTTON
       // ========================================================================
       Button(
-        onClick = {
-          val finalTitle = title.ifBlank { "Anchor Slot $slotIdx" }
-          val calculatedStart = startHour * 60 + startMinute
-          val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(15)
-
-          if (isSlot5) {
-            if (onSaveSlot5 != null) {
-              onSaveSlot5(finalTitle, voiceMessage)
-            } else {
-              onSaveAnchor(
-                slotIdx,
-                finalTitle,
-                anchor.startTimeMinute,
-                anchor.durationMinutes,
-                voiceMessage,
-                isDndEnabled,
-                enableHaptic,
-                selectedDays,
-                isVoiceEnabled,
-                anchor.customNotificationTitle,
-                anchor.customNotificationBody,
-                anchor.customRingtoneUri,
-                anchor.customRingtoneTitle,
-                isSoundAlertEnabled
-              )
-            }
-          } else {
-            onSaveAnchor(
-              slotIdx,
-              finalTitle,
-              if (isSlot1) anchor.startTimeMinute else calculatedStart,
-              calculatedDuration,
-              voiceMessage,
-              isDndEnabled,
-              enableHaptic,
-              selectedDays,
-              isVoiceEnabled,
-              anchor.customNotificationTitle,
-              anchor.customNotificationBody,
-              anchor.customRingtoneUri,
-              anchor.customRingtoneTitle,
-              isSoundAlertEnabled
-            )
-          }
-
-          onSave?.invoke(
-            anchor.copy(
-              title = finalTitle,
-              startTimeMinute = if (isSlot1 || isSlot5) anchor.startTimeMinute else calculatedStart,
-              durationMinutes = if (isSlot5) anchor.durationMinutes else calculatedDuration,
-              voiceMessage = voiceMessage,
-              enableDnd = isDndEnabled,
-              enableHaptic = enableHaptic,
-              isVoiceEnabled = isVoiceEnabled,
-              isSoundAlertEnabled = isSoundAlertEnabled,
-              selectedDays = selectedDays
-            )
-          )
-
-          onDismiss()
-        },
+        onClick = { executeSave() },
         modifier = Modifier
           .fillMaxWidth()
           .height(52.dp)
@@ -801,6 +879,80 @@ fun AnchorEditBottomSheet(
       },
       containerColor = OneUiBackground,
       shape = RoundedCornerShape(20.dp)
+    )
+  }
+
+  // In-Place Unsaved Changes Dismissal Guard Dialog
+  if (showUnsavedChangesDialog) {
+    AlertDialog(
+      onDismissRequest = { showUnsavedChangesDialog = false },
+      containerColor = Color(0xFF121620),
+      titleContentColor = Color(0xFFF8FAFC),
+      textContentColor = Color(0xFF94A3B8),
+      shape = RoundedCornerShape(22.dp),
+      tonalElevation = 6.dp,
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Default.Close,
+            contentDescription = null,
+            tint = Color(0xFFEF4444),
+            modifier = Modifier.size(20.dp)
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "Discard Unsaved Changes?",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFF8FAFC)
+          )
+        }
+      },
+      text = {
+        Text(
+          text = "You have unsaved edits in this anchor slot. What would you like to do?",
+          fontSize = 13.sp,
+          color = Color(0xFF94A3B8),
+          lineHeight = 18.sp
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            showUnsavedChangesDialog = false
+            executeSave()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier.testTag("dialog_anchor_save_and_apply_button")
+        ) {
+          Text("Save & Apply", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        }
+      },
+      dismissButton = {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          // Discard (Destructive Crimson)
+          TextButton(
+            onClick = {
+              showUnsavedChangesDialog = false
+              onDismiss()
+            },
+            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFEF4444)),
+            modifier = Modifier.testTag("dialog_anchor_discard_button")
+          ) {
+            Text("Discard", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+          }
+
+          // Keep Editing (Neutral)
+          TextButton(
+            onClick = { showUnsavedChangesDialog = false },
+            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF94A3B8)),
+            modifier = Modifier.testTag("dialog_anchor_keep_editing_button")
+          ) {
+            Text("Keep Editing", fontSize = 12.sp)
+          }
+        }
+      }
     )
   }
 }

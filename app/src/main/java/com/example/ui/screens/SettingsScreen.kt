@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timelapse
+import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -164,9 +167,16 @@ data class CategoryAggregate(
   val avgRating: Int?
 )
 
+data class OverviewCategoryItem(
+  val id: String,
+  val icon: String,
+  val name: String,
+  val count: Int
+)
+
 /**
- * PHASE 5B / 6C: 24-Hour Circular Donut & Dual-Mode Analytics Chart Engine in SettingsScreen.
- * Preserves Inter-Task Rest Buffer and Trash Bin recovery.
+ * PHASE 5B / 6C / PART 2: 24-Hour Circular Donut & Dual-Mode Analytics Chart Engine in SettingsScreen.
+ * Pure real-rating driven historical metrics & categorized overview list with task length counts.
  */
 @Composable
 fun SettingsScreen(
@@ -204,12 +214,28 @@ fun SettingsScreen(
     effectiveTasks.sumOf { it.durationMinutes }.coerceAtMost(1440)
   }
 
-  // Aggregated Categories (supporting up to 3 months / 90 days cache history)
-  val categoryAggregates = remember(effectiveTasks, selectedRange) {
-    val multiplier = selectedRange.multiplier
-    val totalTimePool = 1440 * multiplier
+  // Check if real user completion ratings exist for historical modes (Week, Month, 3 Months)
+  val hasHistoricalData = remember(taskRatingCache) {
+    taskRatingCache.isNotEmpty()
+  }
 
-    val grouped = effectiveTasks.groupBy { resolveTaskCategory(it) }
+  // Aggregated Categories (pure user-rating driven for historical modes; scheduled routine for Day mode)
+  val categoryAggregates = remember(effectiveTasks, selectedRange, hasHistoricalData) {
+    val multiplier = selectedRange.multiplier
+    val isHistorical = selectedRange != AnalyticsTimeRange.DAY
+    val relevantTasks = if (isHistorical) {
+      effectiveTasks.filter { taskRatingCache.containsKey(it.id) }
+    } else {
+      effectiveTasks
+    }
+
+    val totalTimePool = if (isHistorical) {
+      relevantTasks.sumOf { it.durationMinutes } * multiplier
+    } else {
+      1440 * multiplier
+    }
+
+    val grouped = relevantTasks.groupBy { resolveTaskCategory(it) }
     grouped.map { (category, tasks) ->
       val totalMins = tasks.sumOf { it.durationMinutes } * multiplier
       val pct = if (totalTimePool > 0) (totalMins.toFloat() / totalTimePool.toFloat()) * 100f else 0f
@@ -229,6 +255,31 @@ fun SettingsScreen(
   val overallAvgRating = remember(effectiveTasks) {
     val ratings = effectiveTasks.mapNotNull { taskRatingCache[it.id] }
     if (ratings.isNotEmpty()) ratings.average().toInt() else null
+  }
+
+  // Overview Category Filter State
+  var selectedOverviewCategoryId by remember { mutableStateOf<String?>("all") }
+
+  val overviewCategoryChips = remember(effectiveTasks) {
+    effectiveTasks
+      .groupBy { resolveTaskCategory(it) }
+      .map { (cat, tasks) ->
+        OverviewCategoryItem(
+          id = cat.id,
+          icon = cat.icon,
+          name = cat.name,
+          count = tasks.size
+        )
+      }
+      .sortedByDescending { it.count }
+  }
+
+  val filteredOverviewTasks = remember(effectiveTasks, selectedOverviewCategoryId) {
+    if (selectedOverviewCategoryId == null || selectedOverviewCategoryId == "all") {
+      effectiveTasks
+    } else {
+      effectiveTasks.filter { resolveTaskCategory(it).id == selectedOverviewCategoryId }
+    }
   }
 
   // Currently inspected task
@@ -415,13 +466,69 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // ==========================================================
-        // VIEW 1: 24-HOUR CIRCULAR DONUT CHART CANVAS
-        // ==========================================================
-        if (viewMode == AnalyticsViewMode.DONUT_CHART) {
-          Box(
+        if (selectedRange != AnalyticsTimeRange.DAY && !hasHistoricalData) {
+          // Sleek Samsung One UI Empty State for Historical Analytics (Fresh Install)
+          Surface(
             modifier = Modifier
               .fillMaxWidth()
+              .clip(RoundedCornerShape(20.dp))
+              .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(20.dp))
+              .testTag("analytics_empty_history_card"),
+            color = Color(0xFF161B26)
+          ) {
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 36.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.Center
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(54.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF3B82F6).copy(alpha = 0.15f))
+                  .border(BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.35f)), CircleShape),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Timeline,
+                  contentDescription = "Analytics Timeline",
+                  tint = Color(0xFF60A5FA),
+                  modifier = Modifier.size(28.dp)
+                )
+              }
+
+              Spacer(modifier = Modifier.height(14.dp))
+
+              Text(
+                text = "No Completion History Yet",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFF8FAFC),
+                textAlign = TextAlign.Center
+              )
+
+              Spacer(modifier = Modifier.height(6.dp))
+
+              Text(
+                text = "Historical focus trends update as you complete routine tasks and log focus ratings.",
+                fontSize = 12.sp,
+                color = Color(0xFF94A3B8),
+                textAlign = TextAlign.Center,
+                lineHeight = 17.sp,
+                modifier = Modifier.padding(horizontal = 16.dp)
+              )
+            }
+          }
+        } else {
+          // ==========================================================
+          // VIEW 1: 24-HOUR CIRCULAR DONUT CHART CANVAS
+          // ==========================================================
+          if (viewMode == AnalyticsViewMode.DONUT_CHART) {
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
               .height(285.dp),
             contentAlignment = Alignment.Center
           ) {
@@ -839,11 +946,12 @@ fun SettingsScreen(
             }
           }
         }
+      }
 
         // ==========================================================
         // HISTORICAL METRIC SUMMARY (Week, Month, 3 Months mode)
         // ==========================================================
-        if (selectedRange != AnalyticsTimeRange.DAY) {
+        if (selectedRange != AnalyticsTimeRange.DAY && hasHistoricalData) {
           Spacer(modifier = Modifier.height(14.dp))
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1091,6 +1199,73 @@ fun SettingsScreen(
         modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
       )
 
+      // Horizontal Scrollable Category Filter Chips with Task Length Counts
+      if (effectiveTasks.isNotEmpty()) {
+        LazyRow(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .testTag("overview_category_filter_row"),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          // 1. [ All (TotalCount) ] Chip
+          item {
+            val isAllSelected = selectedOverviewCategoryId == null || selectedOverviewCategoryId == "all"
+            Surface(
+              modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .border(
+                  BorderStroke(
+                    1.dp,
+                    if (isAllSelected) Color(0xFF10B981) else Color(0xFF1F2637)
+                  ),
+                  RoundedCornerShape(12.dp)
+                )
+                .clickable { selectedOverviewCategoryId = "all" }
+                .testTag("overview_chip_all"),
+              color = if (isAllSelected) Color(0xFF10B981).copy(alpha = 0.18f) else Color(0xFF161B26),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Text(
+                text = "All (${effectiveTasks.size})",
+                fontSize = 12.sp,
+                fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isAllSelected) Color(0xFF6EE7B7) else Color(0xFF94A3B8),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+              )
+            }
+          }
+
+          // 2. Dynamic Category Chips present in the active schedule with Task Counts
+          items(overviewCategoryChips, key = { it.id }) { catItem ->
+            val isSelected = selectedOverviewCategoryId == catItem.id
+            Surface(
+              modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .border(
+                  BorderStroke(
+                    1.dp,
+                    if (isSelected) Color(0xFF38BDF8) else Color(0xFF1F2637)
+                  ),
+                  RoundedCornerShape(12.dp)
+                )
+                .clickable { selectedOverviewCategoryId = catItem.id }
+                .testTag("overview_chip_${catItem.id}"),
+              color = if (isSelected) Color(0xFF38BDF8).copy(alpha = 0.18f) else Color(0xFF161B26),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Text(
+                text = "${catItem.icon} ${catItem.name} (${catItem.count})",
+                fontSize = 12.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) Color(0xFF7DD3FC) else Color(0xFF94A3B8),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+              )
+            }
+          }
+        }
+      }
+
       Surface(
         modifier = Modifier
           .fillMaxWidth()
@@ -1112,9 +1287,22 @@ fun SettingsScreen(
               color = TextTertiary
             )
           }
+        } else if (filteredOverviewTasks.isEmpty()) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(24.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(
+              text = "No tasks found in this category.",
+              fontSize = 13.sp,
+              color = TextTertiary
+            )
+          }
         } else {
           Column(modifier = Modifier.fillMaxWidth()) {
-            effectiveTasks.forEachIndexed { index, task ->
+            filteredOverviewTasks.forEachIndexed { index, task ->
               val cat = resolveTaskCategory(task)
               Row(
                 modifier = Modifier
@@ -1186,7 +1374,7 @@ fun SettingsScreen(
                 }
               }
 
-              if (index < effectiveTasks.lastIndex) {
+              if (index < filteredOverviewTasks.lastIndex) {
                 HorizontalDivider(
                   color = Color(0xFF1F2637),
                   thickness = 1.dp,

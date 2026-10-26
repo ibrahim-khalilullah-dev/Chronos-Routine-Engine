@@ -123,6 +123,20 @@ fun TimelineScreen(
   val coroutineScope = rememberCoroutineScope()
   val listState = rememberLazyListState()
 
+  // Real device calendar day
+  val systemToday = remember {
+    when (java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)) {
+      java.util.Calendar.SATURDAY -> RoutineDay.SATURDAY
+      java.util.Calendar.SUNDAY -> RoutineDay.SUNDAY
+      java.util.Calendar.MONDAY -> RoutineDay.MONDAY
+      java.util.Calendar.TUESDAY -> RoutineDay.TUESDAY
+      java.util.Calendar.WEDNESDAY -> RoutineDay.WEDNESDAY
+      java.util.Calendar.THURSDAY -> RoutineDay.THURSDAY
+      java.util.Calendar.FRIDAY -> RoutineDay.FRIDAY
+      else -> RoutineDay.SATURDAY
+    }
+  }
+
   // State for Confirmation Dialog (Requirement 1: Safe Delete)
   var taskToDeleteConfirm by remember { mutableStateOf<RoutineTask?>(null) }
 
@@ -187,6 +201,7 @@ fun TimelineScreen(
       item {
         OneUiHeader(
           activeDay = activeDay,
+          systemToday = systemToday,
           onSelectDay = { day ->
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onSelectDay(day)
@@ -505,6 +520,7 @@ fun TimelineScreen(
 @Composable
 fun OneUiHeader(
   activeDay: RoutineDay,
+  systemToday: RoutineDay,
   onSelectDay: (RoutineDay) -> Unit,
   totalScheduledMinutes: Int,
   scheduledCount: Int,
@@ -544,40 +560,110 @@ fun OneUiHeader(
 
     Spacer(modifier = Modifier.height(14.dp))
 
-    // Day Pills Selector (Sat to Fri)
+    // Day Pills Selector (Sat to Fri): Real Today vs Inspected Day Visual Duality
     LazyRow(
       horizontalArrangement = Arrangement.spacedBy(8.dp),
       modifier = Modifier.fillMaxWidth()
     ) {
       items(RoutineDay.entries) { day ->
+        val isRealToday = day == systemToday
         val isSelected = day == activeDay
+
+        // Visual Duality Styling
+        val (pillBorder, pillBackground, pillTextColor) = when {
+          isSelected && isRealToday -> Triple(
+            BorderStroke(1.5.dp, Color(0xFF10B981)), // Emerald glow for active real today
+            Color(0xFF10B981).copy(alpha = 0.22f),
+            Color.White
+          )
+          isSelected && !isRealToday -> Triple(
+            BorderStroke(1.5.dp, Color(0xFFEF4444)), // Crimson Red for active inspected day
+            Color(0xFFEF4444).copy(alpha = 0.18f),
+            Color.White
+          )
+          !isSelected && isRealToday -> Triple(
+            BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)), // Subtle emerald for unselected real today
+            OneUiSurfaceElevated,
+            Color(0xFFE2E8F0)
+          )
+          else -> Triple(
+            BorderStroke(1.dp, OneUiBorder),
+            OneUiSurfaceElevated,
+            TextSecondary
+          )
+        }
+
         Surface(
           modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
-            .border(
-              BorderStroke(1.dp, if (isSelected) AnchorGradientStart else OneUiBorder),
-              RoundedCornerShape(16.dp)
-            )
+            .border(pillBorder, RoundedCornerShape(16.dp))
             .clickable {
               haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
               onSelectDay(day)
             }
             .testTag("day_pill_${day.name.lowercase()}"),
-          color = if (isSelected) AnchorGradientStart else OneUiSurfaceElevated,
+          color = pillBackground,
           shape = RoundedCornerShape(16.dp)
         ) {
           Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
             Text(
               text = day.shortName,
-              color = if (isSelected) Color.White else TextSecondary,
-              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+              color = pillTextColor,
+              fontWeight = if (isSelected || isRealToday) FontWeight.Bold else FontWeight.Medium,
               fontSize = 13.sp
             )
+
+            if (isRealToday) {
+              // Persistent small emerald green indicator dot (● #10B981) permanently marking real today
+              Spacer(modifier = Modifier.width(5.dp))
+              Box(
+                modifier = Modifier
+                  .size(6.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF10B981))
+              )
+            } else if (isSelected) {
+              // Glowing red indicator dot (● #EF4444) for inspected day (not real today)
+              Spacer(modifier = Modifier.width(5.dp))
+              Box(
+                modifier = Modifier
+                  .size(6.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFFEF4444))
+              )
+            }
           }
         }
+      }
+    }
+
+    // Inspected Day Contextual Indicator Banner (When user inspects a day other than real today)
+    if (activeDay != systemToday) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Row(
+        modifier = Modifier
+          .clip(RoundedCornerShape(10.dp))
+          .background(Color(0xFFEF4444).copy(alpha = 0.12f))
+          .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+          .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Box(
+          modifier = Modifier
+            .size(6.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFEF4444))
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = "Inspecting ${activeDay.fullName} • Today is ${systemToday.fullName}",
+          fontSize = 11.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = Color(0xFFFCA5A5)
+        )
       }
     }
 
