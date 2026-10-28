@@ -133,9 +133,10 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       TimelineSortMode.LONGEST_DURATION -> rawResult.scheduledTasks.sortedByDescending { it.durationMinutes }
       TimelineSortMode.SHORTEST_DURATION -> rawResult.scheduledTasks.sortedBy { it.durationMinutes }
       TimelineSortMode.ACTIVE_FIRST -> {
-        val active = rawResult.scheduledTasks.filter { com.example.ui.components.isTaskActiveAt(it, currMin) }
-        val upcoming = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin) && it.startTimeMinute >= currMin }.sortedBy { it.startTimeMinute }
-        val completed = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin) && it.startTimeMinute < currMin }.sortedBy { it.startTimeMinute }
+        val isToday = day == RoutineDay.today()
+        val active = rawResult.scheduledTasks.filter { com.example.ui.components.isTaskActiveAt(it, currMin, isToday) }
+        val upcoming = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute >= currMin }.sortedBy { it.startTimeMinute }
+        val completed = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute < currMin }.sortedBy { it.startTimeMinute }
         active + upcoming + completed
       }
       TimelineSortMode.HORIZON_REVERSE -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute + it.durationMinutes }

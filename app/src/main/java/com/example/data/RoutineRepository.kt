@@ -40,8 +40,18 @@ class RoutineRepository(context: Context) {
   }
 
   fun getActiveDay(): RoutineDay {
-    val name = prefs.getString(KEY_ACTIVE_DAY, RoutineDay.MONDAY.name) ?: RoutineDay.MONDAY.name
-    return RoutineDay.fromString(name) ?: RoutineDay.MONDAY
+    val systemToday = when (java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)) {
+      java.util.Calendar.SATURDAY -> RoutineDay.SATURDAY
+      java.util.Calendar.SUNDAY -> RoutineDay.SUNDAY
+      java.util.Calendar.MONDAY -> RoutineDay.MONDAY
+      java.util.Calendar.TUESDAY -> RoutineDay.TUESDAY
+      java.util.Calendar.WEDNESDAY -> RoutineDay.WEDNESDAY
+      java.util.Calendar.THURSDAY -> RoutineDay.THURSDAY
+      java.util.Calendar.FRIDAY -> RoutineDay.FRIDAY
+      else -> RoutineDay.SATURDAY
+    }
+    val name = prefs.getString(KEY_ACTIVE_DAY, systemToday.name) ?: systemToday.name
+    return RoutineDay.fromString(name) ?: systemToday
   }
 
   fun setActiveDay(day: RoutineDay) {
@@ -52,7 +62,7 @@ class RoutineRepository(context: Context) {
     val rawJson = prefs.getString(KEY_ANCHORS, null)
     val sleepDuration = getSleepDurationMinutes()
     if (rawJson.isNullOrEmpty()) {
-      val defaultAnchors = SchedulerEngine.calculateAnchors(emptyList(), sleepDuration)
+      val defaultAnchors = SchedulerEngine.createDefaultAnchors(sleepDuration)
       saveAnchors(defaultAnchors)
       return defaultAnchors
     }
@@ -61,7 +71,7 @@ class RoutineRepository(context: Context) {
       val list = deserializeTaskList(rawJson)
       SchedulerEngine.calculateAnchors(list, sleepDuration)
     } catch (_: Exception) {
-      val defaultAnchors = SchedulerEngine.calculateAnchors(emptyList(), sleepDuration)
+      val defaultAnchors = SchedulerEngine.createDefaultAnchors(sleepDuration)
       saveAnchors(defaultAnchors)
       defaultAnchors
     }

@@ -310,4 +310,92 @@ class ExampleRobolectricTest {
     assertEquals("dyn_1", sortedAnchorsBottom.first().id)
     assertEquals(TaskType.ANCHOR_STANDARD, sortedAnchorsBottom.last().type)
   }
+
+  @Test
+  fun `precision default anchors configure exact 30-minute durations and exact user start times`() {
+    val defaults = SchedulerEngine.createDefaultAnchors(sleepDurationMinutes = 420)
+    assertEquals(7, defaults.size)
+
+    val s1 = defaults.first { it.slotNumber == 1 }
+    val s2 = defaults.first { it.slotNumber == 2 }
+    val s3 = defaults.first { it.slotNumber == 3 }
+    val s4 = defaults.first { it.slotNumber == 4 }
+    val s5 = defaults.first { it.slotNumber == 5 }
+    val s6 = defaults.first { it.slotNumber == 6 }
+    val s7 = defaults.first { it.slotNumber == 7 }
+
+    // Slot 1: Reverse Sleep Tracker: 10:00 PM (1320m), 420m duration
+    assertEquals("Reverse Sleep Tracker", s1.title)
+    assertEquals(1320, s1.startTimeMinute)
+    assertEquals(420, s1.durationMinutes)
+    assertEquals("Bedtime reached. Entering recovery mode.", s1.voiceMessage)
+
+    // Slot 2: Morning Routine: 05:00 AM (300m), 30m duration
+    assertEquals("Morning Routine", s2.title)
+    assertEquals(300, s2.startTimeMinute)
+    assertEquals(30, s2.durationMinutes)
+    assertEquals("Morning time", s2.voiceMessage)
+
+    // Slot 3: Afternoon Focus: 01:15 PM (795m), 30m duration
+    assertEquals("Afternoon Focus", s3.title)
+    assertEquals(795, s3.startTimeMinute)
+    assertEquals(30, s3.durationMinutes)
+    assertEquals("Afternoon time", s3.voiceMessage)
+
+    // Slot 4: Late Afternoon Reset: 04:30 PM (990m), 30m duration
+    assertEquals("Late Afternoon Reset", s4.title)
+    assertEquals(990, s4.startTimeMinute)
+    assertEquals(30, s4.durationMinutes)
+    assertEquals("Late afternoon time", s4.voiceMessage)
+
+    // Slot 5: Elastic Rubber Buffer: Spans from 05:00 PM (1020m) to 06:00 PM (1080m) = 60m duration
+    assertEquals("Elastic Rubber Buffer", s5.title)
+    assertEquals(1020, s5.startTimeMinute)
+    assertEquals(60, s5.durationMinutes)
+    assertEquals("Entering protected elastic buffer time.", s5.voiceMessage)
+
+    // Slot 6: Evening Wind-Down: 06:00 PM (1080m), 30m duration
+    assertEquals("Evening Wind-Down", s6.title)
+    assertEquals(1080, s6.startTimeMinute)
+    assertEquals(30, s6.durationMinutes)
+    assertEquals("Evening time", s6.voiceMessage)
+
+    // Slot 7: Night Reflection: 08:00 PM (1200m), 30m duration
+    assertEquals("Night Reflection", s7.title)
+    assertEquals(1200, s7.startTimeMinute)
+    assertEquals(30, s7.durationMinutes)
+    assertEquals("Night time", s7.voiceMessage)
+  }
+
+  @Test
+  fun `isTaskActiveAt returns false when isToday is false to prevent cross-day active leakage`() {
+    val task = RoutineTask(
+      id = "task_afternoon",
+      title = "Focus Sprint",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 900, // 03:00 PM
+      durationMinutes = 60   // Ends at 04:00 PM
+    )
+
+    // When isToday is true and clock matches: active
+    assertTrue(com.example.ui.components.isTaskActiveAt(task, currentMinute = 930, isToday = true))
+
+    // When isToday is false (viewing another day): NEVER active
+    assertFalse(com.example.ui.components.isTaskActiveAt(task, currentMinute = 930, isToday = false))
+  }
+
+  @Test
+  fun `routine day today returns correct calendar day of week`() {
+    val expected = when (java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)) {
+      java.util.Calendar.SATURDAY -> RoutineDay.SATURDAY
+      java.util.Calendar.SUNDAY -> RoutineDay.SUNDAY
+      java.util.Calendar.MONDAY -> RoutineDay.MONDAY
+      java.util.Calendar.TUESDAY -> RoutineDay.TUESDAY
+      java.util.Calendar.WEDNESDAY -> RoutineDay.WEDNESDAY
+      java.util.Calendar.THURSDAY -> RoutineDay.THURSDAY
+      java.util.Calendar.FRIDAY -> RoutineDay.FRIDAY
+      else -> RoutineDay.SATURDAY
+    }
+    assertEquals(expected, RoutineDay.today())
+  }
 }

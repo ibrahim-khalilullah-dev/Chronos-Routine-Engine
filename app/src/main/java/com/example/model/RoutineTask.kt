@@ -22,6 +22,19 @@ enum class RoutineDay(val shortName: String, val fullName: String) {
     }
 
     fun allDays(): Set<RoutineDay> = entries.toSet()
+
+    fun today(): RoutineDay {
+      return when (java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)) {
+        java.util.Calendar.SATURDAY -> SATURDAY
+        java.util.Calendar.SUNDAY -> SUNDAY
+        java.util.Calendar.MONDAY -> MONDAY
+        java.util.Calendar.TUESDAY -> TUESDAY
+        java.util.Calendar.WEDNESDAY -> WEDNESDAY
+        java.util.Calendar.THURSDAY -> THURSDAY
+        java.util.Calendar.FRIDAY -> FRIDAY
+        else -> SATURDAY
+      }
+    }
   }
 }
 

@@ -137,6 +137,8 @@ fun TimelineScreen(
     }
   }
 
+  val isToday = (activeDay == systemToday)
+
   // State for Confirmation Dialog (Requirement 1: Safe Delete)
   var taskToDeleteConfirm by remember { mutableStateOf<RoutineTask?>(null) }
 
@@ -147,10 +149,14 @@ fun TimelineScreen(
   // Item: Section Title "Daily Timeline & Anchors"
   val headerItemsOffset = 1 + (if (activeAutomation.isRunning) 1 else 0) + (if (!isDndGranted) 1 else 0) + 1
 
-  // Real-time active running task
-  val activeTaskIndex = remember(scheduleResult.scheduledTasks, currentMinute) {
-    scheduleResult.scheduledTasks.indexOfFirst {
-      isTaskActiveAt(it, currentMinute)
+  // Real-time active running task (strictly evaluated only when viewing today)
+  val activeTaskIndex = remember(scheduleResult.scheduledTasks, currentMinute, isToday) {
+    if (!isToday) {
+      -1
+    } else {
+      scheduleResult.scheduledTasks.indexOfFirst {
+        isTaskActiveAt(it, currentMinute, isToday = true)
+      }
     }
   }
   val activeLazyItemIndex = if (activeTaskIndex >= 0) headerItemsOffset + activeTaskIndex else -1
@@ -283,6 +289,7 @@ fun TimelineScreen(
               task = task,
               sleepDurationMinutes = sleepDurationMinutes,
               currentMinute = currentMinute,
+              isToday = isToday,
               onQuickAdjust = { delta ->
                 task.slotNumber?.let { slot -> onQuickAdjustAnchor(slot, delta) }
               },
@@ -293,6 +300,7 @@ fun TimelineScreen(
             DynamicTaskCard(
               task = task,
               currentMinute = currentMinute,
+              isToday = isToday,
               onEditClick = { onEditTask(task) }
             )
           }

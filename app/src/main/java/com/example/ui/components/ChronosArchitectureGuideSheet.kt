@@ -2,6 +2,8 @@ package com.example.ui.components
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,8 +79,7 @@ fun ChronosArchitectureGuideSheet(
   modifier: Modifier = Modifier
 ) {
   val sheetState = rememberModalBottomSheetState(
-    skipPartiallyExpanded = true,
-    confirmValueChange = { false } // Completely disables drag/swipe-to-dismiss gestures
+    skipPartiallyExpanded = true
   )
 
   // Consume all nested scroll dispatch so vertical scrolling inside the guide never collapses or dismisses the sheet
@@ -93,28 +95,32 @@ fun ChronosArchitectureGuideSheet(
   ModalBottomSheet(
     onDismissRequest = onDismiss,
     sheetState = sheetState,
+    sheetGesturesEnabled = false, // CRITICAL: Completely disables drag & swipe-to-dismiss gestures
+    dragHandle = null,             // Eliminates the gesture-consuming default drag handle
     containerColor = Color(0xFF080A0F), // True AMOLED Obsidian Black
     contentColor = TextPrimary,
-    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-    dragHandle = {
-      Box(
-        modifier = Modifier
-          .padding(vertical = 12.dp)
-          .size(width = 38.dp, height = 4.dp)
-          .clip(CircleShape)
-          .background(Color.White.copy(alpha = 0.25f))
-      )
-    }
+    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
   ) {
-    Column(
-      modifier = modifier
-        .fillMaxWidth()
-        .nestedScroll(consumeNestedScrollConnection)
-        .verticalScroll(rememberScrollState())
-        .padding(horizontal = 20.dp, vertical = 6.dp)
-        .padding(bottom = 44.dp)
-        .testTag("chronos_architecture_guide_sheet")
-    ) {
+    @OptIn(ExperimentalFoundationApi::class)
+    CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+      Column(
+        modifier = modifier
+          .fillMaxWidth()
+          .nestedScroll(consumeNestedScrollConnection)
+          .verticalScroll(rememberScrollState())
+          .padding(horizontal = 20.dp, vertical = 6.dp)
+          .padding(bottom = 44.dp)
+          .testTag("chronos_architecture_guide_sheet")
+      ) {
+        // Plain, static, non-draggable visual indicator pill
+        Box(
+          modifier = Modifier
+            .padding(vertical = 12.dp)
+            .size(width = 44.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(Color.White.copy(alpha = 0.25f))
+            .align(Alignment.CenterHorizontally)
+        )
       // ==============================================================
       // 1. THE EDITORIAL MASTHEAD (Newspaper Banner Header)
       // ==============================================================
@@ -412,6 +418,7 @@ fun ChronosArchitectureGuideSheet(
       )
     }
   }
+}
 }
 
 @Composable

@@ -97,8 +97,8 @@ import com.example.ui.theme.TextTertiary
 import com.example.ui.theme.WarningAmber
 import com.example.ui.theme.gradientBrushWithAlpha
 
-fun isTaskActiveAt(task: RoutineTask, currentMinute: Int): Boolean {
-  if (currentMinute < 0) return false
+fun isTaskActiveAt(task: RoutineTask, currentMinute: Int, isToday: Boolean = true): Boolean {
+  if (!isToday || currentMinute < 0) return false
   val start = task.startTimeMinute
   val end = task.startTimeMinute + task.durationMinutes
   return if (end <= 1440) {
@@ -108,8 +108,8 @@ fun isTaskActiveAt(task: RoutineTask, currentMinute: Int): Boolean {
   }
 }
 
-fun isTaskCompletedAt(task: RoutineTask, currentMinute: Int): Boolean {
-  if (currentMinute < 0) return false
+fun isTaskCompletedAt(task: RoutineTask, currentMinute: Int, isToday: Boolean = true): Boolean {
+  if (!isToday || currentMinute < 0) return false
   val start = task.startTimeMinute
   val end = task.startTimeMinute + task.durationMinutes
   return if (end <= 1440) {
@@ -265,6 +265,7 @@ fun AnchorSlotCard(
   task: RoutineTask,
   sleepDurationMinutes: Int = 420,
   currentMinute: Int = -1,
+  isToday: Boolean = true,
   onQuickAdjust: (deltaMinutes: Int) -> Unit,
   onEditClick: () -> Unit,
   onRateTask: ((taskId: String, ratingPct: Int) -> Unit)? = null,
@@ -274,7 +275,7 @@ fun AnchorSlotCard(
   val isSleepSlot = slotNum == 1
   val isElasticSlot = slotNum == 5
   val isStandardAnchor = !isSleepSlot && !isElasticSlot
-  val isActive = isTaskActiveAt(task, currentMinute)
+  val isActive = isTaskActiveAt(task, currentMinute, isToday)
 
   val gradientBrush: Brush = when {
     isSleepSlot -> SleepBrush
@@ -459,7 +460,7 @@ fun AnchorSlotCard(
       if (isActive && currentMinute >= 0) {
         Spacer(modifier = Modifier.height(10.dp))
         ActiveTaskLiveProgressBar(task = task, currentMinute = currentMinute, accentColor = Color(0xFF10B981))
-      } else if (isTaskCompletedAt(task, currentMinute) || taskRatingCache.containsKey(task.id)) {
+      } else if (isTaskCompletedAt(task, currentMinute, isToday) || (isToday && taskRatingCache.containsKey(task.id))) {
         Spacer(modifier = Modifier.height(10.dp))
         TaskCompletionRatingBar(task = task, onRate = { r -> onRateTask?.invoke(task.id, r) })
       }
@@ -692,12 +693,13 @@ fun AnchorSlotCard(
 fun DynamicTaskCard(
   task: RoutineTask,
   currentMinute: Int = -1,
+  isToday: Boolean = true,
   onEditClick: () -> Unit,
   onRateTask: ((taskId: String, ratingPct: Int) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val haptic = LocalHapticFeedback.current
-  val isActive = isTaskActiveAt(task, currentMinute)
+  val isActive = isTaskActiveAt(task, currentMinute, isToday)
 
   Surface(
     modifier = modifier
@@ -827,7 +829,7 @@ fun DynamicTaskCard(
       if (isActive && currentMinute >= 0) {
         Spacer(modifier = Modifier.height(10.dp))
         ActiveTaskLiveProgressBar(task = task, currentMinute = currentMinute, accentColor = DynamicGradientEnd)
-      } else if (isTaskCompletedAt(task, currentMinute) || taskRatingCache.containsKey(task.id)) {
+      } else if (isTaskCompletedAt(task, currentMinute, isToday) || (isToday && taskRatingCache.containsKey(task.id))) {
         Spacer(modifier = Modifier.height(10.dp))
         TaskCompletionRatingBar(task = task, onRate = { r -> onRateTask?.invoke(task.id, r) })
       }

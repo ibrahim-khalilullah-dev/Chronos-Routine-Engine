@@ -18,6 +18,8 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -79,6 +81,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -221,8 +224,7 @@ fun TaskModalBottomSheet(
 ) {
   val context = LocalContext.current
   val sheetState = rememberModalBottomSheetState(
-    skipPartiallyExpanded = true,
-    confirmValueChange = { false } // Completely disables drag/swipe-to-dismiss gestures
+    skipPartiallyExpanded = true
   )
 
   val isEditing = initialTask != null
@@ -570,28 +572,32 @@ fun TaskModalBottomSheet(
   ModalBottomSheet(
     onDismissRequest = { handleDismissRequest() },
     sheetState = sheetState,
+    sheetGesturesEnabled = false, // CRITICAL: Completely disables drag & swipe-to-dismiss gestures
+    dragHandle = null,             // Eliminates the gesture-consuming default drag handle
     containerColor = Color(0xFF080A0F), // True AMOLED Deep Dark
     contentColor = TextPrimary,
-    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-    dragHandle = {
-      Box(
-        modifier = Modifier
-          .padding(vertical = 12.dp)
-          .size(width = 38.dp, height = 4.dp)
-          .clip(CircleShape)
-          .background(Color.White.copy(alpha = 0.25f))
-      )
-    }
+    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
   ) {
     Box(modifier = Modifier.fillMaxWidth()) {
-      Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .nestedScroll(consumeNestedScrollConnection)
-          .verticalScroll(rememberScrollState())
-          .padding(horizontal = 20.dp, vertical = 6.dp)
-          .padding(bottom = 96.dp) // Room for sticky bottom bar
-      ) {
+      @OptIn(ExperimentalFoundationApi::class)
+      CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .nestedScroll(consumeNestedScrollConnection)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .padding(bottom = 96.dp) // Room for sticky bottom bar
+        ) {
+          // Plain, static, non-draggable visual indicator pill
+          Box(
+            modifier = Modifier
+              .padding(vertical = 12.dp)
+              .size(width = 44.dp, height = 4.dp)
+              .clip(RoundedCornerShape(2.dp))
+              .background(Color.White.copy(alpha = 0.25f))
+              .align(Alignment.CenterHorizontally)
+          )
         // ==============================================================
         // 1. TOP BAR
         // ==============================================================
@@ -1696,6 +1702,7 @@ fun TaskModalBottomSheet(
             }
           }
         }
+      }
       }
 
       // ==============================================================

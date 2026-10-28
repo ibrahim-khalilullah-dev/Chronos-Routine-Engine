@@ -23,6 +23,107 @@ object SchedulerEngine {
   const val MIN_ELASTIC_BUFFER_MINUTES = 15
 
   /**
+   * Generates the precision default anchors for a fresh installation.
+   * All standard anchors configured to 30 minutes with exact user start times:
+   * Slot 1: Reverse Sleep Tracker (10:00 PM = 1320m, 420m duration)
+   * Slot 2: Morning Routine (05:00 AM = 300m, 30m duration)
+   * Slot 3: Afternoon Focus (01:15 PM = 795m, 30m duration)
+   * Slot 4: Late Afternoon Reset (04:30 PM = 990m, 30m duration)
+   * Slot 5: Elastic Rubber Buffer (05:00 PM = 1020m, 60m duration)
+   * Slot 6: Evening Wind-Down (06:00 PM = 1080m, 30m duration)
+   * Slot 7: Night Reflection (08:00 PM = 1200m, 30m duration)
+   */
+  fun createDefaultAnchors(sleepDurationMinutes: Int = 420): List<RoutineTask> {
+    val safeSleepDuration = sleepDurationMinutes.coerceIn(240, 720)
+    val slot2Start = 300 // 05:00 AM
+    val rawBedtime = slot2Start - safeSleepDuration
+    val bedtimeMinute = ((rawBedtime % 1440) + 1440) % 1440
+
+    val slot1 = RoutineTask(
+      id = "anchor_slot_1",
+      title = "Reverse Sleep Tracker",
+      type = TaskType.ANCHOR_SLEEP,
+      slotNumber = 1,
+      startTimeMinute = bedtimeMinute,
+      durationMinutes = safeSleepDuration,
+      voiceMessage = "Bedtime reached. Entering recovery mode.",
+      enableDnd = true
+    )
+
+    val slot2 = RoutineTask(
+      id = "anchor_slot_2",
+      title = "Morning Routine",
+      type = TaskType.ANCHOR_STANDARD,
+      slotNumber = 2,
+      startTimeMinute = slot2Start, // 05:00 AM
+      durationMinutes = 30,         // 30 mins (05:00 AM -> 05:30 AM)
+      voiceMessage = "Morning time",
+      enableDnd = true
+    )
+
+    val slot3 = RoutineTask(
+      id = "anchor_slot_3",
+      title = "Afternoon Focus",
+      type = TaskType.ANCHOR_STANDARD,
+      slotNumber = 3,
+      startTimeMinute = 795, // 01:15 PM
+      durationMinutes = 30,  // 30 mins (01:15 PM -> 01:45 PM)
+      voiceMessage = "Afternoon time",
+      enableDnd = true
+    )
+
+    val slot4 = RoutineTask(
+      id = "anchor_slot_4",
+      title = "Late Afternoon Reset",
+      type = TaskType.ANCHOR_STANDARD,
+      slotNumber = 4,
+      startTimeMinute = 990, // 04:30 PM
+      durationMinutes = 30,  // 30 mins (04:30 PM -> 05:00 PM)
+      voiceMessage = "Late afternoon time",
+      enableDnd = true
+    )
+
+    val slot6 = RoutineTask(
+      id = "anchor_slot_6",
+      title = "Evening Wind-Down",
+      type = TaskType.ANCHOR_STANDARD,
+      slotNumber = 6,
+      startTimeMinute = 1080, // 06:00 PM
+      durationMinutes = 30,   // 30 mins (06:00 PM -> 06:30 PM)
+      voiceMessage = "Evening time",
+      enableDnd = false
+    )
+
+    val slot7 = RoutineTask(
+      id = "anchor_slot_7",
+      title = "Night Reflection",
+      type = TaskType.ANCHOR_STANDARD,
+      slotNumber = 7,
+      startTimeMinute = 1200, // 08:00 PM
+      durationMinutes = 30,   // 30 mins (08:00 PM -> 08:30 PM)
+      voiceMessage = "Night time",
+      enableDnd = true
+    )
+
+    // Slot 5: Spans between Slot 4 End (05:00 PM = 1020m) and Slot 6 Start (06:00 PM = 1080m) -> 60 minutes
+    val slot4End = slot4.startTimeMinute + slot4.durationMinutes
+    val elasticDuration = (slot6.startTimeMinute - slot4End).coerceAtLeast(MIN_ELASTIC_BUFFER_MINUTES)
+    val slot5 = RoutineTask(
+      id = "anchor_slot_5",
+      title = "Elastic Rubber Buffer",
+      type = TaskType.ANCHOR_ELASTIC,
+      slotNumber = 5,
+      startTimeMinute = slot4End,
+      durationMinutes = elasticDuration,
+      voiceMessage = "Entering protected elastic buffer time.",
+      enableDnd = false,
+      selectedDays = RoutineDay.allDays()
+    )
+
+    return listOf(slot1, slot2, slot3, slot4, slot5, slot6, slot7)
+  }
+
+  /**
    * Recalculates Slot 1 (Reverse Sleep) and Slot 5 (Elastic Buffer) based on
    * Anchor 2, Anchor 4, and Anchor 6 with complete midnight rollover safety.
    */
@@ -30,17 +131,21 @@ object SchedulerEngine {
     anchors: List<RoutineTask>,
     sleepDurationMinutes: Int = 420 // 7 hours default
   ): List<RoutineTask> {
+    if (anchors.isEmpty()) {
+      return createDefaultAnchors(sleepDurationMinutes)
+    }
+
     val map = anchors.associateBy { it.slotNumber ?: 0 }.toMutableMap()
 
     // 1. Slot 2: Wake-up Anchor (Default 05:00 AM = 300 min)
     val slot2 = map[2] ?: RoutineTask(
       id = "anchor_slot_2",
-      title = "Wake Up & Morning Anchor",
+      title = "Morning Routine",
       type = TaskType.ANCHOR_STANDARD,
       slotNumber = 2,
       startTimeMinute = 300, // 05:00 AM
-      durationMinutes = 45,
-      voiceMessage = "Good morning! Time to start the day with focus.",
+      durationMinutes = 30,  // 30 mins
+      voiceMessage = "Morning time",
       enableDnd = true
     )
     map[2] = slot2
@@ -55,7 +160,7 @@ object SchedulerEngine {
     val existingSlot1 = map[1]
     val slot1 = (existingSlot1 ?: RoutineTask(
       id = "anchor_slot_1",
-      title = "Reverse Sleep Recovery",
+      title = "Reverse Sleep Tracker",
       type = TaskType.ANCHOR_SLEEP,
       slotNumber = 1,
       startTimeMinute = bedtimeMinute,
@@ -70,58 +175,58 @@ object SchedulerEngine {
     )
     map[1] = slot1
 
-    // 3. Slot 3: Deep Work (Default 09:00 AM = 540 min)
+    // 3. Slot 3: Afternoon Focus (Default 01:15 PM = 795 min)
     if (!map.containsKey(3)) {
       map[3] = RoutineTask(
         id = "anchor_slot_3",
-        title = "Deep Work & Study Engine",
+        title = "Afternoon Focus",
         type = TaskType.ANCHOR_STANDARD,
         slotNumber = 3,
-        startTimeMinute = 540, // 09:00 AM
-        durationMinutes = 180, // 3 hours -> 12:00 PM
-        voiceMessage = "Deep work block initiated. DND engaged.",
+        startTimeMinute = 795, // 01:15 PM
+        durationMinutes = 30,  // 30 mins
+        voiceMessage = "Afternoon time",
         enableDnd = true
       )
     }
 
-    // 4. Slot 4: Health / Fitness (Default 02:00 PM = 840 min)
+    // 4. Slot 4: Late Afternoon Reset (Default 04:30 PM = 990 min)
     if (!map.containsKey(4)) {
       map[4] = RoutineTask(
         id = "anchor_slot_4",
-        title = "Health & Fitness Engine",
+        title = "Late Afternoon Reset",
         type = TaskType.ANCHOR_STANDARD,
         slotNumber = 4,
-        startTimeMinute = 840, // 02:00 PM
-        durationMinutes = 60,  // 03:00 PM
-        voiceMessage = "Workout session starting now. Hydrate!",
+        startTimeMinute = 990, // 04:30 PM
+        durationMinutes = 30,  // 30 mins
+        voiceMessage = "Late afternoon time",
         enableDnd = true
       )
     }
 
-    // 5. Slot 6: Evening Reset (Default 07:30 PM = 1170 min)
+    // 5. Slot 6: Evening Wind-Down (Default 06:00 PM = 1080 min)
     if (!map.containsKey(6)) {
       map[6] = RoutineTask(
         id = "anchor_slot_6",
-        title = "Evening Reset & Family Anchor",
+        title = "Evening Wind-Down",
         type = TaskType.ANCHOR_STANDARD,
         slotNumber = 6,
-        startTimeMinute = 1170, // 07:30 PM
-        durationMinutes = 60,   // 08:30 PM
-        voiceMessage = "Evening transition initiated.",
+        startTimeMinute = 1080, // 06:00 PM
+        durationMinutes = 30,   // 30 mins
+        voiceMessage = "Evening time",
         enableDnd = false
       )
     }
 
-    // 6. Slot 7: Night Reflection (Default 10:00 PM = 1320 min)
+    // 6. Slot 7: Night Reflection (Default 08:00 PM = 1200 min)
     if (!map.containsKey(7)) {
       map[7] = RoutineTask(
         id = "anchor_slot_7",
-        title = "Night Reflection & Wind-Down",
+        title = "Night Reflection",
         type = TaskType.ANCHOR_STANDARD,
         slotNumber = 7,
-        startTimeMinute = 1320, // 10:00 PM
-        durationMinutes = 45,   // 10:45 PM
-        voiceMessage = "Night wind-down starting. Dim screens.",
+        startTimeMinute = 1200, // 08:00 PM
+        durationMinutes = 30,   // 30 mins
+        voiceMessage = "Night time",
         enableDnd = true
       )
     }
