@@ -21,12 +21,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -131,13 +132,23 @@ fun ChronosArchitectureGuideSheet(
 
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
+        IconButton(
+          onClick = onDismiss,
+          modifier = Modifier.size(38.dp).testTag("dismiss_guide_button")
+        ) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "Back",
+            tint = TextPrimary
+          )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
           Text(
             text = "THE CHRONOS GAZETTE",
-            fontSize = 24.sp,
+            fontSize = 22.sp,
             fontWeight = FontWeight.Black,
             fontFamily = FontFamily.Serif,
             letterSpacing = 1.5.sp,
@@ -145,23 +156,12 @@ fun ChronosArchitectureGuideSheet(
           )
           Spacer(modifier = Modifier.height(2.dp))
           Text(
-            text = "VOL. VIII • NO. 85 • ONE UI 8.5 ARCHITECTURAL EDITION • RUNTIME DISPATCH",
+            text = "VOL. VIII • ARCHITECTURAL SPECIFICATION",
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
             letterSpacing = 0.5.sp,
             color = Color(0xFF94A3B8)
-          )
-        }
-
-        IconButton(
-          onClick = onDismiss,
-          modifier = Modifier.testTag("dismiss_guide_button")
-        ) {
-          Icon(
-            imageVector = Icons.Default.Close,
-            contentDescription = "Close Gazette",
-            tint = TextSecondary
           )
         }
       }
@@ -248,52 +248,84 @@ fun ChronosArchitectureGuideSheet(
           NewspaperAnchorRow(
             slot = 1,
             task = anchor1,
-            defaultTitle = "Reverse Sleep Tracker",
-            role = "Links backwards from Slot 2 wake time with midnight modulo rollover (% 1440).",
+            defaultTitle = "Sleep Tracker (Night Rest)",
+            role = "10:00 PM (420m / 7h) • Modulo arithmetic (% 1440) anchoring backwards from Slot 2 wake time.",
             accent = SleepGradientStart
           )
           NewspaperAnchorRow(
             slot = 2,
             task = anchor2,
-            defaultTitle = "Wake & Morning",
-            role = "Fixed morning anchor initiating circadian wakefulness and metabolic baseline.",
+            defaultTitle = "Morning Routine (Fajr)",
+            role = "05:00 AM (30m) • Fixed morning anchor initiating circadian wakefulness and metabolic baseline.",
             accent = AnchorGradientStart
           )
           NewspaperAnchorRow(
             slot = 3,
             task = anchor3,
-            defaultTitle = "Deep Focus 1",
-            role = "First major morning cognitive peak dedicated to high-leverage deep work.",
+            defaultTitle = "Afternoon Focus (Dhuhr)",
+            role = "01:15 PM (30m) • Midday focus peak. Features Friday Jumu'ah Dual Mode with dedicated timing & speech.",
             accent = AnchorGradientStart
           )
           NewspaperAnchorRow(
             slot = 4,
             task = anchor4,
-            defaultTitle = "Midday Reset",
-            role = "Nutritional intake and cognitive restoration separating morning and afternoon.",
+            defaultTitle = "Late Afternoon Reset (Asr)",
+            role = "04:30 PM (30m) • Cognitive reset defining the upper boundary of the Slot 5 elastic buffer.",
             accent = AnchorGradientStart
           )
           NewspaperAnchorRow(
             slot = 5,
             task = anchor5,
             defaultTitle = "Elastic Rubber Buffer",
-            role = "Dynamic shock absorber auto-scaling between Slot 4 & 6 with a strict 15m floor.",
+            role = "05:00 PM → 06:00 PM (60m) • Dynamic accordion shock absorber spanning between Slot 4 and Slot 6.",
             accent = ElasticGradientStart
           )
           NewspaperAnchorRow(
             slot = 6,
             task = anchor6,
-            defaultTitle = "Evening Reset",
-            role = "Transition barrier initiating cognitive decompression and family rhythm.",
+            defaultTitle = "Evening Wind-Down (Maghrib)",
+            role = "06:00 PM (30m) • Decompression threshold marking end of work and start of evening reflection.",
             accent = AnchorGradientStart
           )
           NewspaperAnchorRow(
             slot = 7,
             task = anchor7,
-            defaultTitle = "Night Rest",
-            role = "Pre-sleep sanctuary establishing biological melatonin and wind-down hygiene.",
+            defaultTitle = "Night Reflection (Isha)",
+            role = "08:00 PM (30m) • Evening boundary establishing biological melatonin onset and wind-down hygiene.",
             accent = AnchorGradientStart
           )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)), RoundedCornerShape(10.dp)),
+          color = Color(0xFF10B981).copy(alpha = 0.08f)
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Text(
+                text = "🕌 Slot 3 Friday Jumu'ah Dual Mode",
+                color = Color(0xFF34D399),
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Serif
+              )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = "On Fridays, Slot 3 seamlessly switches into dedicated Jumu'ah mode without altering Saturday–Thursday schedules:\n" +
+                "• Dedicated Time Window: Independent start time (default 11:30 AM) and expanded duration (default 2h 30m).\n" +
+                "• Autonomous Voice Annunciation: Custom TTS greeting (\"Friday Jumu'ah prayer and spiritual reflection\") with dedicated audio ducking.\n" +
+                "• Dynamic Non-Encroachment: Friday dynamic tasks automatically conform around the extended Jumu'ah window with zero manual rescheduling.",
+              color = Color(0xFFCBD5E1),
+              fontSize = 11.sp,
+              lineHeight = 15.sp
+            )
+          }
         }
       }
 
@@ -305,14 +337,15 @@ fun ChronosArchitectureGuideSheet(
       EditorialArticleCard(
         dispatchNumber = "DISPATCH II",
         title = "Slot 5: Accordion Elastic Buffer",
-        lead = "Self-Balancing Mathematical Shock Absorber",
+        lead = "Self-Balancing Mathematical Shock Absorber & Day Recurrence",
         icon = Icons.Default.Shield,
         accentColor = ElasticGradientStart
       ) {
         Text(
-          text = "Slot 5 functions as an accordion buffer mathematically calibrated to bridge the exact duration between Slot 4 (Midday Reset) and Slot 6 (Evening Reset).\n\n" +
-            "• Dynamic Sizing: When you lengthen or relocate Slot 4 or Slot 6, Slot 5 instantly recalculates its span.\n" +
-            "• Protected 15-Minute Floor: Slot 5 can never be compressed below 15 minutes, ensuring guaranteed decompression time even under extreme routine demands.",
+          text = "Slot 5 functions as an accordion buffer mathematically calibrated to bridge the exact duration between Slot 4 (Late Afternoon Reset) and Slot 6 (Evening Wind-Down).\n\n" +
+            "• Dynamic Recalculation: When Slot 4 or Slot 6 moves, Slot 5 automatically stretches or contracts to absorb routine drift without shifting surrounding dynamic tasks.\n" +
+            "• Protected 15-Minute Floor: Slot 5 can never be compressed below 15 minutes under routine expansion, guaranteeing physiological decompression time.\n" +
+            "• Weekly Recurrence Selector: Slot 5 includes a granular 7-day selector (Saturday through Friday). You can activate it for all 7 days or selectively deactivate it on designated days. When deactivated on any day, 100% of the Slot 4 → Slot 6 interval is fully liberated for high-leverage dynamic tasks with zero artificial buffers.",
           color = TextSecondary,
           fontSize = 12.sp,
           lineHeight = 17.sp
@@ -398,6 +431,84 @@ fun ChronosArchitectureGuideSheet(
           fontSize = 11.sp,
           lineHeight = 15.sp
         )
+      }
+
+      Spacer(modifier = Modifier.height(18.dp))
+
+      // ==============================================================
+      // 7. EDITORIAL DISPATCH V: QUANTIFIED SELF & VISUAL ANALYTICS
+      // ==============================================================
+      EditorialArticleCard(
+        dispatchNumber = "DISPATCH V",
+        title = "Quantified Self & Visual Analytics",
+        lead = "Deterministic Focus Metrics & Circadian Dial",
+        icon = Icons.Default.Star,
+        accentColor = Color(0xFFF59E0B)
+      ) {
+        Text(
+          text = "Chronos incorporates a high-fidelity, zero-dummy-data quantitative tracking engine to audit daily productivity, cognitive energy, and execution fidelity:",
+          color = TextSecondary,
+          fontSize = 12.sp,
+          lineHeight = 17.sp
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .border(BorderStroke(1.dp, Color(0xFF1E293B)), RoundedCornerShape(10.dp)),
+          color = Color(0xFF0F141E)
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+              text = "⭐ Two-Step Focus Completion & Permanent 5-Star Badges",
+              color = Color(0xFFFBBF24),
+              fontWeight = FontWeight.Bold,
+              fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = "Upon task completion, Chronos prompts a 2-step evaluation from [0%] to [100%] in 25% increments (Poor, Fair, Good, Great, Masterful). Completed tasks lock in an immutable 5-Star rating badge (★☆☆☆☆ through ★★★★★) displayed right on the timeline card.",
+              color = Color(0xFFCBD5E1),
+              fontSize = 11.sp,
+              lineHeight = 15.sp
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+              text = "🍩 24-Hour Circular Donut Dial",
+              color = Color(0xFF60A5FA),
+              fontWeight = FontWeight.Bold,
+              fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = "In Settings Analytics, the 24-Hour Donut Chart dynamically maps today's complete 1,440-minute circadian distribution: sleep (purple), fixed anchors (emerald), fluid twins (indigo), and dynamic focus tasks (cyan).",
+              color = Color(0xFFCBD5E1),
+              fontSize = 11.sp,
+              lineHeight = 15.sp
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+              text = "📈 3-Month Historical Rating Engine (Zero Fake Data)",
+              color = Color(0xFFA78BFA),
+              fontWeight = FontWeight.Bold,
+              fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = "The analytics engine calculates actual rolling metrics across Day, Week, Month, and 3-Month horizons strictly based on verified user ratings. Fresh installations present clean, uncluttered zero-state indicators without synthetic filler data.",
+              color = Color(0xFFCBD5E1),
+              fontSize = 11.sp,
+              lineHeight = 15.sp
+            )
+          }
+        }
       }
 
       Spacer(modifier = Modifier.height(24.dp))
