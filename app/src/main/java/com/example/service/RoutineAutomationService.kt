@@ -163,13 +163,22 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
 
     val notifTitle = intent.getStringExtra(AutomationManager.EXTRA_NOTIFICATION_TITLE) ?: title
     val notifBody = intent.getStringExtra(AutomationManager.EXTRA_NOTIFICATION_BODY) ?: voiceMessage
+    val categoryEmoji = intent.getStringExtra(AutomationManager.EXTRA_CATEGORY_EMOJI) ?: "⏱️"
+    val categoryName = intent.getStringExtra(AutomationManager.EXTRA_CATEGORY_NAME) ?: "Routine Focus"
+    val formattedDuration = intent.getStringExtra(AutomationManager.EXTRA_FORMATTED_DURATION) ?: ""
 
     activeTaskId = taskId
 
     acquireWakeLock()
 
-    // Start as Foreground Service with custom notification
-    val notification = buildNotification(notifTitle, notifBody, enableDnd)
+    // Start as Foreground Service with professional One UI notification
+    val notification = buildNotification(
+      title = notifTitle,
+      categoryEmoji = categoryEmoji,
+      categoryName = categoryName,
+      formattedDuration = formattedDuration,
+      voiceMessage = voiceMessage
+    )
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -327,7 +336,13 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     }
   }
 
-  private fun buildNotification(title: String, body: String, dndActive: Boolean): Notification {
+  private fun buildNotification(
+    title: String,
+    categoryEmoji: String,
+    categoryName: String,
+    formattedDuration: String,
+    voiceMessage: String
+  ): Notification {
     val openIntent = Intent(this, MainActivity::class.java).apply {
       flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
     }
@@ -336,20 +351,40 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    val dndBadge = if (dndActive) " • DND Active 🌙" else ""
+    // Clean One UI layout without prefixes like "Category:" or "Duration:".
+    // Format: ${categoryEmoji} ${categoryName}  •  ${formattedDuration}
+    val contentLine = if (categoryName.isNotBlank() && formattedDuration.isNotBlank()) {
+      "$categoryEmoji $categoryName  •  $formattedDuration"
+    } else if (formattedDuration.isNotBlank()) {
+      "$categoryEmoji $formattedDuration"
+    } else {
+      "$categoryEmoji $categoryName"
+    }
 
-    return NotificationCompat.Builder(this, CHANNEL_ID)
+    // Clean, bold task title ONLY (No "Name:" or "Title:" prefix)
+    val cleanTitle = title.trim()
+
+    val builder = NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.mipmap.ic_launcher)
-      .setContentTitle("$title$dndBadge")
-      .setContentText(body)
-      .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+      .setContentTitle(cleanTitle)
+      .setContentText(contentLine)
       .setPriority(NotificationCompat.PRIORITY_MAX)
       .setCategory(NotificationCompat.CATEGORY_ALARM)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setShowWhen(true)
       .setContentIntent(openPending)
       .setOngoing(true)
-      .build()
+
+    // Sub-text / Expanded Body: If custom voice/notification message exists, display it cleanly in BigTextStyle: “${voiceMessage}”
+    val cleanVoice = voiceMessage.trim().removeSurrounding("“", "”").removeSurrounding("\"", "\"")
+    val expandedText = if (cleanVoice.isNotBlank()) {
+      "$contentLine\n\n“$cleanVoice”"
+    } else {
+      contentLine
+    }
+    builder.setStyle(NotificationCompat.BigTextStyle().bigText(expandedText))
+
+    return builder.build()
   }
 
   override fun onDestroy() {

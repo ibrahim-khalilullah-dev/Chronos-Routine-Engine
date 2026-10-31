@@ -17,6 +17,7 @@ import android.speech.tts.TextToSpeech
 import com.example.data.RoutineRepository
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
+import com.example.model.TaskType
 import com.example.receiver.RoutineAlarmReceiver
 import java.util.Calendar
 
@@ -35,6 +36,40 @@ object AutomationManager {
   const val EXTRA_NOTIFICATION_TITLE = "extra_notification_title"
   const val EXTRA_NOTIFICATION_BODY = "extra_notification_body"
   const val EXTRA_VOICE_VOLUME = "extra_voice_volume"
+  const val EXTRA_CATEGORY_EMOJI = "extra_category_emoji"
+  const val EXTRA_CATEGORY_NAME = "extra_category_name"
+  const val EXTRA_FORMATTED_DURATION = "extra_formatted_duration"
+
+  fun resolveCategoryInfo(task: RoutineTask, activeDay: RoutineDay = RoutineDay.today()): Pair<String, String> {
+    return when {
+      task.type == TaskType.ANCHOR_SLEEP -> "🌙" to "Night Sleep"
+      task.type == TaskType.ANCHOR_ELASTIC -> "🛡️" to "Rest Buffer"
+      task.type == TaskType.ANCHOR_STANDARD -> when (task.slotNumber) {
+        2 -> "🌅" to "Morning Routine"
+        3 -> if (activeDay == RoutineDay.FRIDAY) "🕌" to "Friday Jumu'ah" else "☀️" to "Midday Focus"
+        4 -> "☕" to "Afternoon Reset"
+        6 -> "🌆" to "Evening Wind-Down"
+        7 -> "🌌" to "Night Reflection"
+        else -> "⚓" to "Fixed Anchor"
+      }
+      else -> when (task.category?.lowercase()?.trim()) {
+        "work" -> "💼" to "Productive Work"
+        "studying" -> "👓" to "Studying"
+        "reading" -> "📖" to "Reading"
+        "training" -> "🏃" to "Training"
+        "break" -> "☕" to "Break"
+        "eating" -> "🍴" to "Eating"
+        "sleep" -> "☁️" to "Sleep"
+        "commuting" -> "🚗" to "Commuting"
+        "family" -> "🏠" to "Home & Family"
+        "internet" -> "🖥️" to "Internet"
+        "goals" -> "🎯" to "Personal Goals"
+        "relationship" -> "❤️" to "Relationship"
+        "tv" -> "📺" to "TV"
+        else -> "⏱️" to "Dynamic Focus"
+      }
+    }
+  }
 
   fun createTtsVolumeParams(volume: Float): Bundle {
     val clamped = volume.coerceIn(0.0f, 1.0f)
@@ -195,6 +230,8 @@ object AutomationManager {
       }
     }
 
+    val (catEmoji, catName) = resolveCategoryInfo(task, targetRoutineDay)
+
     val startIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
       action = ACTION_START_TASK
       putExtra(EXTRA_TASK_ID, task.id)
@@ -208,6 +245,9 @@ object AutomationManager {
       putExtra(EXTRA_NOTIFICATION_TITLE, if (task.customNotificationTitle.isNotBlank()) task.customNotificationTitle else effectiveTitle)
       putExtra(EXTRA_NOTIFICATION_BODY, if (task.customNotificationBody.isNotBlank()) task.customNotificationBody else effectiveVoiceMessage.ifBlank { "$effectiveTitle starting now." })
       putExtra(EXTRA_VOICE_VOLUME, task.voiceVolume)
+      putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
+      putExtra(EXTRA_CATEGORY_NAME, catName)
+      putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)
     }
 
     val pendingStart = PendingIntent.getBroadcast(
@@ -307,6 +347,8 @@ object AutomationManager {
 
   fun startAutomationService(context: Context, task: RoutineTask) {
     if (task.isDeleted) return
+    val (catEmoji, catName) = resolveCategoryInfo(task)
+
     val serviceIntent = Intent(context, RoutineAutomationService::class.java).apply {
       action = ACTION_START_TASK
       putExtra(EXTRA_TASK_ID, task.id)
@@ -320,6 +362,9 @@ object AutomationManager {
       putExtra(EXTRA_NOTIFICATION_TITLE, task.notificationDisplayTitle)
       putExtra(EXTRA_NOTIFICATION_BODY, task.notificationDisplayBody)
       putExtra(EXTRA_VOICE_VOLUME, task.voiceVolume)
+      putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
+      putExtra(EXTRA_CATEGORY_NAME, catName)
+      putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)
     }
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

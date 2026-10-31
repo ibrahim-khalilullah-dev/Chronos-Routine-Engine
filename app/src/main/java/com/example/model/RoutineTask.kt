@@ -82,8 +82,18 @@ data class RoutineTask(
   val fridayStartTimeMinute: Int? = null,
   val fridayDurationMinutes: Int? = null,
   val fridayVoiceMessage: String? = null,
-  val voiceVolume: Float = 1.0f
+  val voiceVolume: Float = 1.0f,
+  val isPausedIndefinitely: Boolean = false,
+  val pausedUntilDateMillis: Long? = null,
+  val isPausedTodayOnly: Boolean = false
 ) {
+  fun isCurrentlyPaused(currentDateMillis: Long = System.currentTimeMillis()): Boolean {
+    if (isPausedIndefinitely) return true
+    if (pausedUntilDateMillis != null) {
+      return currentDateMillis < pausedUntilDateMillis
+    }
+    return isPausedTodayOnly
+  }
   val endTimeMinute: Int
     get() = (startTimeMinute + durationMinutes) % 1440
 

@@ -398,4 +398,132 @@ class ExampleRobolectricTest {
     }
     assertEquals(expected, RoutineDay.today())
   }
+
+  @Test
+  fun `automatic zero-click vault persistence and restore across fresh install state`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+
+    // Customize sleep duration and add a dynamic task
+    repo.setSleepDurationMinutes(480)
+    repo.setBufferMinutes(10)
+    val testTask = RoutineTask(
+      id = "vault_test_task",
+      title = "Vault Preserved Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 600,
+      durationMinutes = 45
+    )
+    repo.saveDynamicTasks(listOf(testTask))
+
+    // Clear preferences to simulate fresh reinstall after uninstall
+    val prefs = context.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
+    prefs.edit().clear().commit()
+
+    // Pristine repo initialized on fresh launch
+    val freshRepo = RoutineRepository(context)
+    val restored = freshRepo.checkAndAutoRestoreVault()
+
+    // Assert that auto-restore detected the vault and restored tasks
+    val tasks = freshRepo.getDynamicTasks()
+    val restoredTask = tasks.firstOrNull { it.id == "vault_test_task" }
+    assertNotNull(restoredTask)
+    assertEquals("Vault Preserved Task", restoredTask!!.title)
+    assertEquals(45, restoredTask.durationMinutes)
+  }
+
+  @Test
+  fun `task pause logic properly evaluates pause state and excludes from scheduleDay`() {
+    val activeTask = RoutineTask(
+      id = "task_active",
+      title = "Active Work",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 400,
+      durationMinutes = 60
+    )
+    val pausedTodayTask = RoutineTask(
+      id = "task_paused_today",
+      title = "Paused Today",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 500,
+      durationMinutes = 60,
+      isPausedTodayOnly = true
+    )
+    val pausedIndefiniteTask = RoutineTask(
+      id = "task_paused_indef",
+      title = "Paused Indefinitely",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 600,
+      durationMinutes = 60,
+      isPausedIndefinitely = true
+    )
+    val pausedFutureTask = RoutineTask(
+      id = "task_paused_future",
+      title = "Paused Future",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 700,
+      durationMinutes = 60,
+      pausedUntilDateMillis = System.currentTimeMillis() + 86400000L
+    )
+    val expiredPauseTask = RoutineTask(
+      id = "task_expired_pause",
+      title = "Expired Pause",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 800,
+      durationMinutes = 60,
+      pausedUntilDateMillis = System.currentTimeMillis() - 1000L
+    )
+
+    assertFalse(activeTask.isCurrentlyPaused())
+    assertTrue(pausedTodayTask.isCurrentlyPaused())
+    assertTrue(pausedIndefiniteTask.isCurrentlyPaused())
+    assertTrue(pausedFutureTask.isCurrentlyPaused())
+    assertFalse(expiredPauseTask.isCurrentlyPaused())
+
+    val anchors = SchedulerEngine.createDefaultAnchors(420)
+    val dynamicList = listOf(activeTask, pausedTodayTask, pausedIndefiniteTask)
+    val result = SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = dynamicList,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 5
+    )
+
+    // Assert that active task is scheduled, but paused tasks are completely excluded
+    val scheduledIds = result.scheduledTasks.map { it.id }
+    assertTrue("Active task must be scheduled", scheduledIds.contains("task_active"))
+    assertFalse("Paused today task must not be scheduled", scheduledIds.contains("task_paused_today"))
+    assertFalse("Paused indefinite task must not be scheduled", scheduledIds.contains("task_paused_indef"))
+  }
+
+  @Test
+  fun `scheduler enforces interTaskBufferMinutes between anchors and dynamic tasks`() {
+    val anchors = SchedulerEngine.createDefaultAnchors(420)
+    val slot2 = anchors.first { it.slotNumber == 2 }
+    val slot2End = slot2.startTimeMinute + slot2.durationMinutes
+
+    val dynamicTask = RoutineTask(
+      id = "dyn_1",
+      title = "Morning Deep Focus",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = slot2End, // Requests to start immediately when Slot 2 ends
+      durationMinutes = 60,
+      allowSplitting = false
+    )
+
+    val buffer = 10
+    val result = SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(dynamicTask),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = buffer
+    )
+
+    val scheduled = result.scheduledTasks.firstOrNull { it.id == "dyn_1" }
+    assertNotNull("Dynamic task must be scheduled", scheduled)
+    assertTrue(
+      "Dynamic task must not start before [Anchor End + buffer]",
+      scheduled!!.startTimeMinute >= slot2End + buffer
+    )
+  }
 }

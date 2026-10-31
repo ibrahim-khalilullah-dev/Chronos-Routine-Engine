@@ -2,17 +2,26 @@ package com.example.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Environment
 import com.example.engine.SchedulerEngine
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
 import com.example.model.TaskType
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
 class RoutineRepository(context: Context) {
 
+  private val appContext: Context = context.applicationContext
   private val prefs: SharedPreferences =
-    context.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
+    appContext.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
+
+  private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
   companion object {
     private const val KEY_ANCHORS = "key_anchors_json"
@@ -21,6 +30,183 @@ class RoutineRepository(context: Context) {
     private const val KEY_BUFFER_DURATION = "key_buffer_duration_mins"
     private const val KEY_ACTIVE_DAY = "key_active_day"
     private const val PURGE_THRESHOLD_MILLIS = 30L * 24 * 60 * 60 * 1000L // 30 Days
+    private const val VAULT_FILE_NAME = "chronos_vault.json"
+    private const val VAULT_DIRECTORY_NAME = "ChronosBackup"
+  }
+
+  init {
+    checkAndAutoRestoreVault()
+  }
+
+  /**
+   * Checks for persistent offline local vault and automatically restores data if
+   * SharedPreferences is in a pristine or unpopulated state.
+   * Returns true if a restore was executed.
+   */
+  fun checkAndAutoRestoreVault(): Boolean {
+    val hasStoredAnchors = prefs.contains(KEY_ANCHORS) && !prefs.getString(KEY_ANCHORS, null).isNullOrEmpty()
+    val hasStoredDynamic = prefs.contains(KEY_DYNAMIC_TASKS) && !prefs.getString(KEY_DYNAMIC_TASKS, null).isNullOrEmpty()
+
+    // If SharedPreferences already contains data, avoid overwriting
+    if (hasStoredAnchors && hasStoredDynamic) {
+      return false
+    }
+
+    val vaultFile = findVaultFile() ?: return false
+    return try {
+      val jsonStr = vaultFile.readText()
+      if (jsonStr.isBlank()) return false
+      val vaultObj = JSONObject(jsonStr)
+
+      val anchorsJson = vaultObj.optJSONArray("anchors")
+      val dynamicTasksJson = vaultObj.optJSONArray("dynamicTasks")
+      val sleepDuration = vaultObj.optInt("sleepDurationMinutes", 420)
+      val bufferMinutes = vaultObj.optInt("bufferMinutes", 5)
+
+      val editor = prefs.edit()
+      if (!prefs.contains(KEY_SLEEP_DURATION)) {
+        editor.putInt(KEY_SLEEP_DURATION, sleepDuration)
+      }
+      if (!prefs.contains(KEY_BUFFER_DURATION)) {
+        editor.putInt(KEY_BUFFER_DURATION, bufferMinutes)
+      }
+
+      var restoredSomething = false
+      if (!hasStoredAnchors && anchorsJson != null && anchorsJson.length() > 0) {
+        editor.putString(KEY_ANCHORS, anchorsJson.toString())
+        restoredSomething = true
+      }
+      if (!hasStoredDynamic && dynamicTasksJson != null && dynamicTasksJson.length() > 0) {
+        editor.putString(KEY_DYNAMIC_TASKS, dynamicTasksJson.toString())
+        restoredSomething = true
+      }
+
+      if (restoredSomething) {
+        editor.commit() // Commit synchronously to ensure immediate availability
+        true
+      } else {
+        false
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun findVaultFile(): File? {
+    // 1. App-specific external files root directory (survives app updates & accessible without storage permissions)
+    try {
+      val extDir = File(appContext.getExternalFilesDir(null), VAULT_DIRECTORY_NAME)
+      val extFile = File(extDir, VAULT_FILE_NAME)
+      if (extFile.exists() && extFile.length() > 0) {
+        return extFile
+      }
+    } catch (_: Exception) {}
+
+    // 2. Primary Public Documents directory (survives app uninstall on shared storage)
+    try {
+      val primaryDir = File(
+        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+        VAULT_DIRECTORY_NAME
+      )
+      val primaryFile = File(primaryDir, VAULT_FILE_NAME)
+      if (primaryFile.exists() && primaryFile.length() > 0) {
+        return primaryFile
+      }
+    } catch (_: Exception) {}
+
+    // 3. Fallback App-specific external documents directory
+    try {
+      val fallbackDir = File(
+        appContext.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
+        VAULT_DIRECTORY_NAME
+      )
+      val fallbackFile = File(fallbackDir, VAULT_FILE_NAME)
+      if (fallbackFile.exists() && fallbackFile.length() > 0) {
+        return fallbackFile
+      }
+    } catch (_: Exception) {}
+
+    // 4. App internal files directory (included in backup_rules.xml)
+    try {
+      val internalDir = File(appContext.filesDir, VAULT_DIRECTORY_NAME)
+      val internalFile = File(internalDir, VAULT_FILE_NAME)
+      if (internalFile.exists() && internalFile.length() > 0) {
+        return internalFile
+      }
+    } catch (_: Exception) {}
+
+    return null
+  }
+
+  private fun persistVaultAsync() {
+    ioScope.launch {
+      try {
+        persistVaultInternal()
+      } catch (_: Exception) {}
+    }
+  }
+
+  private fun persistVaultInternal() {
+    val anchorsRaw = prefs.getString(KEY_ANCHORS, null)
+    val dynamicRaw = prefs.getString(KEY_DYNAMIC_TASKS, null)
+    val sleepDuration = getSleepDurationMinutes()
+    val bufferMinutes = getBufferMinutes()
+
+    val vaultObj = JSONObject().apply {
+      put("version", 1)
+      put("timestamp", System.currentTimeMillis())
+      put("sleepDurationMinutes", sleepDuration)
+      put("bufferMinutes", bufferMinutes)
+      put("anchors", if (!anchorsRaw.isNullOrEmpty()) JSONArray(anchorsRaw) else JSONArray())
+      put("dynamicTasks", if (!dynamicRaw.isNullOrEmpty()) JSONArray(dynamicRaw) else JSONArray())
+    }
+    val content = vaultObj.toString(2)
+
+    // 1. App-specific external files root directory (guaranteed accessible)
+    try {
+      val extDir = File(appContext.getExternalFilesDir(null), VAULT_DIRECTORY_NAME)
+      if (!extDir.exists()) {
+        extDir.mkdirs()
+      }
+      val extFile = File(extDir, VAULT_FILE_NAME)
+      extFile.writeText(content)
+    } catch (_: Exception) {}
+
+    // 2. Primary Public Documents directory (survives app uninstall)
+    try {
+      val primaryDir = File(
+        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+        VAULT_DIRECTORY_NAME
+      )
+      if (!primaryDir.exists()) {
+        primaryDir.mkdirs()
+      }
+      val primaryFile = File(primaryDir, VAULT_FILE_NAME)
+      primaryFile.writeText(content)
+    } catch (_: Exception) {}
+
+    // 3. Fallback App-specific external documents directory
+    try {
+      val fallbackDir = File(
+        appContext.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
+        VAULT_DIRECTORY_NAME
+      )
+      if (!fallbackDir.exists()) {
+        fallbackDir.mkdirs()
+      }
+      val fallbackFile = File(fallbackDir, VAULT_FILE_NAME)
+      fallbackFile.writeText(content)
+    } catch (_: Exception) {}
+
+    // 4. App internal files directory (included in backup_rules.xml)
+    try {
+      val internalDir = File(appContext.filesDir, VAULT_DIRECTORY_NAME)
+      if (!internalDir.exists()) {
+        internalDir.mkdirs()
+      }
+      val internalFile = File(internalDir, VAULT_FILE_NAME)
+      internalFile.writeText(content)
+    } catch (_: Exception) {}
   }
 
   fun getSleepDurationMinutes(): Int {
@@ -29,6 +215,7 @@ class RoutineRepository(context: Context) {
 
   fun setSleepDurationMinutes(minutes: Int) {
     prefs.edit().putInt(KEY_SLEEP_DURATION, minutes).apply()
+    persistVaultAsync()
   }
 
   fun getBufferMinutes(): Int {
@@ -37,6 +224,7 @@ class RoutineRepository(context: Context) {
 
   fun setBufferMinutes(minutes: Int) {
     prefs.edit().putInt(KEY_BUFFER_DURATION, minutes).apply()
+    persistVaultAsync()
   }
 
   fun getActiveDay(): RoutineDay {
@@ -59,7 +247,12 @@ class RoutineRepository(context: Context) {
   }
 
   fun getAnchors(): List<RoutineTask> {
-    val rawJson = prefs.getString(KEY_ANCHORS, null)
+    var rawJson = prefs.getString(KEY_ANCHORS, null)
+    if (rawJson.isNullOrEmpty()) {
+      if (checkAndAutoRestoreVault()) {
+        rawJson = prefs.getString(KEY_ANCHORS, null)
+      }
+    }
     val sleepDuration = getSleepDurationMinutes()
     if (rawJson.isNullOrEmpty()) {
       val defaultAnchors = SchedulerEngine.createDefaultAnchors(sleepDuration)
@@ -80,10 +273,16 @@ class RoutineRepository(context: Context) {
   fun saveAnchors(anchors: List<RoutineTask>) {
     val json = serializeTaskList(anchors)
     prefs.edit().putString(KEY_ANCHORS, json).apply()
+    persistVaultAsync()
   }
 
   fun getDynamicTasks(): List<RoutineTask> {
-    val rawJson = prefs.getString(KEY_DYNAMIC_TASKS, null)
+    var rawJson = prefs.getString(KEY_DYNAMIC_TASKS, null)
+    if (rawJson.isNullOrEmpty()) {
+      if (checkAndAutoRestoreVault()) {
+        rawJson = prefs.getString(KEY_DYNAMIC_TASKS, null)
+      }
+    }
     if (rawJson.isNullOrEmpty()) {
       return emptyList()
     }
@@ -112,6 +311,7 @@ class RoutineRepository(context: Context) {
     val nonSplitTasks = tasks.filter { !it.isSplitPart }
     val json = serializeTaskList(nonSplitTasks)
     prefs.edit().putString(KEY_DYNAMIC_TASKS, json).apply()
+    persistVaultAsync()
   }
 
   fun softDeleteTask(taskId: String): List<RoutineTask> {
@@ -198,6 +398,9 @@ class RoutineRepository(context: Context) {
         if (t.fridayDurationMinutes != null) put("fridayDurationMinutes", t.fridayDurationMinutes)
         if (t.fridayVoiceMessage != null) put("fridayVoiceMessage", t.fridayVoiceMessage)
         put("voiceVolume", t.voiceVolume.toDouble())
+        put("isPausedIndefinitely", t.isPausedIndefinitely)
+        if (t.pausedUntilDateMillis != null) put("pausedUntilDateMillis", t.pausedUntilDateMillis)
+        put("isPausedTodayOnly", t.isPausedTodayOnly)
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -257,7 +460,10 @@ class RoutineRepository(context: Context) {
         fridayStartTimeMinute = if (obj.has("fridayStartTimeMinute")) obj.getInt("fridayStartTimeMinute") else null,
         fridayDurationMinutes = if (obj.has("fridayDurationMinutes")) obj.getInt("fridayDurationMinutes") else null,
         fridayVoiceMessage = if (obj.has("fridayVoiceMessage")) obj.getString("fridayVoiceMessage") else null,
-        voiceVolume = if (obj.has("voiceVolume")) obj.getDouble("voiceVolume").toFloat() else 1.0f
+        voiceVolume = if (obj.has("voiceVolume")) obj.getDouble("voiceVolume").toFloat() else 1.0f,
+        isPausedIndefinitely = obj.optBoolean("isPausedIndefinitely", false),
+        pausedUntilDateMillis = if (obj.has("pausedUntilDateMillis")) obj.getLong("pausedUntilDateMillis") else null,
+        isPausedTodayOnly = obj.optBoolean("isPausedTodayOnly", false)
       )
       list.add(task)
     }

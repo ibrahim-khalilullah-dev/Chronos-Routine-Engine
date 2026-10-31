@@ -116,6 +116,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
   val isBatteryOptimizationIgnored by viewModel.isBatteryOptimizationIgnored.collectAsState()
   val activeAutomation by viewModel.activeAutomation.collectAsState()
   val anchors by viewModel.anchors.collectAsState()
+  val dynamicTasks by viewModel.dynamicTasks.collectAsState()
   val sortMode by viewModel.sortMode.collectAsState()
   val deletedTasks by viewModel.deletedTasks.collectAsState()
   val currentMinute by viewModel.currentMinute.collectAsState()
@@ -133,6 +134,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
   )
 
   LaunchedEffect(Unit) {
+    viewModel.checkAndAutoRestoreVault()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
         != PackageManager.PERMISSION_GRANTED
@@ -317,6 +319,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
         NavigationTab.SETTINGS -> {
           val slot1 = anchors.firstOrNull { it.slotNumber == 1 }
           val slot2 = anchors.firstOrNull { it.slotNumber == 2 }
+          val allTasks = (anchors + dynamicTasks).filter { !it.isDeleted }
           SettingsScreen(
             sleepDurationMinutes = sleepDurationMinutes,
             bufferMinutes = bufferMinutes,
@@ -324,9 +327,16 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             slot2Task = slot2,
             deletedCount = deletedTasks.size,
             scheduledTasks = scheduleResult.scheduledTasks,
+            allTasks = allTasks,
             onUpdateSleepDuration = { viewModel.updateSleepDuration(it) },
             onUpdateBufferMinutes = { viewModel.updateBufferMinutes(it) },
-            onOpenTrashBin = { viewModel.selectTab(NavigationTab.TRASH) }
+            onOpenTrashBin = { viewModel.selectTab(NavigationTab.TRASH) },
+            onPauseTask = { id, isAnchor, slot, days, todayOnly, indef ->
+              viewModel.pauseTask(id, isAnchor, slot, days, todayOnly, indef)
+            },
+            onResumeTask = { id, isAnchor, slot ->
+              viewModel.resumeTask(id, isAnchor, slot)
+            }
           )
         }
 

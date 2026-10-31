@@ -144,10 +144,9 @@ fun TimelineScreen(
 
   // Header offset in LazyColumn items:
   // Item 0: OneUiHeader
-  // Item 1 (if activeAutomation.isRunning): ActiveAutomationBanner
-  // Item 2 (if !isDndGranted): DndPermissionBanner
+  // Item 1 (if !isDndGranted): DndPermissionBanner
   // Item: Section Title "Daily Timeline & Anchors"
-  val headerItemsOffset = 1 + (if (activeAutomation.isRunning) 1 else 0) + (if (!isDndGranted) 1 else 0) + 1
+  val headerItemsOffset = 1 + (if (!isDndGranted) 1 else 0) + 1
 
   // Real-time active running task (strictly evaluated only when viewing today)
   val activeTaskIndex = remember(scheduleResult.scheduledTasks, currentMinute, isToday) {
@@ -229,18 +228,7 @@ fun TimelineScreen(
         )
       }
 
-      // Active Automation Banner (Hardware DND or TTS Running)
-      if (activeAutomation.isRunning) {
-        item {
-          ActiveAutomationBanner(
-            automationState = activeAutomation,
-            onStop = {
-              haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-              onStopAutomation()
-            }
-          )
-        }
-      }
+
 
       // DND Permission Alert Banner
       if (!isDndGranted) {

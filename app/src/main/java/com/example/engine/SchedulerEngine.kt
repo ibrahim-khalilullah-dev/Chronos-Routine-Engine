@@ -308,7 +308,7 @@ object SchedulerEngine {
       val taskBuffer = if (task.type == TaskType.DYNAMIC) {
         task.interTaskBufferMinutes.coerceAtLeast(interTaskBufferMinutes)
       } else {
-        0
+        interTaskBufferMinutes
       }
       val totalBlock = task.durationMinutes + taskBuffer
 
@@ -359,9 +359,9 @@ object SchedulerEngine {
     activeDay: RoutineDay,
     interTaskBufferMinutes: Int = 5
   ): ScheduleResult {
-    // 1. Anchors active on this day (excluding soft-deleted)
+    // 1. Anchors active on this day (excluding soft-deleted and paused)
     val dayAnchors = anchors
-      .filter { !it.isDeleted && it.selectedDays.contains(activeDay) }
+      .filter { !it.isDeleted && !it.isCurrentlyPaused() && it.selectedDays.contains(activeDay) }
       .map { anchor ->
         if (anchor.slotNumber == 3 && activeDay == RoutineDay.FRIDAY) {
           anchor.copy(
@@ -379,8 +379,8 @@ object SchedulerEngine {
     val scheduledTasks = ArrayList(dayAnchors)
     val overflowTasks = mutableListOf<RoutineTask>()
 
-    // Filter dynamic tasks for the active day (excluding soft-deleted)
-    val dayDynamicTasks = dynamicTasks.filter { !it.isDeleted && it.selectedDays.contains(activeDay) }
+    // Filter dynamic tasks for the active day (excluding soft-deleted and paused)
+    val dayDynamicTasks = dynamicTasks.filter { !it.isDeleted && !it.isCurrentlyPaused() && it.selectedDays.contains(activeDay) }
 
     // 2. Separate Fluid Twins and Standard Dynamic Tasks
     val (fluidTwinTasks, standardTasks) = dayDynamicTasks.partition { it.isFluidTwin && !it.fluidTwinId.isNullOrEmpty() }

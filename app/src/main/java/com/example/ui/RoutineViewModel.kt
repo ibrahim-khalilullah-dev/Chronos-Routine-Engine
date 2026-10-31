@@ -88,6 +88,10 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   val activeAutomation: StateFlow<ActiveAutomationState> = RoutineAutomationService.serviceState
 
   init {
+    val restored = repository.checkAndAutoRestoreVault()
+    if (restored) {
+      refreshFromRepository()
+    }
     // Clock synchronization ticker for real-time progress bar & auto-scroll
     viewModelScope.launch {
       while (isActive) {
@@ -95,6 +99,23 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         delay(15000L) // Refresh every 15 seconds
       }
     }
+  }
+
+  fun checkAndAutoRestoreVault(): Boolean {
+    val restored = repository.checkAndAutoRestoreVault()
+    if (restored) {
+      refreshFromRepository()
+    }
+    return restored
+  }
+
+  fun refreshFromRepository() {
+    _sleepDurationMinutes.value = repository.getSleepDurationMinutes()
+    _bufferMinutes.value = repository.getBufferMinutes()
+    _anchors.value = repository.getAnchors()
+    _dynamicTasks.value = repository.getDynamicTasks()
+    _deletedTasks.value = repository.getDeletedTasks()
+    _activeDay.value = repository.getActiveDay()
   }
 
   private fun getCurrentMinuteOfDay(): Int {
@@ -225,6 +246,103 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun updateBufferMinutes(minutes: Int) {
     _bufferMinutes.value = minutes.coerceIn(0, 30)
     repository.setBufferMinutes(_bufferMinutes.value)
+  }
+
+  fun pauseTask(
+    taskId: String,
+    isAnchor: Boolean,
+    slotNumber: Int?,
+    days: Int?,
+    todayOnly: Boolean,
+    indefinitely: Boolean
+  ) {
+    viewModelScope.launch {
+      scheduleMutex.withLock {
+        val now = System.currentTimeMillis()
+        val pausedUntil = when {
+          indefinitely -> null
+          todayOnly -> {
+            val cal = Calendar.getInstance().apply {
+              set(Calendar.HOUR_OF_DAY, 23)
+              set(Calendar.MINUTE, 59)
+              set(Calendar.SECOND, 59)
+              set(Calendar.MILLISECOND, 999)
+            }
+            cal.timeInMillis
+          }
+          days != null && days > 0 -> {
+            now + days * 24L * 60 * 60 * 1000
+          }
+          else -> null
+        }
+
+        if (isAnchor && slotNumber != null) {
+          val updated = _anchors.value.map { task ->
+            if (task.slotNumber == slotNumber) {
+              task.copy(
+                isPausedIndefinitely = indefinitely,
+                isPausedTodayOnly = todayOnly,
+                pausedUntilDateMillis = pausedUntil
+              )
+            } else {
+              task
+            }
+          }
+          _anchors.value = updated
+          repository.saveAnchors(updated)
+        } else {
+          val updated = _dynamicTasks.value.map { task ->
+            if (task.id == taskId || task.parentTaskId == taskId) {
+              task.copy(
+                isPausedIndefinitely = indefinitely,
+                isPausedTodayOnly = todayOnly,
+                pausedUntilDateMillis = pausedUntil
+              )
+            } else {
+              task
+            }
+          }
+          _dynamicTasks.value = updated
+          repository.saveDynamicTasks(updated)
+        }
+      }
+    }
+  }
+
+  fun resumeTask(taskId: String, isAnchor: Boolean, slotNumber: Int?) {
+    viewModelScope.launch {
+      scheduleMutex.withLock {
+        if (isAnchor && slotNumber != null) {
+          val updated = _anchors.value.map { task ->
+            if (task.slotNumber == slotNumber) {
+              task.copy(
+                isPausedIndefinitely = false,
+                isPausedTodayOnly = false,
+                pausedUntilDateMillis = null
+              )
+            } else {
+              task
+            }
+          }
+          _anchors.value = updated
+          repository.saveAnchors(updated)
+        } else {
+          val updated = _dynamicTasks.value.map { task ->
+            if (task.id == taskId || task.parentTaskId == taskId) {
+              task.copy(
+                isPausedIndefinitely = false,
+                isPausedTodayOnly = false,
+                pausedUntilDateMillis = null
+              )
+            } else {
+              task
+            }
+          }
+          _dynamicTasks.value = updated
+          repository.saveDynamicTasks(updated)
+        }
+      }
+    }
   }
 
   fun updateSlot5Protected(

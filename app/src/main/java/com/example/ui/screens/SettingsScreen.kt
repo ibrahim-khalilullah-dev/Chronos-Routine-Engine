@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -26,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -36,14 +38,22 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +69,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -147,11 +158,17 @@ fun resolveTaskCategory(task: RoutineTask): AnalyticsCategory {
   }
 }
 
-enum class AnalyticsTimeRange(val label: String, val multiplier: Int, val headerLabel: String) {
-  DAY("Day", 1, "TODAY 24H"),
-  WEEK("Week", 7, "WEEK TOTAL"),
-  MONTH("Month", 30, "MONTH TOTAL"),
-  THREE_MONTHS("3 Months", 90, "3-MO TOTAL")
+enum class AnalyticsTimeRange(val label: String, val headerLabel: String) {
+  DAY("Day", "TODAY 24H"),
+  WEEK("Week", "WEEK TOTAL"),
+  MONTH("Month", "MONTH TOTAL"),
+  THREE_MONTHS("3 Months", "3-MO TOTAL")
+}
+
+enum class PauseOption {
+  TODAY_ONLY,
+  N_DAYS,
+  INDEFINITELY
 }
 
 enum class AnalyticsViewMode {
@@ -178,6 +195,7 @@ data class OverviewCategoryItem(
  * PHASE 5B / 6C / PART 2: 24-Hour Circular Donut & Dual-Mode Analytics Chart Engine in SettingsScreen.
  * Pure real-rating driven historical metrics & categorized overview list with task length counts.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
   sleepDurationMinutes: Int = 420,
@@ -186,9 +204,12 @@ fun SettingsScreen(
   slot2Task: RoutineTask? = null,
   deletedCount: Int = 0,
   scheduledTasks: List<RoutineTask> = emptyList(),
+  allTasks: List<RoutineTask> = emptyList(),
   onUpdateSleepDuration: (Float) -> Unit = {},
   onUpdateBufferMinutes: (Int) -> Unit,
   onOpenTrashBin: () -> Unit = {},
+  onPauseTask: (taskId: String, isAnchor: Boolean, slotNumber: Int?, days: Int?, todayOnly: Boolean, indefinitely: Boolean) -> Unit = { _, _, _, _, _, _ -> },
+  onResumeTask: (taskId: String, isAnchor: Boolean, slotNumber: Int?) -> Unit = { _, _, _ -> },
   modifier: Modifier = Modifier
 ) {
   var restBufferInput by remember(bufferMinutes) {
@@ -221,7 +242,6 @@ fun SettingsScreen(
 
   // Aggregated Categories (pure user-rating driven for historical modes; scheduled routine for Day mode)
   val categoryAggregates = remember(effectiveTasks, selectedRange, hasHistoricalData) {
-    val multiplier = selectedRange.multiplier
     val isHistorical = selectedRange != AnalyticsTimeRange.DAY
     val relevantTasks = if (isHistorical) {
       effectiveTasks.filter { taskRatingCache.containsKey(it.id) }
@@ -230,14 +250,14 @@ fun SettingsScreen(
     }
 
     val totalTimePool = if (isHistorical) {
-      relevantTasks.sumOf { it.durationMinutes } * multiplier
+      relevantTasks.sumOf { it.durationMinutes }
     } else {
-      1440 * multiplier
+      1440
     }
 
     val grouped = relevantTasks.groupBy { resolveTaskCategory(it) }
     grouped.map { (category, tasks) ->
-      val totalMins = tasks.sumOf { it.durationMinutes } * multiplier
+      val totalMins = tasks.sumOf { it.durationMinutes }
       val pct = if (totalTimePool > 0) (totalMins.toFloat() / totalTimePool.toFloat()) * 100f else 0f
       val ratings = tasks.mapNotNull { taskRatingCache[it.id] }
       val avgRating = if (ratings.isNotEmpty()) ratings.average().toInt() else null
@@ -245,7 +265,7 @@ fun SettingsScreen(
         category = category,
         totalMinutes = totalMins,
         percentage = pct,
-        taskCount = tasks.size * multiplier,
+        taskCount = tasks.size,
         avgRating = avgRating
       )
     }.sortedByDescending { it.totalMinutes }
@@ -257,11 +277,16 @@ fun SettingsScreen(
     if (ratings.isNotEmpty()) ratings.average().toInt() else null
   }
 
+  // Source tasks for Overview list (including paused tasks)
+  val overviewSourceTasks = remember(allTasks, effectiveTasks) {
+    if (allTasks.isNotEmpty()) allTasks else effectiveTasks
+  }
+
   // Overview Category Filter State
   var selectedOverviewCategoryId by remember { mutableStateOf<String?>("all") }
 
-  val overviewCategoryChips = remember(effectiveTasks) {
-    effectiveTasks
+  val overviewCategoryChips = remember(overviewSourceTasks) {
+    overviewSourceTasks
       .groupBy { resolveTaskCategory(it) }
       .map { (cat, tasks) ->
         OverviewCategoryItem(
@@ -274,13 +299,18 @@ fun SettingsScreen(
       .sortedByDescending { it.count }
   }
 
-  val filteredOverviewTasks = remember(effectiveTasks, selectedOverviewCategoryId) {
+  val filteredOverviewTasks = remember(overviewSourceTasks, selectedOverviewCategoryId) {
     if (selectedOverviewCategoryId == null || selectedOverviewCategoryId == "all") {
-      effectiveTasks
+      overviewSourceTasks
     } else {
-      effectiveTasks.filter { resolveTaskCategory(it).id == selectedOverviewCategoryId }
+      overviewSourceTasks.filter { resolveTaskCategory(it).id == selectedOverviewCategoryId }
     }
   }
+
+  // Task Pause & Vacation State
+  var taskToPause by remember { mutableStateOf<RoutineTask?>(null) }
+  var pauseMode by remember { mutableStateOf(PauseOption.TODAY_ONLY) }
+  var pauseDaysInput by remember { mutableStateOf("3") }
 
   // Currently inspected task
   val inspectedTask = remember(inspectedTaskId, effectiveTasks) {
@@ -702,21 +732,37 @@ fun SettingsScreen(
                   color = Color(0xFF94A3B8)
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                val totalH = (totalScheduledDayMinutes * selectedRange.multiplier) / 60
-                val totalM = (totalScheduledDayMinutes * selectedRange.multiplier) % 60
+                val isHistorical = selectedRange != AnalyticsTimeRange.DAY
+                val displayMinutes = if (isHistorical) {
+                  effectiveTasks.filter { taskRatingCache.containsKey(it.id) }.sumOf { it.durationMinutes }
+                } else {
+                  totalScheduledDayMinutes
+                }
+                val totalH = displayMinutes / 60
+                val totalM = displayMinutes % 60
                 Text(
                   text = "${totalH}h ${totalM}m",
                   fontSize = 19.sp,
                   fontWeight = FontWeight.Black,
                   color = Color.White
                 )
-                val activePct = ((totalScheduledDayMinutes.toFloat() / 1440f) * 100f).toInt()
-                Text(
-                  text = if (totalScheduledDayMinutes > 0) "$activePct% Scheduled" else "0% Pristine",
-                  fontSize = 10.sp,
-                  fontWeight = FontWeight.Medium,
-                  color = Color(0xFF10B981)
-                )
+                if (isHistorical) {
+                  val completedCount = effectiveTasks.count { taskRatingCache.containsKey(it.id) }
+                  Text(
+                    text = if (completedCount > 0) "$completedCount Completed" else "0 Completed",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF10B981)
+                  )
+                } else {
+                  val activePct = ((totalScheduledDayMinutes.toFloat() / 1440f) * 100f).toInt()
+                  Text(
+                    text = if (totalScheduledDayMinutes > 0) "$activePct% Scheduled" else "0% Pristine",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF10B981)
+                  )
+                }
               }
             }
           }
@@ -1372,6 +1418,60 @@ fun SettingsScreen(
                     )
                   }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // 5. Pause / Vacation Control
+                val isPaused = task.isCurrentlyPaused()
+                if (isPaused) {
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFFF59E0B).copy(alpha = 0.18f),
+                    border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
+                    modifier = Modifier
+                      .testTag("overview_task_resume_${task.id}")
+                      .clickable {
+                        onResumeTask(task.id, task.type == TaskType.ANCHOR_STANDARD, task.slotNumber)
+                      }
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      Text("⏸️", fontSize = 10.sp)
+                      Spacer(modifier = Modifier.width(3.dp))
+                      Text(
+                        text = "Resume",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFFBBF24)
+                      )
+                    }
+                  }
+                } else {
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1E293B).copy(alpha = 0.7f),
+                    border = BorderStroke(1.dp, Color(0xFF334155)),
+                    modifier = Modifier
+                      .testTag("overview_task_pause_${task.id}")
+                      .clickable {
+                        taskToPause = task
+                        pauseMode = PauseOption.TODAY_ONLY
+                        pauseDaysInput = "3"
+                      }
+                  ) {
+                    Box(
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Text(
+                        text = "⏸️",
+                        fontSize = 11.sp
+                      )
+                    }
+                  }
+                }
               }
 
               if (index < filteredOverviewTasks.lastIndex) {
@@ -1388,5 +1488,268 @@ fun SettingsScreen(
     }
 
     Spacer(modifier = Modifier.height(24.dp))
+  }
+
+  // Task Pause Configuration Bottom Sheet
+  if (taskToPause != null) {
+    val currentTask = taskToPause!!
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+      onDismissRequest = { taskToPause = null },
+      sheetState = sheetState,
+      sheetGesturesEnabled = false,
+      dragHandle = null,
+      containerColor = Color(0xFF121620),
+      shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 24.dp, vertical = 20.dp)
+          .navigationBarsPadding(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+      ) {
+        // Header
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Column {
+            Text(
+              text = "Pause Task",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Black,
+              color = Color.White
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+              text = currentTask.title,
+              fontSize = 13.sp,
+              fontWeight = FontWeight.Medium,
+              color = Color(0xFFA5B4FC),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
+          IconButton(
+            onClick = { taskToPause = null },
+            modifier = Modifier.size(32.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.Close,
+              contentDescription = "Close",
+              tint = Color(0xFF94A3B8)
+            )
+          }
+        }
+
+        HorizontalDivider(color = Color(0xFF1F2637), thickness = 1.dp)
+
+        // Option 1: Pause for Today Only
+        val isToday = pauseMode == PauseOption.TODAY_ONLY
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(
+              BorderStroke(1.dp, if (isToday) Color(0xFFF59E0B) else Color(0xFF1F2637)),
+              RoundedCornerShape(14.dp)
+            )
+            .clickable { pauseMode = PauseOption.TODAY_ONLY },
+          color = if (isToday) Color(0xFFF59E0B).copy(alpha = 0.12f) else Color(0xFF161B26),
+          shape = RoundedCornerShape(14.dp)
+        ) {
+          Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            RadioButton(
+              selected = isToday,
+              onClick = { pauseMode = PauseOption.TODAY_ONLY },
+              colors = RadioButtonDefaults.colors(
+                selectedColor = Color(0xFFF59E0B),
+                unselectedColor = Color(0xFF64748B)
+              )
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+              Text(
+                text = "Pause for Today Only",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+              )
+              Text(
+                text = "Resumes automatically tomorrow at 00:00",
+                fontSize = 11.sp,
+                color = Color(0xFF94A3B8)
+              )
+            }
+          }
+        }
+
+        // Option 2: Pause for N Days
+        val isNDays = pauseMode == PauseOption.N_DAYS
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(
+              BorderStroke(1.dp, if (isNDays) Color(0xFFF59E0B) else Color(0xFF1F2637)),
+              RoundedCornerShape(14.dp)
+            )
+            .clickable { pauseMode = PauseOption.N_DAYS },
+          color = if (isNDays) Color(0xFFF59E0B).copy(alpha = 0.12f) else Color(0xFF161B26),
+          shape = RoundedCornerShape(14.dp)
+        ) {
+          Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              RadioButton(
+                selected = isNDays,
+                onClick = { pauseMode = PauseOption.N_DAYS },
+                colors = RadioButtonDefaults.colors(
+                  selectedColor = Color(0xFFF59E0B),
+                  unselectedColor = Color(0xFF64748B)
+                )
+              )
+              Spacer(modifier = Modifier.width(10.dp))
+              Column {
+                Text(
+                  text = "Pause for N Days",
+                  fontSize = 14.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color.White
+                )
+                Text(
+                  text = "Put on vacation hold for custom number of days",
+                  fontSize = 11.sp,
+                  color = Color(0xFF94A3B8)
+                )
+              }
+            }
+            if (isNDays) {
+              Spacer(modifier = Modifier.height(10.dp))
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 36.dp)
+              ) {
+                Text(
+                  text = "Days to pause:",
+                  fontSize = 12.sp,
+                  color = Color(0xFFCBD5E1)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                BasicTextField(
+                  value = pauseDaysInput,
+                  onValueChange = { newVal ->
+                    val filtered = newVal.filter { it.isDigit() }
+                    if (filtered.length <= 2) {
+                      pauseDaysInput = filtered
+                    }
+                  },
+                  textStyle = TextStyle(
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                  ),
+                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  singleLine = true,
+                  modifier = Modifier
+                    .width(60.dp)
+                    .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
+                    .border(1.dp, Color(0xFF38BDF8), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                )
+              }
+            }
+          }
+        }
+
+        // Option 3: Pause Indefinitely
+        val isIndefinite = pauseMode == PauseOption.INDEFINITELY
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(
+              BorderStroke(1.dp, if (isIndefinite) Color(0xFFF59E0B) else Color(0xFF1F2637)),
+              RoundedCornerShape(14.dp)
+            )
+            .clickable { pauseMode = PauseOption.INDEFINITELY },
+          color = if (isIndefinite) Color(0xFFF59E0B).copy(alpha = 0.12f) else Color(0xFF161B26),
+          shape = RoundedCornerShape(14.dp)
+        ) {
+          Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            RadioButton(
+              selected = isIndefinite,
+              onClick = { pauseMode = PauseOption.INDEFINITELY },
+              colors = RadioButtonDefaults.colors(
+                selectedColor = Color(0xFFF59E0B),
+                unselectedColor = Color(0xFF64748B)
+              )
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+              Text(
+                text = "Pause Indefinitely",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+              )
+              Text(
+                text = "Remains paused until you manually resume it",
+                fontSize = 11.sp,
+                color = Color(0xFF94A3B8)
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Action Buttons
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          OutlinedButton(
+            onClick = { taskToPause = null },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, Color(0xFF334155))
+          ) {
+            Text("Cancel", color = Color(0xFF94A3B8))
+          }
+          Button(
+            onClick = {
+              val days = if (pauseMode == PauseOption.N_DAYS) {
+                pauseDaysInput.toIntOrNull()?.coerceAtLeast(1) ?: 1
+              } else null
+              onPauseTask(
+                currentTask.id,
+                currentTask.type == TaskType.ANCHOR_STANDARD,
+                currentTask.slotNumber,
+                days,
+                pauseMode == PauseOption.TODAY_ONLY,
+                pauseMode == PauseOption.INDEFINITELY
+              )
+              taskToPause = null
+            },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B))
+          ) {
+            Text("Pause Task", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+          }
+        }
+      }
+    }
   }
 }
