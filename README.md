@@ -4,9 +4,9 @@
 
 **Circadian Anchors • Auto-Balancing Fluid Twins • Hardware DND & Lock-Screen TTS • Samsung One UI 8.5 Aesthetic**
 
-[![Download Chronos APK](https://img.shields.io/badge/Download-Latest%20APK%20(v1.0.0)-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/releases/latest/download/app-release.apk)
+[![Download Chronos APK](https://img.shields.io/badge/Download-Chronos%20APK-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk)
 
-**[👉 Direct APK Download Link](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/releases/latest/download/app-release.apk)**
+> **Direct Download:** Click the badge above or tap [Download chronos.apk](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk) to install directly on your Android device.
 
 <br/>
 
@@ -108,9 +108,11 @@ Evening Reading | 45 | 19:30 | N | ALL | Y | Decompression literature
 ## 🚀 Building & Installation
 
 ### Option A: Direct APK Download (Recommended)
-Download the signed release APK directly to your Android device:
+Download the compiled APK directly to your Android device with zero 404 errors:
 
-[![Download APK](https://img.shields.io/badge/Download-Release%20APK-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/releases/latest/download/app-release.apk)
+[![Download Chronos APK](https://img.shields.io/badge/Download-Chronos%20APK-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk)
+
+> **Direct Download Link:** [https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk)
 
 ### Option B: Build from Source (Gradle)
 Clone the repository and build using Gradle:
