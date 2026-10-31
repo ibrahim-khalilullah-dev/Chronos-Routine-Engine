@@ -4,9 +4,12 @@
 
 **Circadian Anchors • Auto-Balancing Fluid Twins • Hardware DND & Lock-Screen TTS • Samsung One UI 8.5 Aesthetic**
 
-[![Download Chronos APK](https://img.shields.io/badge/Download-Chronos%20APK-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk)
+<br/>
 
-> **Direct Download:** Click the badge above or tap [Download chronos.apk](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk) to install directly on your Android device.
+<a href="https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk">
+  <img src="https://img.shields.io/badge/INSTALL%20CHRONOS-ANDROID%20APK-10B981?style=for-the-badge&logo=android&logoColor=white" height="54" alt="Install Chronos APK" />
+</a>
+<p><sub>Tap the button above to instantly download <b>chronos.apk</b> directly to your phone.</sub></p>
 
 <br/>
 
@@ -105,16 +108,8 @@ Evening Reading | 45 | 19:30 | N | ALL | Y | Decompression literature
 
 ---
 
-## 🚀 Building & Installation
+## 🚀 Building from Source
 
-### Option A: Direct APK Download (Recommended)
-Download the compiled APK directly to your Android device with zero 404 errors:
-
-[![Download Chronos APK](https://img.shields.io/badge/Download-Chronos%20APK-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk)
-
-> **Direct Download Link:** [https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk)
-
-### Option B: Build from Source (Gradle)
 Clone the repository and build using Gradle:
 
 ```bash
