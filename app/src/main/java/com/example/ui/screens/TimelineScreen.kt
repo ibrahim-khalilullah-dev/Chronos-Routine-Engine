@@ -116,6 +116,7 @@ fun TimelineScreen(
   onOpenTrashBin: () -> Unit,
   onStopAutomation: () -> Unit,
   onRefreshDndPermission: () -> Unit,
+  onRateTask: ((RoutineTask, Int) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
@@ -281,7 +282,8 @@ fun TimelineScreen(
               onQuickAdjust = { delta ->
                 task.slotNumber?.let { slot -> onQuickAdjustAnchor(slot, delta) }
               },
-              onEditClick = { onEditTask(task) }
+              onEditClick = { onEditTask(task) },
+              onRateTask = { _, rating -> onRateTask?.invoke(task, rating) }
             )
           }
           TaskType.DYNAMIC -> {
@@ -289,7 +291,8 @@ fun TimelineScreen(
               task = task,
               currentMinute = currentMinute,
               isToday = isToday,
-              onEditClick = { onEditTask(task) }
+              onEditClick = { onEditTask(task) },
+              onRateTask = { _, rating -> onRateTask?.invoke(task, rating) }
             )
           }
         }
@@ -753,25 +756,50 @@ fun OneUiHeader(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // Quick Metrics Strip
+    // Quick Metrics Strip (Frosted One UI 8.5 Luxury Aesthetic)
     Surface(
       modifier = Modifier
         .fillMaxWidth()
-        .clip(RoundedCornerShape(20.dp)),
-      color = OneUiSurfaceElevated
+        .clip(RoundedCornerShape(20.dp))
+        .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(20.dp)),
+      color = Color(0xFF121620)
     ) {
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceAround
+          .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceAround,
+        verticalAlignment = Alignment.CenterVertically
       ) {
-        MetricItem(label = "7 Anchors", value = "Locked 🔒", color = Color(0xFFA5B4FC))
-        MetricItem(label = "Scheduled", value = "$scheduledCount tasks", color = DynamicGradientEnd)
+        MetricItem(
+          label = "7 Anchors",
+          value = "Locked 🔒",
+          dotColor = Color(0xFF818CF8),
+          valueColor = Color(0xFFA5B4FC)
+        )
+        Box(
+          modifier = Modifier
+            .width(1.dp)
+            .height(24.dp)
+            .background(Color.White.copy(alpha = 0.08f))
+        )
+        MetricItem(
+          label = "Scheduled",
+          value = "$scheduledCount tasks",
+          dotColor = Color(0xFF38BDF8),
+          valueColor = Color(0xFFE2E8F0)
+        )
+        Box(
+          modifier = Modifier
+            .width(1.dp)
+            .height(24.dp)
+            .background(Color.White.copy(alpha = 0.08f))
+        )
         MetricItem(
           label = "Overflow",
           value = if (overflowCount == 0) "Clear ✓" else "$overflowCount pending",
-          color = if (overflowCount == 0) Color(0xFF10B981) else WarningAmber
+          dotColor = if (overflowCount == 0) Color(0xFF10B981) else WarningAmber,
+          valueColor = if (overflowCount == 0) Color(0xFF34D399) else WarningAmber
         )
       }
     }
@@ -779,11 +807,31 @@ fun OneUiHeader(
 }
 
 @Composable
-private fun MetricItem(label: String, value: String, color: Color) {
+private fun MetricItem(label: String, value: String, dotColor: Color, valueColor: Color) {
   Column(horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(text = label, color = TextTertiary, fontSize = 11.sp)
-    Spacer(modifier = Modifier.height(2.dp))
-    Text(text = value, color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Box(
+        modifier = Modifier
+          .size(6.dp)
+          .clip(CircleShape)
+          .background(dotColor)
+      )
+      Spacer(modifier = Modifier.width(5.dp))
+      Text(
+        text = label,
+        color = Color(0xFF94A3B8),
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.4.sp
+      )
+    }
+    Spacer(modifier = Modifier.height(3.dp))
+    Text(
+      text = value,
+      color = valueColor,
+      fontSize = 13.sp,
+      fontWeight = FontWeight.Bold
+    )
   }
 }
 

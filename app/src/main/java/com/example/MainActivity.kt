@@ -279,6 +279,9 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             },
             onRefreshDndPermission = {
               viewModel.refreshDndPermission()
+            },
+            onRateTask = { task, rating ->
+              viewModel.recordTaskRating(task, rating)
             }
           )
         }
@@ -336,7 +339,8 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             },
             onResumeTask = { id, isAnchor, slot ->
               viewModel.resumeTask(id, isAnchor, slot)
-            }
+            },
+            taskRatingHistory = viewModel.getTaskRatingHistory()
           )
         }
 

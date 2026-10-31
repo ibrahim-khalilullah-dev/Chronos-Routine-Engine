@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +55,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -78,6 +81,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.RoutineTask
+import com.example.model.TaskRatingRecord
 import com.example.model.TaskType
 import com.example.ui.components.taskRatingCache
 import com.example.ui.theme.DangerRed
@@ -89,6 +93,9 @@ import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
 import com.example.ui.theme.WarningAmber
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.atan2
 import kotlin.math.sqrt
 
@@ -158,6 +165,38 @@ fun resolveTaskCategory(task: RoutineTask): AnalyticsCategory {
   }
 }
 
+fun resolveRecordCategory(record: TaskRatingRecord): AnalyticsCategory {
+  val catId = record.category.lowercase()
+  if (ANALYTICS_CATEGORIES.containsKey(catId)) {
+    return ANALYTICS_CATEGORIES[catId]!!
+  }
+  val titleLower = record.taskTitle.lowercase()
+  return when {
+    titleLower.contains("sleep") || titleLower.contains("bed") || titleLower.contains("nap") ->
+      ANALYTICS_CATEGORIES["sleep"]!!
+    titleLower.contains("work") || titleLower.contains("code") || titleLower.contains("job") ->
+      ANALYTICS_CATEGORIES["work"]!!
+    titleLower.contains("study") || titleLower.contains("learn") || titleLower.contains("exam") ->
+      ANALYTICS_CATEGORIES["studying"]!!
+    titleLower.contains("break") || titleLower.contains("coffee") || titleLower.contains("tea") ->
+      ANALYTICS_CATEGORIES["break"]!!
+    titleLower.contains("train") || titleLower.contains("gym") || titleLower.contains("run") || titleLower.contains("workout") ->
+      ANALYTICS_CATEGORIES["training"]!!
+    titleLower.contains("eat") || titleLower.contains("lunch") || titleLower.contains("dinner") || titleLower.contains("breakfast") || titleLower.contains("meal") ->
+      ANALYTICS_CATEGORIES["eating"]!!
+    titleLower.contains("read") || titleLower.contains("book") ->
+      ANALYTICS_CATEGORIES["reading"]!!
+    titleLower.contains("goal") ->
+      ANALYTICS_CATEGORIES["goals"]!!
+    titleLower.contains("family") || titleLower.contains("home") ->
+      ANALYTICS_CATEGORIES["family"]!!
+    record.category.contains("ANCHOR", ignoreCase = true) ->
+      ANALYTICS_CATEGORIES["anchor_standard"]!!
+    else ->
+      AnalyticsCategory(id = "general", icon = "⚡", name = record.taskTitle.take(18), color = Color(0xFF06B6D4))
+  }
+}
+
 enum class AnalyticsTimeRange(val label: String, val headerLabel: String) {
   DAY("Day", "TODAY 24H"),
   WEEK("Week", "WEEK TOTAL"),
@@ -205,6 +244,7 @@ fun SettingsScreen(
   deletedCount: Int = 0,
   scheduledTasks: List<RoutineTask> = emptyList(),
   allTasks: List<RoutineTask> = emptyList(),
+  taskRatingHistory: List<TaskRatingRecord> = emptyList(),
   onUpdateSleepDuration: (Float) -> Unit = {},
   onUpdateBufferMinutes: (Int) -> Unit,
   onOpenTrashBin: () -> Unit = {},
@@ -215,6 +255,11 @@ fun SettingsScreen(
   var restBufferInput by remember(bufferMinutes) {
     mutableStateOf(bufferMinutes.toString())
   }
+  var showBufferConfirmDialog by remember { mutableStateOf(false) }
+  var pendingBufferValue by remember { mutableStateOf(bufferMinutes) }
+
+  // Expanded category in PROGRESS_BARS view
+  var expandedCategoryId by remember { mutableStateOf<String?>(null) }
 
   // Analytics State
   var selectedRange by remember { mutableStateOf(AnalyticsTimeRange.DAY) }
@@ -235,46 +280,67 @@ fun SettingsScreen(
     effectiveTasks.sumOf { it.durationMinutes }.coerceAtMost(1440)
   }
 
-  // Check if real user completion ratings exist for historical modes (Week, Month, 3 Months)
-  val hasHistoricalData = remember(taskRatingCache) {
-    taskRatingCache.isNotEmpty()
+  // Historical data filtered by selected range (90-day threshold auto-purged)
+  val rangeFilteredHistory = remember(taskRatingHistory, selectedRange) {
+    val now = System.currentTimeMillis()
+    when (selectedRange) {
+      AnalyticsTimeRange.DAY -> emptyList()
+      AnalyticsTimeRange.WEEK -> taskRatingHistory.filter { it.timestamp >= now - 7L * 86400000L }
+      AnalyticsTimeRange.MONTH -> taskRatingHistory.filter { it.timestamp >= now - 30L * 86400000L }
+      AnalyticsTimeRange.THREE_MONTHS -> taskRatingHistory.filter { it.timestamp >= now - 90L * 86400000L }
+    }
+  }
+
+  // Check if historical data exists for non-DAY modes
+  val hasHistoricalData = remember(rangeFilteredHistory, selectedRange) {
+    if (selectedRange == AnalyticsTimeRange.DAY) true else rangeFilteredHistory.isNotEmpty()
   }
 
   // Aggregated Categories (pure user-rating driven for historical modes; scheduled routine for Day mode)
-  val categoryAggregates = remember(effectiveTasks, selectedRange, hasHistoricalData) {
-    val isHistorical = selectedRange != AnalyticsTimeRange.DAY
-    val relevantTasks = if (isHistorical) {
-      effectiveTasks.filter { taskRatingCache.containsKey(it.id) }
+  val categoryAggregates = remember(effectiveTasks, selectedRange, rangeFilteredHistory) {
+    if (selectedRange == AnalyticsTimeRange.DAY) {
+      val totalTimePool = 1440
+      val grouped = effectiveTasks.groupBy { resolveTaskCategory(it) }
+      grouped.map { (category, tasks) ->
+        val totalMins = tasks.sumOf { it.durationMinutes }
+        val pct = if (totalTimePool > 0) (totalMins.toFloat() / totalTimePool.toFloat()) * 100f else 0f
+        val ratings = tasks.mapNotNull { taskRatingCache[it.id] }
+        val avgRating = if (ratings.isNotEmpty()) ratings.average().toInt() else null
+        CategoryAggregate(
+          category = category,
+          totalMinutes = totalMins,
+          percentage = pct,
+          taskCount = tasks.size,
+          avgRating = avgRating
+        )
+      }.sortedByDescending { it.totalMinutes }
     } else {
-      effectiveTasks
+      val totalTimePool = rangeFilteredHistory.sumOf { it.durationMinutes }
+      val grouped = rangeFilteredHistory.groupBy { resolveRecordCategory(it) }
+      grouped.map { (category, records) ->
+        val totalMins = records.sumOf { it.durationMinutes }
+        val pct = if (totalTimePool > 0) (totalMins.toFloat() / totalTimePool.toFloat()) * 100f else 0f
+        val ratings = records.map { it.ratingPct }
+        val avgRating = if (ratings.isNotEmpty()) ratings.average().toInt() else null
+        CategoryAggregate(
+          category = category,
+          totalMinutes = totalMins,
+          percentage = pct,
+          taskCount = records.size,
+          avgRating = avgRating
+        )
+      }.sortedByDescending { it.totalMinutes }
     }
-
-    val totalTimePool = if (isHistorical) {
-      relevantTasks.sumOf { it.durationMinutes }
-    } else {
-      1440
-    }
-
-    val grouped = relevantTasks.groupBy { resolveTaskCategory(it) }
-    grouped.map { (category, tasks) ->
-      val totalMins = tasks.sumOf { it.durationMinutes }
-      val pct = if (totalTimePool > 0) (totalMins.toFloat() / totalTimePool.toFloat()) * 100f else 0f
-      val ratings = tasks.mapNotNull { taskRatingCache[it.id] }
-      val avgRating = if (ratings.isNotEmpty()) ratings.average().toInt() else null
-      CategoryAggregate(
-        category = category,
-        totalMinutes = totalMins,
-        percentage = pct,
-        taskCount = tasks.size,
-        avgRating = avgRating
-      )
-    }.sortedByDescending { it.totalMinutes }
   }
 
   // Overall Focus Rating average from all tasks with ratings
-  val overallAvgRating = remember(effectiveTasks) {
-    val ratings = effectiveTasks.mapNotNull { taskRatingCache[it.id] }
-    if (ratings.isNotEmpty()) ratings.average().toInt() else null
+  val overallAvgRating = remember(selectedRange, effectiveTasks, rangeFilteredHistory) {
+    if (selectedRange == AnalyticsTimeRange.DAY) {
+      val ratings = effectiveTasks.mapNotNull { taskRatingCache[it.id] }
+      if (ratings.isNotEmpty()) ratings.average().toInt() else null
+    } else {
+      if (rangeFilteredHistory.isNotEmpty()) rangeFilteredHistory.map { it.ratingPct }.average().toInt() else null
+    }
   }
 
   // Source tasks for Overview list (including paused tasks)
@@ -645,44 +711,64 @@ fun SettingsScreen(
                 )
               }
 
-              // 3. Draw active task segments
-              effectiveTasks.forEach { task ->
-                val isSelected = task.id == inspectedTaskId
-                val category = resolveTaskCategory(task)
-                val startAngle = ((task.startTimeMinute / 1440f) * 360f) - 90f
-                val sweepAngle = ((task.durationMinutes / 1440f) * 360f).coerceAtLeast(1f)
+              // 3. Draw active task segments or historical category slices
+              if (selectedRange == AnalyticsTimeRange.DAY) {
+                effectiveTasks.forEach { task ->
+                  val isSelected = task.id == inspectedTaskId
+                  val category = resolveTaskCategory(task)
+                  val startAngle = ((task.startTimeMinute / 1440f) * 360f) - 90f
+                  val sweepAngle = ((task.durationMinutes / 1440f) * 360f).coerceAtLeast(1f)
 
-                val effectiveStroke = if (isSelected) strokeWidthPx + 6.dp.toPx() else strokeWidthPx
-                val effectiveColor = if (inspectedTaskId == null || isSelected) {
-                  category.color
-                } else {
-                  category.color.copy(alpha = 0.35f)
-                }
+                  val effectiveStroke = if (isSelected) strokeWidthPx + 6.dp.toPx() else strokeWidthPx
+                  val effectiveColor = if (inspectedTaskId == null || isSelected) {
+                    category.color
+                  } else {
+                    category.color.copy(alpha = 0.35f)
+                  }
 
-                drawArc(
-                  color = effectiveColor,
-                  startAngle = startAngle,
-                  sweepAngle = sweepAngle,
-                  useCenter = false,
-                  topLeft = topLeft,
-                  size = arcSize,
-                  style = Stroke(
-                    width = effectiveStroke,
-                    cap = if (sweepAngle > 4f) StrokeCap.Round else StrokeCap.Butt
-                  )
-                )
-
-                // Highlight border when inspected
-                if (isSelected) {
                   drawArc(
-                    color = Color.White,
+                    color = effectiveColor,
                     startAngle = startAngle,
                     sweepAngle = sweepAngle,
                     useCenter = false,
                     topLeft = topLeft,
                     size = arcSize,
-                    style = Stroke(width = 2.dp.toPx())
+                    style = Stroke(
+                      width = effectiveStroke,
+                      cap = if (sweepAngle > 4f) StrokeCap.Round else StrokeCap.Butt
+                    )
                   )
+
+                  // Highlight border when inspected
+                  if (isSelected) {
+                    drawArc(
+                      color = Color.White,
+                      startAngle = startAngle,
+                      sweepAngle = sweepAngle,
+                      useCenter = false,
+                      topLeft = topLeft,
+                      size = arcSize,
+                      style = Stroke(width = 2.dp.toPx())
+                    )
+                  }
+                }
+              } else {
+                var currentAngle = -90f
+                categoryAggregates.forEach { agg ->
+                  val sweepAngle = ((agg.percentage / 100f) * 360f).coerceAtLeast(1f)
+                  drawArc(
+                    color = agg.category.color,
+                    startAngle = currentAngle,
+                    sweepAngle = sweepAngle,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(
+                      width = strokeWidthPx,
+                      cap = if (sweepAngle > 8f) StrokeCap.Round else StrokeCap.Butt
+                    )
+                  )
+                  currentAngle += sweepAngle
                 }
               }
             }
@@ -698,7 +784,7 @@ fun SettingsScreen(
               horizontalAlignment = Alignment.CenterHorizontally,
               verticalArrangement = Arrangement.Center
             ) {
-              if (inspectedTask != null) {
+              if (inspectedTask != null && selectedRange == AnalyticsTimeRange.DAY) {
                 val cat = resolveTaskCategory(inspectedTask)
                 Text(
                   text = "${cat.icon} ${cat.name}",
@@ -734,7 +820,7 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(2.dp))
                 val isHistorical = selectedRange != AnalyticsTimeRange.DAY
                 val displayMinutes = if (isHistorical) {
-                  effectiveTasks.filter { taskRatingCache.containsKey(it.id) }.sumOf { it.durationMinutes }
+                  rangeFilteredHistory.sumOf { it.durationMinutes }
                 } else {
                   totalScheduledDayMinutes
                 }
@@ -747,9 +833,9 @@ fun SettingsScreen(
                   color = Color.White
                 )
                 if (isHistorical) {
-                  val completedCount = effectiveTasks.count { taskRatingCache.containsKey(it.id) }
+                  val completedCount = rangeFilteredHistory.size
                   Text(
-                    text = if (completedCount > 0) "$completedCount Completed" else "0 Completed",
+                    text = if (completedCount > 0) "$completedCount Logged" else "0 Logged",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
                     color = Color(0xFF10B981)
@@ -860,12 +946,22 @@ fun SettingsScreen(
               }
             } else {
               categoryAggregates.forEach { item ->
+                val isExpanded = expandedCategoryId == item.category.id
                 Column(
                   modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF161B26))
-                    .border(1.dp, Color(0xFF1F2637), RoundedCornerShape(12.dp))
+                    .border(
+                      BorderStroke(
+                        1.dp,
+                        if (isExpanded) item.category.color.copy(alpha = 0.7f) else Color(0xFF1F2637)
+                      ),
+                      RoundedCornerShape(12.dp)
+                    )
+                    .clickable {
+                      expandedCategoryId = if (isExpanded) null else item.category.id
+                    }
                     .padding(12.dp)
                 ) {
                   Row(
@@ -931,6 +1027,122 @@ fun SettingsScreen(
                         .clip(RoundedCornerShape(4.dp))
                         .background(item.category.color)
                     )
+                  }
+
+                  // Expandable Accordion: Task details & historical completion logs
+                  AnimatedVisibility(visible = isExpanded) {
+                    Column(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                    ) {
+                      HorizontalDivider(color = Color(0xFF1F2637), thickness = 1.dp)
+                      Spacer(modifier = Modifier.height(8.dp))
+
+                      if (selectedRange == AnalyticsTimeRange.DAY) {
+                        val matchingTasks = effectiveTasks.filter { resolveTaskCategory(it).id == item.category.id }
+                        if (matchingTasks.isEmpty()) {
+                          Text(
+                            text = "No scheduled tasks in this category",
+                            fontSize = 11.sp,
+                            color = TextTertiary,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                          )
+                        } else {
+                          matchingTasks.forEach { t ->
+                            val rating = taskRatingCache[t.id]
+                            Row(
+                              modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                              horizontalArrangement = Arrangement.SpaceBetween,
+                              verticalAlignment = Alignment.CenterVertically
+                            ) {
+                              Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                  text = t.title,
+                                  fontSize = 12.sp,
+                                  fontWeight = FontWeight.SemiBold,
+                                  color = Color.White,
+                                  maxLines = 1,
+                                  overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                  text = "${t.formattedStartTime} → ${t.formattedEndTime} • ${t.formattedDuration}",
+                                  fontSize = 10.sp,
+                                  color = Color(0xFF94A3B8)
+                                )
+                              }
+                              if (rating != null) {
+                                Surface(
+                                  shape = RoundedCornerShape(6.dp),
+                                  color = Color(0xFF10B981).copy(alpha = 0.2f)
+                                ) {
+                                  Text(
+                                    text = "★ $rating%",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF10B981),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                  )
+                                }
+                              }
+                            }
+                          }
+                        }
+                      } else {
+                        // Historical completion records for this category
+                        val matchingRecords = rangeFilteredHistory.filter { resolveRecordCategory(it).id == item.category.id }
+                        val dateFormat = remember { SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()) }
+                        if (matchingRecords.isEmpty()) {
+                          Text(
+                            text = "No completed task records in this category",
+                            fontSize = 11.sp,
+                            color = TextTertiary,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                          )
+                        } else {
+                          matchingRecords.forEach { record ->
+                            Row(
+                              modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 5.dp),
+                              horizontalArrangement = Arrangement.SpaceBetween,
+                              verticalAlignment = Alignment.CenterVertically
+                            ) {
+                              Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                  text = record.taskTitle,
+                                  fontSize = 12.sp,
+                                  fontWeight = FontWeight.SemiBold,
+                                  color = Color.White,
+                                  maxLines = 1,
+                                  overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                  text = "${record.durationMinutes}m • ${dateFormat.format(Date(record.timestamp))}",
+                                  fontSize = 10.sp,
+                                  color = Color(0xFF94A3B8)
+                                )
+                              }
+                              Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f))
+                              ) {
+                                Text(
+                                  text = "★ ${record.ratingPct}%",
+                                  fontSize = 10.sp,
+                                  fontWeight = FontWeight.Bold,
+                                  color = Color(0xFF10B981),
+                                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
                   }
                 }
               }
@@ -1125,44 +1337,122 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        OutlinedTextField(
-          value = restBufferInput,
-          onValueChange = { newVal ->
-            val clean = newVal.filter { it.isDigit() }.take(3)
-            restBufferInput = clean
-            val parsed = clean.toIntOrNull() ?: 0
-            onUpdateBufferMinutes(parsed)
-          },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          trailingIcon = {
-            Text(
-              text = "min",
+        val parsedVal = restBufferInput.toIntOrNull()
+        val canApply = parsedVal != null && parsedVal != bufferMinutes && parsedVal in 0..30
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          OutlinedTextField(
+            value = restBufferInput,
+            onValueChange = { newVal ->
+              val clean = newVal.filter { it.isDigit() }.take(2)
+              if (clean.isEmpty()) {
+                restBufferInput = ""
+              } else {
+                val num = clean.toIntOrNull() ?: 0
+                val clamped = num.coerceIn(0, 30)
+                restBufferInput = clamped.toString()
+              }
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            trailingIcon = {
+              Text(
+                text = "min",
+                color = Color(0xFF10B981),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(end = 8.dp)
+              )
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedContainerColor = OneUiSurfaceHigh,
+              unfocusedContainerColor = OneUiSurfaceHigh,
+              focusedBorderColor = Color(0xFF10B981),
+              unfocusedBorderColor = OneUiBorder,
+              focusedTextColor = TextPrimary,
+              unfocusedTextColor = TextPrimary
+            ),
+            textStyle = LocalTextStyle.current.copy(
+              fontSize = 14.sp,
+              fontWeight = FontWeight.Bold,
+              textAlign = TextAlign.Center
+            ),
+            modifier = Modifier
+              .width(96.dp)
+              .testTag("settings_rest_buffer_input")
+          )
+
+          if (canApply) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Surface(
+              shape = RoundedCornerShape(10.dp),
               color = Color(0xFF10B981),
-              fontWeight = FontWeight.SemiBold,
-              fontSize = 12.sp,
-              modifier = Modifier.padding(end = 8.dp)
-            )
-          },
-          singleLine = true,
-          shape = RoundedCornerShape(12.dp),
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = OneUiSurfaceHigh,
-            unfocusedContainerColor = OneUiSurfaceHigh,
-            focusedBorderColor = Color(0xFF10B981),
-            unfocusedBorderColor = OneUiBorder,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary
-          ),
-          textStyle = LocalTextStyle.current.copy(
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-          ),
-          modifier = Modifier
-            .width(105.dp)
-            .testTag("settings_rest_buffer_input")
-        )
+              modifier = Modifier
+                .testTag("settings_rest_buffer_apply_btn")
+                .clickable {
+                  pendingBufferValue = parsedVal ?: bufferMinutes
+                  showBufferConfirmDialog = true
+                }
+            ) {
+              Text(
+                text = "Apply",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F172A),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+              )
+            }
+          }
+        }
       }
+    }
+
+    if (showBufferConfirmDialog) {
+      AlertDialog(
+        onDismissRequest = { showBufferConfirmDialog = false },
+        containerColor = Color(0xFF161B26),
+        shape = RoundedCornerShape(20.dp),
+        title = {
+          Text(
+            text = "Update Rest Buffer?",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+          )
+        },
+        text = {
+          Text(
+            text = "Set inter-task rest buffer to ${pendingBufferValue} minutes? This will automatically realign gaps between all dynamic routine tasks.",
+            fontSize = 13.sp,
+            color = Color(0xFFCBD5E1),
+            lineHeight = 18.sp
+          )
+        },
+        confirmButton = {
+          Button(
+            onClick = {
+              onUpdateBufferMinutes(pendingBufferValue)
+              restBufferInput = pendingBufferValue.toString()
+              showBufferConfirmDialog = false
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+            shape = RoundedCornerShape(10.dp)
+          ) {
+            Text("Apply", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+          }
+        },
+        dismissButton = {
+          TextButton(
+            onClick = {
+              restBufferInput = bufferMinutes.toString()
+              showBufferConfirmDialog = false
+            }
+          ) {
+            Text("Cancel", color = TextSecondary)
+          }
+        }
+      )
     }
 
     // ==============================================================
@@ -1419,56 +1709,59 @@ fun SettingsScreen(
                   }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // 5. Pause / Vacation Control
-                val isPaused = task.isCurrentlyPaused()
-                if (isPaused) {
-                  Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFFF59E0B).copy(alpha = 0.18f),
-                    border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
-                    modifier = Modifier
-                      .testTag("overview_task_resume_${task.id}")
-                      .clickable {
-                        onResumeTask(task.id, task.type == TaskType.ANCHOR_STANDARD, task.slotNumber)
-                      }
-                  ) {
-                    Row(
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                      verticalAlignment = Alignment.CenterVertically
+                // 5. Pause / Vacation Control (Slot 1 Reverse Sleep is strictly protected and cannot be paused)
+                val isSlot1 = task.slotNumber == 1
+                if (!isSlot1) {
+                  Spacer(modifier = Modifier.width(8.dp))
+                  val isPaused = task.isCurrentlyPaused()
+                  val isAnchorTask = task.slotNumber != null || task.type == TaskType.ANCHOR_STANDARD || task.type == TaskType.ANCHOR_ELASTIC
+                  if (isPaused) {
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = Color(0xFFF59E0B).copy(alpha = 0.18f),
+                      border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
+                      modifier = Modifier
+                        .testTag("overview_task_resume_${task.id}")
+                        .clickable {
+                          onResumeTask(task.id, isAnchorTask, task.slotNumber)
+                        }
                     ) {
-                      Text("⏸️", fontSize = 10.sp)
-                      Spacer(modifier = Modifier.width(3.dp))
-                      Text(
-                        text = "Resume",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFBBF24)
-                      )
+                      Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                      ) {
+                        Text("⏸️", fontSize = 10.sp)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                          text = "Resume",
+                          fontSize = 11.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = Color(0xFFFBBF24)
+                        )
+                      }
                     }
-                  }
-                } else {
-                  Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF1E293B).copy(alpha = 0.7f),
-                    border = BorderStroke(1.dp, Color(0xFF334155)),
-                    modifier = Modifier
-                      .testTag("overview_task_pause_${task.id}")
-                      .clickable {
-                        taskToPause = task
-                        pauseMode = PauseOption.TODAY_ONLY
-                        pauseDaysInput = "3"
-                      }
-                  ) {
-                    Box(
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                      contentAlignment = Alignment.Center
+                  } else {
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = Color(0xFF1E293B).copy(alpha = 0.7f),
+                      border = BorderStroke(1.dp, Color(0xFF334155)),
+                      modifier = Modifier
+                        .testTag("overview_task_pause_${task.id}")
+                        .clickable {
+                          taskToPause = task
+                          pauseMode = PauseOption.TODAY_ONLY
+                          pauseDaysInput = "3"
+                        }
                     ) {
-                      Text(
-                        text = "⏸️",
-                        fontSize = 11.sp
-                      )
+                      Box(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Text(
+                          text = "⏸️",
+                          fontSize = 11.sp
+                        )
+                      }
                     }
                   }
                 }
@@ -1732,9 +2025,10 @@ fun SettingsScreen(
               val days = if (pauseMode == PauseOption.N_DAYS) {
                 pauseDaysInput.toIntOrNull()?.coerceAtLeast(1) ?: 1
               } else null
+              val isAnchorTask = currentTask.slotNumber != null || currentTask.type == TaskType.ANCHOR_STANDARD || currentTask.type == TaskType.ANCHOR_ELASTIC
               onPauseTask(
                 currentTask.id,
-                currentTask.type == TaskType.ANCHOR_STANDARD,
+                isAnchorTask,
                 currentTask.slotNumber,
                 days,
                 pauseMode == PauseOption.TODAY_ONLY,

@@ -8,6 +8,7 @@ import com.example.engine.ScheduleResult
 import com.example.engine.SchedulerEngine
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
+import com.example.model.TaskRatingRecord
 import com.example.model.TaskType
 import com.example.service.ActiveAutomationState
 import com.example.service.AutomationManager
@@ -56,7 +57,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   private val _activeDay = MutableStateFlow(repository.getActiveDay())
   val activeDay: StateFlow<RoutineDay> = _activeDay.asStateFlow()
 
-  private val _sortMode = MutableStateFlow(TimelineSortMode.EARLIEST_START)
+  private val _sortMode = MutableStateFlow(repository.getSortMode())
   val sortMode: StateFlow<TimelineSortMode> = _sortMode.asStateFlow()
 
   private val _sleepDurationMinutes = MutableStateFlow(repository.getSleepDurationMinutes())
@@ -92,6 +93,11 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     if (restored) {
       refreshFromRepository()
     }
+    // Populate permanent task ratings into cache
+    val history = repository.getTaskRatingHistory()
+    for (r in history) {
+      com.example.ui.components.taskRatingCache[r.taskId] = r.ratingPct
+    }
     // Clock synchronization ticker for real-time progress bar & auto-scroll
     viewModelScope.launch {
       while (isActive) {
@@ -116,6 +122,11 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     _dynamicTasks.value = repository.getDynamicTasks()
     _deletedTasks.value = repository.getDeletedTasks()
     _activeDay.value = repository.getActiveDay()
+    _sortMode.value = repository.getSortMode()
+    val history = repository.getTaskRatingHistory()
+    for (r in history) {
+      com.example.ui.components.taskRatingCache[r.taskId] = r.ratingPct
+    }
   }
 
   private fun getCurrentMinuteOfDay(): Int {
@@ -201,7 +212,23 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
 
   fun setSortMode(mode: TimelineSortMode) {
     _sortMode.value = mode
+    repository.setSortMode(mode)
   }
+
+  fun recordTaskRating(task: RoutineTask, ratingPct: Int) {
+    val record = TaskRatingRecord(
+      taskId = task.id,
+      taskTitle = task.title,
+      category = task.category ?: if (task.type == TaskType.ANCHOR_SLEEP) "Sleep" else if (task.type == TaskType.ANCHOR_ELASTIC) "Rest Buffer" else if (task.type == TaskType.ANCHOR_STANDARD) "Anchor" else "General",
+      durationMinutes = task.durationMinutes,
+      ratingPct = ratingPct,
+      timestamp = System.currentTimeMillis()
+    )
+    repository.recordTaskRating(record)
+    com.example.ui.components.taskRatingCache[task.id] = ratingPct
+  }
+
+  fun getTaskRatingHistory(): List<TaskRatingRecord> = repository.getTaskRatingHistory()
 
   fun refreshPermissions() {
     _isDndGranted.value = AutomationManager.isDndPermissionGranted(getApplication())
@@ -276,9 +303,16 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           else -> null
         }
 
-        if (isAnchor && slotNumber != null) {
+        if (slotNumber == 1) {
+          // Slot 1 (Reverse Sleep) is strictly protected and cannot be paused
+          return@launch
+        }
+
+        val targetIsAnchor = isAnchor || slotNumber != null || _anchors.value.any { it.id == taskId }
+        if (targetIsAnchor) {
+          val targetSlot = slotNumber ?: _anchors.value.firstOrNull { it.id == taskId }?.slotNumber
           val updated = _anchors.value.map { task ->
-            if (task.slotNumber == slotNumber) {
+            if (task.id == taskId || (targetSlot != null && task.slotNumber == targetSlot)) {
               task.copy(
                 isPausedIndefinitely = indefinitely,
                 isPausedTodayOnly = todayOnly,
@@ -312,9 +346,11 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun resumeTask(taskId: String, isAnchor: Boolean, slotNumber: Int?) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        if (isAnchor && slotNumber != null) {
+        val targetIsAnchor = isAnchor || slotNumber != null || _anchors.value.any { it.id == taskId }
+        if (targetIsAnchor) {
+          val targetSlot = slotNumber ?: _anchors.value.firstOrNull { it.id == taskId }?.slotNumber
           val updated = _anchors.value.map { task ->
-            if (task.slotNumber == slotNumber) {
+            if (task.id == taskId || (targetSlot != null && task.slotNumber == targetSlot)) {
               task.copy(
                 isPausedIndefinitely = false,
                 isPausedTodayOnly = false,

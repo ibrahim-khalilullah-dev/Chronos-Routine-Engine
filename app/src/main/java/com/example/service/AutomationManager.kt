@@ -260,12 +260,12 @@ object AutomationManager {
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         if (am.canScheduleExactAlarms()) {
-          am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pendingStart)
+          am.setAlarmClock(AlarmManager.AlarmClockInfo(startCal.timeInMillis, pendingStart), pendingStart)
         } else {
           am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pendingStart)
         }
-      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pendingStart)
+      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        am.setAlarmClock(AlarmManager.AlarmClockInfo(startCal.timeInMillis, pendingStart), pendingStart)
       } else {
         am.setExact(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pendingStart)
       }

@@ -6,7 +6,9 @@ import android.os.Environment
 import com.example.engine.SchedulerEngine
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
+import com.example.model.TaskRatingRecord
 import com.example.model.TaskType
+import com.example.ui.TimelineSortMode
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +31,10 @@ class RoutineRepository(context: Context) {
     private const val KEY_SLEEP_DURATION = "key_sleep_duration_mins"
     private const val KEY_BUFFER_DURATION = "key_buffer_duration_mins"
     private const val KEY_ACTIVE_DAY = "key_active_day"
+    private const val KEY_SORT_MODE = "key_sort_mode"
+    private const val KEY_TASK_RATING_HISTORY = "key_task_rating_history_json"
     private const val PURGE_THRESHOLD_MILLIS = 30L * 24 * 60 * 60 * 1000L // 30 Days
+    private const val RATING_HISTORY_THRESHOLD_MILLIS = 90L * 24 * 60 * 60 * 1000L // 90 Days
     private const val VAULT_FILE_NAME = "chronos_vault.json"
     private const val VAULT_DIRECTORY_NAME = "ChronosBackup"
   }
@@ -78,6 +83,18 @@ class RoutineRepository(context: Context) {
       }
       if (!hasStoredDynamic && dynamicTasksJson != null && dynamicTasksJson.length() > 0) {
         editor.putString(KEY_DYNAMIC_TASKS, dynamicTasksJson.toString())
+        restoredSomething = true
+      }
+
+      val sortModeName = vaultObj.optString("sortMode", null)
+      if (sortModeName != null && !prefs.contains(KEY_SORT_MODE)) {
+        editor.putString(KEY_SORT_MODE, sortModeName)
+        restoredSomething = true
+      }
+
+      val ratingHistoryJson = vaultObj.optJSONArray("ratingHistory")
+      if (ratingHistoryJson != null && ratingHistoryJson.length() > 0 && !prefs.contains(KEY_TASK_RATING_HISTORY)) {
+        editor.putString(KEY_TASK_RATING_HISTORY, ratingHistoryJson.toString())
         restoredSomething = true
       }
 
@@ -152,13 +169,18 @@ class RoutineRepository(context: Context) {
     val sleepDuration = getSleepDurationMinutes()
     val bufferMinutes = getBufferMinutes()
 
+    val sortModeName = prefs.getString(KEY_SORT_MODE, TimelineSortMode.EARLIEST_START.name)
+    val ratingHistoryRaw = prefs.getString(KEY_TASK_RATING_HISTORY, null)
+
     val vaultObj = JSONObject().apply {
       put("version", 1)
       put("timestamp", System.currentTimeMillis())
       put("sleepDurationMinutes", sleepDuration)
       put("bufferMinutes", bufferMinutes)
+      put("sortMode", sortModeName)
       put("anchors", if (!anchorsRaw.isNullOrEmpty()) JSONArray(anchorsRaw) else JSONArray())
       put("dynamicTasks", if (!dynamicRaw.isNullOrEmpty()) JSONArray(dynamicRaw) else JSONArray())
+      put("ratingHistory", if (!ratingHistoryRaw.isNullOrEmpty()) JSONArray(ratingHistoryRaw) else JSONArray())
     }
     val content = vaultObj.toString(2)
 
@@ -244,6 +266,82 @@ class RoutineRepository(context: Context) {
 
   fun setActiveDay(day: RoutineDay) {
     prefs.edit().putString(KEY_ACTIVE_DAY, day.name).apply()
+  }
+
+  fun getSortMode(): TimelineSortMode {
+    val name = prefs.getString(KEY_SORT_MODE, TimelineSortMode.EARLIEST_START.name)
+    return try {
+      TimelineSortMode.valueOf(name ?: TimelineSortMode.EARLIEST_START.name)
+    } catch (_: Exception) {
+      TimelineSortMode.EARLIEST_START
+    }
+  }
+
+  fun setSortMode(mode: TimelineSortMode) {
+    prefs.edit().putString(KEY_SORT_MODE, mode.name).apply()
+    persistVaultAsync()
+  }
+
+  fun getTaskRatingHistory(): List<TaskRatingRecord> {
+    val rawJson = prefs.getString(KEY_TASK_RATING_HISTORY, null) ?: return emptyList()
+    return try {
+      val array = JSONArray(rawJson)
+      val list = mutableListOf<TaskRatingRecord>()
+      val cutoff = System.currentTimeMillis() - RATING_HISTORY_THRESHOLD_MILLIS
+      var hasExpired = false
+      for (i in 0 until array.length()) {
+        val obj = array.getJSONObject(i)
+        val ts = obj.optLong("timestamp", 0L)
+        if (ts >= cutoff) {
+          list.add(
+            TaskRatingRecord(
+              taskId = obj.optString("taskId", ""),
+              taskTitle = obj.optString("taskTitle", ""),
+              category = obj.optString("category", "General"),
+              durationMinutes = obj.optInt("durationMinutes", 0),
+              ratingPct = obj.optInt("ratingPct", 0),
+              timestamp = ts
+            )
+          )
+        } else {
+          hasExpired = true
+        }
+      }
+      if (hasExpired) {
+        saveTaskRatingHistoryInternal(list)
+      }
+      list
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  fun recordTaskRating(record: TaskRatingRecord) {
+    val existing = getTaskRatingHistory().toMutableList()
+    val index = existing.indexOfFirst { it.taskId == record.taskId }
+    if (index >= 0) {
+      existing[index] = record
+    } else {
+      existing.add(record)
+    }
+    saveTaskRatingHistoryInternal(existing)
+  }
+
+  private fun saveTaskRatingHistoryInternal(records: List<TaskRatingRecord>) {
+    val array = JSONArray()
+    for (r in records) {
+      val obj = JSONObject().apply {
+        put("taskId", r.taskId)
+        put("taskTitle", r.taskTitle)
+        put("category", r.category)
+        put("durationMinutes", r.durationMinutes)
+        put("ratingPct", r.ratingPct)
+        put("timestamp", r.timestamp)
+      }
+      array.put(obj)
+    }
+    prefs.edit().putString(KEY_TASK_RATING_HISTORY, array.toString()).apply()
+    persistVaultAsync()
   }
 
   fun getAnchors(): List<RoutineTask> {

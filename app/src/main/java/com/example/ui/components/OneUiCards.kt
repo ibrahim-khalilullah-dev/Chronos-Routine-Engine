@@ -392,49 +392,39 @@ fun AnchorSlotCard(
           if (pendingDeltaMinutes != 0) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              // Green Checkmark [ ✓ ]
-              IconButton(
+              // Clean Checkmark [ ✓ ]
+              Surface(
                 onClick = {
                   haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                   onQuickAdjust(pendingDeltaMinutes)
                   pendingDeltaMinutes = 0
                 },
-                modifier = Modifier
-                  .size(34.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFF10B981).copy(alpha = 0.15f))
-                  .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f)), CircleShape)
-                  .testTag("save_quick_adjust_slot_$slotNum")
+                shape = CircleShape,
+                color = Color(0xFF10B981).copy(alpha = 0.2f),
+                border = BorderStroke(1.dp, Color(0xFF10B981)),
+                modifier = Modifier.size(32.dp).testTag("save_quick_adjust_slot_$slotNum")
               ) {
-                Icon(
-                  imageVector = Icons.Default.Check,
-                  contentDescription = "Confirm shift",
-                  tint = Color(0xFF10B981),
-                  modifier = Modifier.size(18.dp)
-                )
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                  Icon(Icons.Default.Check, contentDescription = "Confirm", tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                }
               }
 
-              // Crimson Cross [ ✕ ]
-              IconButton(
+              // Clean Cross [ ✕ ]
+              Surface(
                 onClick = {
                   haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                   pendingDeltaMinutes = 0
                 },
-                modifier = Modifier
-                  .size(34.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFFEF4444).copy(alpha = 0.15f))
-                  .border(BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.6f)), CircleShape)
-                  .testTag("cancel_quick_adjust_slot_$slotNum")
+                shape = CircleShape,
+                color = Color(0xFFEF4444).copy(alpha = 0.2f),
+                border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                modifier = Modifier.size(32.dp).testTag("cancel_quick_adjust_slot_$slotNum")
               ) {
-                Icon(
-                  imageVector = Icons.Default.Close,
-                  contentDescription = "Cancel shift",
-                  tint = Color(0xFFEF4444),
-                  modifier = Modifier.size(18.dp)
-                )
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                  Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                }
               }
             }
           } else {

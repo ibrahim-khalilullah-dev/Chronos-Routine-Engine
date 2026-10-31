@@ -185,3 +185,13 @@ data class ScheduleGap(
   val endMinute: Int,
   val durationMinutes: Int = endMinute - startMinute
 )
+
+@Immutable
+data class TaskRatingRecord(
+  val taskId: String,
+  val taskTitle: String,
+  val category: String,
+  val durationMinutes: Int,
+  val ratingPct: Int,
+  val timestamp: Long = System.currentTimeMillis()
+)

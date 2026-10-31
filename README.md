@@ -30,9 +30,9 @@
 
 ## 📖 Overview
 
-**Chronos** (ক্রোনস) is an ultra-precise, offline, mathematical routine engine and hardware automation platform designed around circadian biology and cognitive peak management. Unlike traditional calendar apps or static checklist trackers, Chronos enforces **mathematical non-encroachment boundaries**, **hydraulic communicating duration pools**, and **system-level hardware telemetry automations** (Do Not Disturb suppression, exact alarm scheduling, audio-ducking Text-to-Speech announcements, and dynamic foreground notifications).
+**Chronos** (ক্রোনস) is an ultra-precise, offline mathematical routine engine and hardware automation platform designed around circadian biology and cognitive peak management. It enforces **mathematical non-encroachment boundaries**, **hydraulic communicating duration pools**, and **system-level hardware telemetry automations** (Do Not Disturb suppression, exact alarm scheduling, audio-ducking Text-to-Speech announcements, and dynamic foreground notifications).
 
-The user interface strictly adheres to **Samsung One UI 8.5 ergonomics**: a pure **AMOLED Obsidian Dark Palette (`#080A0F`)**, 20dp smooth squircles, hairline structure borders (`#1F2637`), and a comfortable 60/40 thumb-interaction reach ratio.
+The user interface adheres to **Samsung One UI 8.5 ergonomics**: a pure **AMOLED Obsidian Dark Palette (`#080A0F`)**, 20dp smooth squircles, hairline structure borders (`#1F2637`), and a comfortable 60/40 thumb-interaction reach ratio.
 
 ---
 
@@ -45,66 +45,57 @@ Chronos anchors human circadian rhythms across 7 immovable daily boundaries. Dyn
 | :---: | :--- | :---: | :---: | :--- |
 | **Slot 1** | **Reverse Sleep Tracker** | 10:00 PM | 420m (7h) | Backward modulo calculation (`% 1440`) derived from Slot 2 wake time. |
 | **Slot 2** | **Morning Routine (Fajr)** | 05:00 AM | 30m | Circadian metabolic baseline & morning wakefulness anchor. |
-| **Slot 3** | **Afternoon Focus (Dhuhr)** | 01:15 PM | 30m | First midday cognitive focus boundary. Features Friday Jumu'ah Dual Mode. |
+| **Slot 3** | **Afternoon Focus (Dhuhr)** | 01:15 PM | 30m | Midday cognitive focus boundary. Features Friday Jumu'ah Dual Mode. |
 | **Slot 4** | **Late Afternoon Reset (Asr)** | 04:30 PM | 30m | Afternoon restoration anchor defining the upper bound of Slot 5. |
 | **Slot 5** | **Elastic Rubber Buffer** | 05:00 PM → 06:00 PM | 60m | Dynamic shock absorber bridging Slot 4 and Slot 6 with a 15m safety floor. |
 | **Slot 6** | **Evening Wind-Down (Maghrib)** | 06:00 PM | 30m | Evening cognitive decompression and family rhythm threshold. |
 | **Slot 7** | **Night Reflection (Isha)** | 08:00 PM | 30m | Melatonin onset preparation and pre-sleep sanctuary. |
 
 ### 2. Slot 3 Friday Jumu'ah Dual Mode 🕌
-On Fridays, Slot 3 seamlessly switches into dedicated Jumu'ah mode without mutating Saturday–Thursday schedules:
-- **Dedicated Autonomous Timing:** Custom start time (default `11:30 AM`) and expanded duration (default `2h 30m`).
-- **Autonomous Voice Annunciation:** Custom TTS announcement (*"Friday Jumu'ah prayer and spiritual reflection."*) with independent audio ducking.
-- **Dynamic Non-Encroachment:** All Friday routine tasks automatically conform around the extended Jumu'ah window.
+On Fridays, Slot 3 seamlessly switches into dedicated Jumu'ah mode:
+- **Autonomous Timing:** Custom start time (default `11:30 AM`) and expanded duration (default `2h 30m`).
+- **Autonomous Voice Annunciation:** Custom speech announcement (*"Friday Jumu'ah prayer and spiritual reflection."*) with audio ducking.
+- **Dynamic Re-alignment:** Friday dynamic tasks automatically conform around the extended Jumu'ah window.
 
 ### 3. Slot 5 Accordion Elastic Buffer & Weekly Recurrence
-Slot 5 acts as a self-balancing shock absorber bridging the time span between Slot 4 and Slot 6:
-- **Mathematical Sizing:** Dynamically expands or contracts when Slot 4 or Slot 6 moves.
-- **Protected 15-Minute Floor:** Can never be compressed below 15 minutes under routine expansion.
-- **Granular 7-Day Recurrence Selector:** Activate across all 7 days or deactivate on designated days. When deactivated on any day, **100% of the Slot 4 → Slot 6 interval is liberated** for dynamic tasks with zero artificial buffers.
+Slot 5 acts as a self-balancing shock absorber bridging Slot 4 and Slot 6:
+- **Mathematical Sizing:** Dynamically resizes when Slot 4 or Slot 6 moves, maintaining a strict 15-minute safety floor.
+- **7-Day Recurrence Selector:** When deactivated on any specific day, **100% of the Slot 4 → Slot 6 interval is liberated** for dynamic tasks with zero artificial buffers.
 
 ### 4. Fluid Twin Tasks (Communicating Vessels)
-Link two distinct routine sessions (e.g. *Morning Architecture Sprint* and *Afternoon Review*) under a unified pooled duration:
+Link two distinct routine sessions under a unified duration pool:
 - **Hydraulic Adjustment:** Extending Session A proportionally contracts Session B in real time without manual re-calculation.
 - **Anchor Wall Protection:** Both twins respect immovable anchor boundaries and enforce a 45-minute safety floor.
-- **Independent Audio & Alarms:** Distinct TTS spoken voice prompts, custom notification sounds, and vibration policies.
 
-### 5. Bulk Terminal CLI & Ghost Autocomplete
-Fast, keystroke-efficient scheduling via pipe-separated Unix syntax:
-```text
-Task Name | Duration(m) | Start(HH:mm) | DND | Days | Voice | Message
-```
-*Example Directives:*
-```bash
-Deep Architecture | 90 | 09:30 | Y | Mon,Wed,Fri | Y | Deep focus sprint starting now
-Client Sync | 30 | 14:00 | N | Tue,Thu | Y | Client review meeting
-Evening Reading | 45 | 19:30 | N | ALL | Y | Decompression literature
-```
-- **Real-Time Ghost Autocomplete:** Predicts upcoming tokens as you type; tap the ghost bar to insert template parameters without syntax errors.
+### 5. 3-Mode Task Pause & Vacation Engine (In Engine Settings)
+Manage temporary routine suspensions without deleting tasks:
+- **Pause for Today Only:** Temporarily deactivates the task for the remainder of today; auto-resumes at midnight.
+- **Pause for N Days:** Enter a custom day count (e.g. 5 days); automatically counts down and re-engages on day N+1.
+- **Pause Indefinitely:** Holds the task in suspension until manually resumed via a 1-tap Amber badge.
+- **Dynamic Gap Liberation:** Pausing any task (including Slot 5) opens up 100% of its scheduled interval as an open gap for other tasks.
 
-### 6. Quantified Self & Visual Analytics (Zero Dummy Data)
-- **Two-Step Completion Evaluation:** Grade task quality from [0%] to [100%] in 25% increments (Poor, Fair, Good, Great, Masterful).
-- **Permanent 5-Star Badges:** Completed tasks display immutable rating stars (`★☆☆☆☆` to `★★★★★`) right on their timeline cards.
-- **24-Hour Circadian Donut Dial:** Interactive SVG canvas dial displaying today's 1,440-minute distribution across sleep, fixed anchors, fluid twins, and dynamic tasks.
-- **Rolling Multi-Horizon Metrics:** True user-rating aggregations across Day, Week, Month, and 3-Month windows with zero synthetic or mock fallback data.
+### 6. Quantified Self, 90-Day History & Circadian Visualizer
+- **Two-Step Completion Evaluation:** Grade task quality from [0%] to [100%] in 25% increments with permanent 5-Star badges.
+- **90-Day Rating History:** Historical ratings persist across restarts and task modifications for 3 months with automatic expiration.
+- **24-Hour Circadian Donut Dial:** Interactive SVG canvas dial displaying today's 1,440-minute distribution with tap-to-inspect segment readouts.
+- **Interactive Progress Accordion:** Expand any category in progress view to inspect individual task ratings, durations, and timestamps.
 
-### 7. Hardware Automations & System Telemetry
-- **Priority Do Not Disturb (DND):** Automatically switches system interruption filters on task start and restores original status upon completion via `NotificationManager`.
-- **Exact Alarms (`AlarmManager`):** Schedules wake-up alarms using `setExactAndAllowWhileIdle()` to overcome aggressive OEM battery doze modes.
-- **Audio-Ducking Lock-Screen TTS:** Announces custom task briefings through `TextToSpeech` with transient audio focus ducking, broadcasting even over the lock screen.
-- **Dynamic System Day Auto-Detection:** Automatically synchronizes with Android `Calendar.DAY_OF_WEEK` upon launch while isolating alternate inspected days from live timer ghosting.
+### 7. Samsung Deep Sleep Immunity & Hardware Automations
+- **AlarmManager.setAlarmClock Engine:** Alarms are scheduled via system clock alarm architecture, granting complete immunity against Samsung One UI aggressive deep-sleep suspension and Doze suppression.
+- **Priority Do Not Disturb (DND):** Automatically switches system interruption filters on task start and restores original status upon completion.
+- **Audio-Ducking Lock-Screen TTS:** Announces custom task briefings through TextToSpeech with transient audio focus ducking.
+- **Offline Storage Vault:** Multi-tier automated snapshots restore routines with zero clicks upon fresh reinstallation.
 
 ---
 
-## 🛠️ Tech Stack & Architecture
+## 🛠️ Tech Stack
 
 - **Language:** 100% Kotlin (Kotlin 2.0.21)
-- **UI Framework:** Jetpack Compose (Material 3 v1.4.0, One UI 8.5 Design System)
-- **Local Persistence:** Room Database (`SQLite`) with KSP (Kotlin Symbol Processing)
-- **Reactive State:** Kotlin Coroutines, `StateFlow`, `collectAsStateWithLifecycle`
-- **Background Execution:** Android Foreground Services, `AlarmManager`, System Broadcast Receivers
-- **Audio & Speech:** Android `TextToSpeech`, `RingtoneManager`, `AudioManager` (transient ducking)
-- **System Services:** `NotificationManager` (Zen Mode / DND management), `Vibrator`
+- **UI Framework:** Jetpack Compose (Material 3 v1.4.0, Samsung One UI 8.5)
+- **Local Persistence:** Room Database (SQLite), SharedPreferences, Multi-tier Offline JSON Vault
+- **Reactive State:** Kotlin Coroutines, StateFlow, collectAsState
+- **Background Execution:** Android Foreground Services, AlarmManager (setAlarmClock), Broadcast Receivers
+- **Audio & Telemetry:** Android TextToSpeech, RingtoneManager, AudioManager (Transient Ducking), NotificationManager
 
 ---
 
@@ -113,14 +104,9 @@ Evening Reading | 45 | 19:30 | N | ALL | Y | Decompression literature
 Clone the repository and build using Gradle:
 
 ```bash
-# Clone the repository
 git clone https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine.git
 cd Chronos-Routine-Engine
-
-# Build Debug APK
 ./gradlew assembleDebug
-
-# Run Robolectric & Unit Tests
 ./gradlew testDebugUnitTest
 ```
 
@@ -135,25 +121,11 @@ app/build/outputs/apk/debug/app-debug.apk
 
 - **Minimum SDK:** Android 8.0 (API Level 26)
 - **Target / Tested SDK:** Android 15 / 16 (API Level 35 / 36 Ready)
-- **Memory Footprint:** < 65MB runtime memory footprint (zero background memory leaks)
+- **Memory Footprint:** < 65MB runtime memory footprint (zero background leaks)
 - **Tested Reference Device:** Samsung Galaxy A24 (SM-A245N), One UI 6.x / 7.x / 8.5
 
 ---
 
 ## 📄 License
 
-```text
-Copyright 2026 Ibrahim Khalilullah
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
+Apache License 2.0. Copyright 2026 Ibrahim Khalilullah.
