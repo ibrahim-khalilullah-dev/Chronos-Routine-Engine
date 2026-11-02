@@ -24,16 +24,15 @@ object SchedulerEngine {
 
   /**
    * Generates the precision default anchors for a fresh installation.
-   * All standard anchors configured to 30 minutes with exact user start times:
-   * Slot 1: Reverse Sleep Tracker (10:00 PM = 1320m, 420m duration)
-   * Slot 2: Morning Routine (05:00 AM = 300m, 30m duration)
-   * Slot 3: Afternoon Focus (01:15 PM = 795m, 30m duration)
-   * Slot 4: Late Afternoon Reset (04:30 PM = 990m, 30m duration)
-   * Slot 5: Elastic Rubber Buffer (05:00 PM = 1020m, 60m duration)
-   * Slot 6: Evening Wind-Down (06:00 PM = 1080m, 30m duration)
-   * Slot 7: Night Reflection (08:00 PM = 1200m, 30m duration)
+   * Slot 1: Sleep (11:00 PM = 1380m, 360m / 6h duration, Reverse Sleep Tracker)
+   * Slot 2: Fajr (05:00 AM = 300m, 35m duration, 8m DND delay)
+   * Slot 3: Dhuhr (01:15 PM = 795m, 35m duration, 8m DND delay; Friday Jumu'ah 12:30 PM, 120m, 5m delay)
+   * Slot 4: Asr (04:30 PM = 990m, 25m duration, 10m DND delay)
+   * Slot 5: Break (Auto-spans Slot 4 End to Slot 6 Start, Elastic Buffer)
+   * Slot 6: Maghrib (06:00 PM = 1080m, 30m duration, 5m DND delay)
+   * Slot 7: Isha (08:00 PM = 1200m, 35m duration, 10m DND delay)
    */
-  fun createDefaultAnchors(sleepDurationMinutes: Int = 420): List<RoutineTask> {
+  fun createDefaultAnchors(sleepDurationMinutes: Int = 360): List<RoutineTask> {
     val safeSleepDuration = sleepDurationMinutes.coerceIn(240, 720)
     val slot2Start = 300 // 05:00 AM
     val rawBedtime = slot2Start - safeSleepDuration
@@ -41,82 +40,93 @@ object SchedulerEngine {
 
     val slot1 = RoutineTask(
       id = "anchor_slot_1",
-      title = "Reverse Sleep Tracker",
+      title = "Sleep",
       type = TaskType.ANCHOR_SLEEP,
       slotNumber = 1,
       startTimeMinute = bedtimeMinute,
       durationMinutes = safeSleepDuration,
-      voiceMessage = "Bedtime reached. Entering recovery mode.",
-      enableDnd = true
+      voiceMessage = "ঘুমানোর সময় হয়েছে।",
+      enableDnd = true,
+      dndDelayMinutes = 0
     )
 
     val slot2 = RoutineTask(
       id = "anchor_slot_2",
-      title = "Morning Routine",
+      title = "Fajr",
       type = TaskType.ANCHOR_STANDARD,
       slotNumber = 2,
       startTimeMinute = slot2Start, // 05:00 AM
-      durationMinutes = 30,         // 30 mins (05:00 AM -> 05:30 AM)
-      voiceMessage = "Morning time",
-      enableDnd = true
+      durationMinutes = 35,         // 35 mins (05:00 AM -> 05:35 AM)
+      voiceMessage = "ফজরের সময় হয়েছে।",
+      enableDnd = true,
+      dndDelayMinutes = 8
     )
 
     val slot3 = RoutineTask(
       id = "anchor_slot_3",
-      title = "Afternoon Focus",
+      title = "Dhuhr",
       type = TaskType.ANCHOR_STANDARD,
       slotNumber = 3,
       startTimeMinute = 795, // 01:15 PM
-      durationMinutes = 30,  // 30 mins (01:15 PM -> 01:45 PM)
-      voiceMessage = "Afternoon time",
-      enableDnd = true
+      durationMinutes = 35,  // 35 mins (01:15 PM -> 01:50 PM)
+      voiceMessage = "যোহরের সময় হয়েছে।",
+      enableDnd = true,
+      dndDelayMinutes = 8,
+      fridayTitle = "Jumu'ah",
+      fridayStartTimeMinute = 750, // 12:30 PM
+      fridayDurationMinutes = 120, // 2 hours
+      fridayVoiceMessage = "জুমার সময় হয়েছে।"
     )
 
     val slot4 = RoutineTask(
       id = "anchor_slot_4",
-      title = "Late Afternoon Reset",
+      title = "Asr",
       type = TaskType.ANCHOR_STANDARD,
       slotNumber = 4,
       startTimeMinute = 990, // 04:30 PM
-      durationMinutes = 30,  // 30 mins (04:30 PM -> 05:00 PM)
-      voiceMessage = "Late afternoon time",
-      enableDnd = true
+      durationMinutes = 25,  // 25 mins (04:30 PM -> 04:55 PM)
+      voiceMessage = "আসরের সময় হয়েছে।",
+      enableDnd = true,
+      dndDelayMinutes = 10
     )
 
     val slot6 = RoutineTask(
       id = "anchor_slot_6",
-      title = "Evening Wind-Down",
+      title = "Maghrib",
       type = TaskType.ANCHOR_STANDARD,
       slotNumber = 6,
       startTimeMinute = 1080, // 06:00 PM
       durationMinutes = 30,   // 30 mins (06:00 PM -> 06:30 PM)
-      voiceMessage = "Evening time",
-      enableDnd = false
+      voiceMessage = "মাগরিবের সময় হয়েছে।",
+      enableDnd = true,
+      dndDelayMinutes = 5
     )
 
     val slot7 = RoutineTask(
       id = "anchor_slot_7",
-      title = "Night Reflection",
+      title = "Isha",
       type = TaskType.ANCHOR_STANDARD,
       slotNumber = 7,
       startTimeMinute = 1200, // 08:00 PM
-      durationMinutes = 30,   // 30 mins (08:00 PM -> 08:30 PM)
-      voiceMessage = "Night time",
-      enableDnd = true
+      durationMinutes = 35,   // 35 mins (08:00 PM -> 08:35 PM)
+      voiceMessage = "এশার সময় হয়েছে।",
+      enableDnd = true,
+      dndDelayMinutes = 10
     )
 
-    // Slot 5: Spans between Slot 4 End (05:00 PM = 1020m) and Slot 6 Start (06:00 PM = 1080m) -> 60 minutes
+    // Slot 5: Spans between Slot 4 End and Slot 6 Start
     val slot4End = slot4.startTimeMinute + slot4.durationMinutes
     val elasticDuration = (slot6.startTimeMinute - slot4End).coerceAtLeast(MIN_ELASTIC_BUFFER_MINUTES)
     val slot5 = RoutineTask(
       id = "anchor_slot_5",
-      title = "Elastic Rubber Buffer",
+      title = "Break",
       type = TaskType.ANCHOR_ELASTIC,
       slotNumber = 5,
       startTimeMinute = slot4End,
       durationMinutes = elasticDuration,
-      voiceMessage = "Entering protected elastic buffer time.",
+      voiceMessage = "বিরতির সময় হয়েছে।",
       enableDnd = false,
+      dndDelayMinutes = 0,
       selectedDays = RoutineDay.allDays()
     )
 
@@ -129,7 +139,7 @@ object SchedulerEngine {
    */
   fun calculateAnchors(
     anchors: List<RoutineTask>,
-    sleepDurationMinutes: Int = 420 // 7 hours default
+    sleepDurationMinutes: Int = 360 // 6 hours default
   ): List<RoutineTask> {
     if (anchors.isEmpty()) {
       return createDefaultAnchors(sleepDurationMinutes)
@@ -140,13 +150,14 @@ object SchedulerEngine {
     // 1. Slot 2: Wake-up Anchor (Default 05:00 AM = 300 min)
     val slot2 = map[2] ?: RoutineTask(
       id = "anchor_slot_2",
-      title = "Morning Routine",
+      title = "Fajr",
       type = TaskType.ANCHOR_STANDARD,
       slotNumber = 2,
       startTimeMinute = 300, // 05:00 AM
-      durationMinutes = 30,  // 30 mins
-      voiceMessage = "Morning time",
-      enableDnd = true
+      durationMinutes = 35,  // 35 mins
+      voiceMessage = "ফজরের সময় হয়েছে।",
+      enableDnd = true,
+      dndDelayMinutes = 8
     )
     map[2] = slot2
 
@@ -160,13 +171,14 @@ object SchedulerEngine {
     val existingSlot1 = map[1]
     val slot1 = (existingSlot1 ?: RoutineTask(
       id = "anchor_slot_1",
-      title = "Reverse Sleep Tracker",
+      title = "Sleep",
       type = TaskType.ANCHOR_SLEEP,
       slotNumber = 1,
       startTimeMinute = bedtimeMinute,
       durationMinutes = safeSleepDuration,
-      voiceMessage = "Bedtime reached. Entering recovery mode.",
-      enableDnd = true
+      voiceMessage = "ঘুমানোর সময় হয়েছে।",
+      enableDnd = true,
+      dndDelayMinutes = 0
     )).copy(
       type = TaskType.ANCHOR_SLEEP,
       slotNumber = 1,
@@ -179,13 +191,18 @@ object SchedulerEngine {
     if (!map.containsKey(3)) {
       map[3] = RoutineTask(
         id = "anchor_slot_3",
-        title = "Afternoon Focus",
+        title = "Dhuhr",
         type = TaskType.ANCHOR_STANDARD,
         slotNumber = 3,
         startTimeMinute = 795, // 01:15 PM
-        durationMinutes = 30,  // 30 mins
-        voiceMessage = "Afternoon time",
-        enableDnd = true
+        durationMinutes = 35,  // 35 mins
+        voiceMessage = "যোহরের সময় হয়েছে।",
+        enableDnd = true,
+        dndDelayMinutes = 8,
+        fridayTitle = "Jumu'ah",
+        fridayStartTimeMinute = 750,
+        fridayDurationMinutes = 120,
+        fridayVoiceMessage = "জুমার সময় হয়েছে।"
       )
     }
 
@@ -193,13 +210,14 @@ object SchedulerEngine {
     if (!map.containsKey(4)) {
       map[4] = RoutineTask(
         id = "anchor_slot_4",
-        title = "Late Afternoon Reset",
+        title = "Asr",
         type = TaskType.ANCHOR_STANDARD,
         slotNumber = 4,
         startTimeMinute = 990, // 04:30 PM
-        durationMinutes = 30,  // 30 mins
-        voiceMessage = "Late afternoon time",
-        enableDnd = true
+        durationMinutes = 25,  // 25 mins
+        voiceMessage = "আসরের সময় হয়েছে।",
+        enableDnd = true,
+        dndDelayMinutes = 10
       )
     }
 
@@ -207,13 +225,14 @@ object SchedulerEngine {
     if (!map.containsKey(6)) {
       map[6] = RoutineTask(
         id = "anchor_slot_6",
-        title = "Evening Wind-Down",
+        title = "Maghrib",
         type = TaskType.ANCHOR_STANDARD,
         slotNumber = 6,
         startTimeMinute = 1080, // 06:00 PM
         durationMinutes = 30,   // 30 mins
-        voiceMessage = "Evening time",
-        enableDnd = false
+        voiceMessage = "মাগরিবের সময় হয়েছে।",
+        enableDnd = true,
+        dndDelayMinutes = 5
       )
     }
 
@@ -221,13 +240,14 @@ object SchedulerEngine {
     if (!map.containsKey(7)) {
       map[7] = RoutineTask(
         id = "anchor_slot_7",
-        title = "Night Reflection",
+        title = "Isha",
         type = TaskType.ANCHOR_STANDARD,
         slotNumber = 7,
         startTimeMinute = 1200, // 08:00 PM
-        durationMinutes = 30,   // 30 mins
-        voiceMessage = "Night time",
-        enableDnd = true
+        durationMinutes = 35,   // 35 mins
+        voiceMessage = "এশার সময় হয়েছে।",
+        enableDnd = true,
+        dndDelayMinutes = 10
       )
     }
 
@@ -251,13 +271,14 @@ object SchedulerEngine {
     val existingSlot5 = map[5]
     val slot5 = (existingSlot5 ?: RoutineTask(
       id = "anchor_slot_5",
-      title = "Elastic Rubber Buffer",
+      title = "Break",
       type = TaskType.ANCHOR_ELASTIC,
       slotNumber = 5,
       startTimeMinute = slot4End,
       durationMinutes = elasticDuration,
-      voiceMessage = "Entering protected elastic buffer time.",
+      voiceMessage = "বিরতির সময় হয়েছে।",
       enableDnd = false,
+      dndDelayMinutes = 0,
       selectedDays = RoutineDay.allDays()
     )).copy(
       type = TaskType.ANCHOR_ELASTIC,

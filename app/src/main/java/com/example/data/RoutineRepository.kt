@@ -65,7 +65,7 @@ class RoutineRepository(context: Context) {
 
       val anchorsJson = vaultObj.optJSONArray("anchors")
       val dynamicTasksJson = vaultObj.optJSONArray("dynamicTasks")
-      val sleepDuration = vaultObj.optInt("sleepDurationMinutes", 420)
+      val sleepDuration = vaultObj.optInt("sleepDurationMinutes", 360)
       val bufferMinutes = vaultObj.optInt("bufferMinutes", 5)
 
       val editor = prefs.edit()
@@ -232,7 +232,7 @@ class RoutineRepository(context: Context) {
   }
 
   fun getSleepDurationMinutes(): Int {
-    return prefs.getInt(KEY_SLEEP_DURATION, 420) // Default 7 hours (420 mins)
+    return prefs.getInt(KEY_SLEEP_DURATION, 360) // Default 6 hours (360 mins)
   }
 
   fun setSleepDurationMinutes(minutes: Int) {

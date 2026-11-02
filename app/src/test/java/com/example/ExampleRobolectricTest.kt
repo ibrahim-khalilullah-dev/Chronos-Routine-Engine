@@ -313,7 +313,7 @@ class ExampleRobolectricTest {
 
   @Test
   fun `precision default anchors configure exact 30-minute durations and exact user start times`() {
-    val defaults = SchedulerEngine.createDefaultAnchors(sleepDurationMinutes = 420)
+    val defaults = SchedulerEngine.createDefaultAnchors(sleepDurationMinutes = 360)
     assertEquals(7, defaults.size)
 
     val s1 = defaults.first { it.slotNumber == 1 }
@@ -324,47 +324,47 @@ class ExampleRobolectricTest {
     val s6 = defaults.first { it.slotNumber == 6 }
     val s7 = defaults.first { it.slotNumber == 7 }
 
-    // Slot 1: Reverse Sleep Tracker: 10:00 PM (1320m), 420m duration
-    assertEquals("Reverse Sleep Tracker", s1.title)
-    assertEquals(1320, s1.startTimeMinute)
-    assertEquals(420, s1.durationMinutes)
-    assertEquals("Bedtime reached. Entering recovery mode.", s1.voiceMessage)
+    // Slot 1: Sleep: 11:00 PM (1380m), 360m duration
+    assertEquals("Sleep", s1.title)
+    assertEquals(1380, s1.startTimeMinute)
+    assertEquals(360, s1.durationMinutes)
+    assertEquals("ঘুমানোর সময় হয়েছে।", s1.voiceMessage)
 
-    // Slot 2: Morning Routine: 05:00 AM (300m), 30m duration
-    assertEquals("Morning Routine", s2.title)
+    // Slot 2: Fajr: 05:00 AM (300m), 35m duration
+    assertEquals("Fajr", s2.title)
     assertEquals(300, s2.startTimeMinute)
-    assertEquals(30, s2.durationMinutes)
-    assertEquals("Morning time", s2.voiceMessage)
+    assertEquals(35, s2.durationMinutes)
+    assertEquals("ফজরের সময় হয়েছে।", s2.voiceMessage)
 
-    // Slot 3: Afternoon Focus: 01:15 PM (795m), 30m duration
-    assertEquals("Afternoon Focus", s3.title)
+    // Slot 3: Dhuhr: 01:15 PM (795m), 35m duration
+    assertEquals("Dhuhr", s3.title)
     assertEquals(795, s3.startTimeMinute)
-    assertEquals(30, s3.durationMinutes)
-    assertEquals("Afternoon time", s3.voiceMessage)
+    assertEquals(35, s3.durationMinutes)
+    assertEquals("যোহরের সময় হয়েছে।", s3.voiceMessage)
 
-    // Slot 4: Late Afternoon Reset: 04:30 PM (990m), 30m duration
-    assertEquals("Late Afternoon Reset", s4.title)
+    // Slot 4: Asr: 04:30 PM (990m), 25m duration
+    assertEquals("Asr", s4.title)
     assertEquals(990, s4.startTimeMinute)
-    assertEquals(30, s4.durationMinutes)
-    assertEquals("Late afternoon time", s4.voiceMessage)
+    assertEquals(25, s4.durationMinutes)
+    assertEquals("আসরের সময় হয়েছে।", s4.voiceMessage)
 
-    // Slot 5: Elastic Rubber Buffer: Spans from 05:00 PM (1020m) to 06:00 PM (1080m) = 60m duration
-    assertEquals("Elastic Rubber Buffer", s5.title)
-    assertEquals(1020, s5.startTimeMinute)
-    assertEquals(60, s5.durationMinutes)
-    assertEquals("Entering protected elastic buffer time.", s5.voiceMessage)
+    // Slot 5: Break: Spans from 04:55 PM (1015m) to 06:00 PM (1080m) = 65m duration
+    assertEquals("Break", s5.title)
+    assertEquals(1015, s5.startTimeMinute)
+    assertEquals(65, s5.durationMinutes)
+    assertEquals("বিরতির সময় হয়েছে।", s5.voiceMessage)
 
-    // Slot 6: Evening Wind-Down: 06:00 PM (1080m), 30m duration
-    assertEquals("Evening Wind-Down", s6.title)
+    // Slot 6: Maghrib: 06:00 PM (1080m), 30m duration
+    assertEquals("Maghrib", s6.title)
     assertEquals(1080, s6.startTimeMinute)
     assertEquals(30, s6.durationMinutes)
-    assertEquals("Evening time", s6.voiceMessage)
+    assertEquals("মাগরিবের সময় হয়েছে।", s6.voiceMessage)
 
-    // Slot 7: Night Reflection: 08:00 PM (1200m), 30m duration
-    assertEquals("Night Reflection", s7.title)
+    // Slot 7: Isha: 08:00 PM (1200m), 35m duration
+    assertEquals("Isha", s7.title)
     assertEquals(1200, s7.startTimeMinute)
-    assertEquals(30, s7.durationMinutes)
-    assertEquals("Night time", s7.voiceMessage)
+    assertEquals(35, s7.durationMinutes)
+    assertEquals("এশার সময় হয়েছে।", s7.voiceMessage)
   }
 
   @Test

@@ -239,16 +239,16 @@ fun TaskModalBottomSheet(
 
   // Slot 3 Friday Dual Mode State
   var activeSlot3Tab by remember { mutableIntStateOf(0) } // 0 = Regular Days, 1 = Friday Mode 🕌
-  var fridayTitle by remember { mutableStateOf(initialTask?.fridayTitle ?: "Friday Jumu'ah & Reflection") }
-  val initialFridayStart = initialTask?.fridayStartTimeMinute ?: (11 * 60 + 30) // 11:30 AM default
+  var fridayTitle by remember { mutableStateOf(initialTask?.fridayTitle ?: "Jumu'ah") }
+  val initialFridayStart = initialTask?.fridayStartTimeMinute ?: (12 * 60 + 30) // 12:30 PM default (750m)
   var fridayStartHour by remember { mutableIntStateOf(initialFridayStart / 60) }
   var fridayStartMinute by remember { mutableIntStateOf(initialFridayStart % 60) }
-  val initialFridayDuration = initialTask?.fridayDurationMinutes ?: 150 // 2h 30m default
+  val initialFridayDuration = initialTask?.fridayDurationMinutes ?: 120 // 2h default
   var fridayDurationHours by remember { mutableIntStateOf(initialFridayDuration / 60) }
   var fridayDurationMins by remember { mutableIntStateOf(initialFridayDuration % 60) }
   var fridayDurationHoursInput by remember { mutableStateOf((initialFridayDuration / 60).toString()) }
   var fridayDurationMinsInput by remember { mutableStateOf((initialFridayDuration % 60).toString()) }
-  var fridayVoiceMessage by remember { mutableStateOf(initialTask?.fridayVoiceMessage ?: "Friday Jumu'ah session starting now.") }
+  var fridayVoiceMessage by remember { mutableStateOf(initialTask?.fridayVoiceMessage ?: "জুমার সময় হয়েছে।") }
 
   // Tone Preview Player State
   var isPlayingTonePreview by remember { mutableStateOf(false) }
@@ -431,10 +431,10 @@ fun TaskModalBottomSheet(
           customFlexibilityMinutes != (initialTask.customFlexibilityMinutes ?: 0) ||
           allowSplitting != (initialTask.allowSplitting ?: false) ||
           (isSlot3 && (
-            fridayTitle != (initialTask.fridayTitle ?: "Friday Jumu'ah & Reflection") ||
-            (fridayDurationHours * 60 + fridayDurationMins) != (initialTask.fridayDurationMinutes ?: 150) ||
-            (fridayStartHour * 60 + fridayStartMinute) != (initialTask.fridayStartTimeMinute ?: (11 * 60 + 30)) ||
-            fridayVoiceMessage != (initialTask.fridayVoiceMessage ?: "Friday Jumu'ah session starting now.")
+            fridayTitle != (initialTask.fridayTitle ?: "Jumu'ah") ||
+            (fridayDurationHours * 60 + fridayDurationMins) != (initialTask.fridayDurationMinutes ?: 120) ||
+            (fridayStartHour * 60 + fridayStartMinute) != (initialTask.fridayStartTimeMinute ?: (12 * 60 + 30)) ||
+            fridayVoiceMessage != (initialTask.fridayVoiceMessage ?: "জুমার সময় হয়েছে।")
           ))
       }
     }
@@ -2537,7 +2537,7 @@ private fun AnchorEditSection(
           OutlinedTextField(
             value = fridayVoiceMessage,
             onValueChange = onFridayVoiceMessageChange,
-            placeholder = { Text("Enter Friday speech announcement...", color = TextTertiary) },
+            placeholder = { Text("কাস্টম ভয়েস মেসেজ লিখুন...", color = TextTertiary) },
             trailingIcon = {
               IconButton(onClick = onTestFridayVoice, modifier = Modifier.testTag("test_friday_voice_button")) {
                 Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Friday Voice", tint = Color(0xFF6EE7B7))
@@ -2798,7 +2798,7 @@ private fun AnchorEditSection(
           OutlinedTextField(
             value = voiceMessage,
             onValueChange = onVoiceMessageChange,
-            placeholder = { Text("Enter custom speech announcement...", color = TextTertiary) },
+            placeholder = { Text("কাস্টম ভয়েস মেসেজ লিখুন...", color = TextTertiary) },
             trailingIcon = {
               IconButton(onClick = onTestVoice, modifier = Modifier.testTag("test_voice_button")) {
                 Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Voice", tint = Color(0xFFA5B4FC))

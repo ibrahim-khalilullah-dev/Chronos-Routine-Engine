@@ -43,18 +43,18 @@ Chronos anchors human circadian rhythms across 7 immovable daily boundaries. Dyn
 
 | Slot | Anchor Name | Default Time | Duration | Circadian Function |
 | :---: | :--- | :---: | :---: | :--- |
-| **Slot 1** | **Reverse Sleep Tracker** | 10:00 PM | 420m (7h) | Backward modulo calculation (`% 1440`) derived from Slot 2 wake time. |
-| **Slot 2** | **Morning Routine (Fajr)** | 05:00 AM | 30m | Circadian metabolic baseline & morning wakefulness anchor. |
-| **Slot 3** | **Afternoon Focus (Dhuhr)** | 01:15 PM | 30m | Midday cognitive focus boundary. Features Friday Jumu'ah Dual Mode. |
-| **Slot 4** | **Late Afternoon Reset (Asr)** | 04:30 PM | 30m | Afternoon restoration anchor defining the upper bound of Slot 5. |
-| **Slot 5** | **Elastic Rubber Buffer** | 05:00 PM → 06:00 PM | 60m | Dynamic shock absorber bridging Slot 4 and Slot 6 with a 15m safety floor. |
-| **Slot 6** | **Evening Wind-Down (Maghrib)** | 06:00 PM | 30m | Evening cognitive decompression and family rhythm threshold. |
-| **Slot 7** | **Night Reflection (Isha)** | 08:00 PM | 30m | Melatonin onset preparation and pre-sleep sanctuary. |
+| **Slot 1** | **Sleep** | 11:00 PM | 360m (6h) | Backward modulo calculation (`% 1440`) derived from Slot 2 wake time. |
+| **Slot 2** | **Fajr** | 05:00 AM | 35m | Circadian metabolic baseline & morning wakefulness anchor (8m DND delay). |
+| **Slot 3** | **Dhuhr** | 01:15 PM | 35m | Midday cognitive focus boundary (8m DND delay). Features Friday Jumu'ah Dual Mode. |
+| **Slot 4** | **Asr** | 04:30 PM | 25m | Afternoon restoration anchor defining the upper bound of Slot 5 (10m DND delay). |
+| **Slot 5** | **Break** | 04:55 PM → 06:00 PM | 65m | Dynamic shock absorber bridging Slot 4 and Slot 6 with a 15m safety floor. |
+| **Slot 6** | **Maghrib** | 06:00 PM | 30m | Evening cognitive decompression and family rhythm threshold (5m DND delay). |
+| **Slot 7** | **Isha** | 08:00 PM | 35m | Melatonin onset preparation and pre-sleep sanctuary (10m DND delay). |
 
 ### 2. Slot 3 Friday Jumu'ah Dual Mode 🕌
 On Fridays, Slot 3 seamlessly switches into dedicated Jumu'ah mode:
-- **Autonomous Timing:** Custom start time (default `11:30 AM`) and expanded duration (default `2h 30m`).
-- **Autonomous Voice Annunciation:** Custom speech announcement (*"Friday Jumu'ah prayer and spiritual reflection."*) with audio ducking.
+- **Autonomous Timing:** Custom start time (default `12:30 PM`) and expanded duration (default `2h` = 120m).
+- **Autonomous Voice Annunciation:** Custom speech announcement (*"জুমার সময় হয়েছে।"*) with audio ducking and 5m DND delay timer.
 - **Dynamic Re-alignment:** Friday dynamic tasks automatically conform around the extended Jumu'ah window.
 
 ### 3. Slot 5 Accordion Elastic Buffer & Weekly Recurrence

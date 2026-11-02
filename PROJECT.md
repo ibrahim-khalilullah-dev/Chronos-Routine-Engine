@@ -43,12 +43,15 @@ app/src/main/
 
 ## 2. CORE ENGINES & MATHEMATICAL INVARIANTS
 
-1. The 7 Immutable Anchors & Delayed DND:
-   - Slot 1 (Reverse Sleep): Bedtime auto-calculated backwards: ((Slot 2 Wake Minute - Sleep Duration + 1440) % 1440). Sleep duration default: 420m (7h).
-   - Slots 2, 3, 4, 6, 7: Fixed anchors with 30-minute standard duration (Slot 2: 05:00 AM, Slot 3: 01:15 PM, Slot 4: 04:30 PM, Slot 6: 06:00 PM, Slot 7: 08:00 PM).
-   - 0-25m Delayed DND: For Anchor Slots 2, 3, 4, 6, 7, when DND is enabled, users can specify a delay timer (0 to 25 mins). 0 = immediate DND upon task start; 1-25 = Handler delay before DND engages. Slots 1 and 5 remain immediate (delay clamped to 0).
-   - Slot 3 Friday Jumu'ah Dual Mode: On Fridays, automatically evaluates dedicated start time (11:30 AM), duration (150m), and custom voice message.
-   - Slot 5 (Elastic Rubber Buffer): Bridges Slot 4 End (05:00 PM) to Slot 6 Start (06:00 PM). Minimum 15m safety floor. Includes 7-day weekly recurrence selector; when deactivated, liberates 100% of the interval for dynamic tasks.
+1. The 7 Immutable Anchors & Delayed DND (New Production Defaults):
+   - Slot 1 (Sleep): Bedtime auto-calculated backwards: ((Slot 2 Wake Minute - Sleep Duration + 1440) % 1440). Default sleep duration: 360m (6h) -> 11:00 PM (1380m). Voice: "ঘুমানোর সময় হয়েছে।". DND delay: 0m.
+   - Slot 2 (Fajr): Start 05:00 AM (300m), duration 35m, DND delay 8m. Voice: "ফজরের সময় হয়েছে।".
+   - Slot 3 (Dhuhr): Start 01:15 PM (795m), duration 35m, DND delay 8m. Voice: "যোহরের সময় হয়েছে।".
+     * Friday Jumu'ah Mode: Dedicated start 12:30 PM (750m), duration 120m (2h), DND delay 5m, Voice: "জুমার সময় হয়েছে।", Title: "Jumu'ah".
+   - Slot 4 (Asr): Start 04:30 PM (990m), duration 25m, DND delay 10m. Voice: "আসরের সময় হয়েছে।".
+   - Slot 5 (Break): Elastic buffer auto-spanning Slot 4 End (04:55 PM = 1015m) to Slot 6 Start (06:00 PM = 1080m) = 65m buffer. Voice: "বিরতির সময় হয়েছে।". Includes 7-day weekly recurrence selector.
+   - Slot 6 (Maghrib): Start 06:00 PM (1080m), duration 30m, DND delay 5m. Voice: "মাগরিবের সময় হয়েছে।".
+   - Slot 7 (Isha): Start 08:00 PM (1200m), duration 35m, DND delay 10m. Voice: "এশার সময় হয়েছে।".
 
 2. Supercharged Bulk Terminal CLI Engine:
    - Directive 1: `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message` (Optional Friday overrides for Slot 3: `| FriTitle | FriStart | FriDuration | FriMessage`).

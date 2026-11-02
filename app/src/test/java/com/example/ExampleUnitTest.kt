@@ -170,4 +170,76 @@ class ExampleUnitTest {
     assertEquals(10, targetCal.get(java.util.Calendar.HOUR_OF_DAY))
     assertEquals(0, targetCal.get(java.util.Calendar.MINUTE))
   }
+
+  @Test
+  fun testNewProductionDefaultAnchors() {
+    val defaults = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    assertEquals(7, defaults.size)
+
+    val slot1 = defaults[0]
+    assertEquals(1, slot1.slotNumber)
+    assertEquals("Sleep", slot1.title)
+    assertEquals(360, slot1.durationMinutes)
+    assertEquals(1380, slot1.startTimeMinute) // 11:00 PM
+    assertEquals("ঘুমানোর সময় হয়েছে।", slot1.voiceMessage)
+    assertTrue(slot1.enableDnd)
+    assertEquals(0, slot1.dndDelayMinutes)
+
+    val slot2 = defaults[1]
+    assertEquals(2, slot2.slotNumber)
+    assertEquals("Fajr", slot2.title)
+    assertEquals(300, slot2.startTimeMinute) // 05:00 AM
+    assertEquals(35, slot2.durationMinutes)
+    assertEquals("ফজরের সময় হয়েছে।", slot2.voiceMessage)
+    assertTrue(slot2.enableDnd)
+    assertEquals(8, slot2.dndDelayMinutes)
+
+    val slot3 = defaults[2]
+    assertEquals(3, slot3.slotNumber)
+    assertEquals("Dhuhr", slot3.title)
+    assertEquals(795, slot3.startTimeMinute) // 01:15 PM
+    assertEquals(35, slot3.durationMinutes)
+    assertEquals("যোহরের সময় হয়েছে।", slot3.voiceMessage)
+    assertTrue(slot3.enableDnd)
+    assertEquals(8, slot3.dndDelayMinutes)
+    assertEquals("Jumu'ah", slot3.fridayTitle)
+    assertEquals(750, slot3.fridayStartTimeMinute)
+    assertEquals(120, slot3.fridayDurationMinutes)
+    assertEquals("জুমার সময় হয়েছে।", slot3.fridayVoiceMessage)
+
+    val slot4 = defaults[3]
+    assertEquals(4, slot4.slotNumber)
+    assertEquals("Asr", slot4.title)
+    assertEquals(990, slot4.startTimeMinute) // 04:30 PM
+    assertEquals(25, slot4.durationMinutes)
+    assertEquals("আসরের সময় হয়েছে।", slot4.voiceMessage)
+    assertTrue(slot4.enableDnd)
+    assertEquals(10, slot4.dndDelayMinutes)
+
+    val slot5 = defaults[4]
+    assertEquals(5, slot5.slotNumber)
+    assertEquals("Break", slot5.title)
+    assertEquals(1015, slot5.startTimeMinute) // 04:55 PM
+    assertEquals(65, slot5.durationMinutes)
+    assertEquals("বিরতির সময় হয়েছে।", slot5.voiceMessage)
+    assertFalse(slot5.enableDnd)
+
+    val slot6 = defaults[5]
+    assertEquals(6, slot6.slotNumber)
+    assertEquals("Maghrib", slot6.title)
+    assertEquals(1080, slot6.startTimeMinute) // 06:00 PM
+    assertEquals(30, slot6.durationMinutes)
+    assertEquals("মাগরিবের সময় হয়েছে।", slot6.voiceMessage)
+    assertTrue(slot6.enableDnd)
+    assertEquals(5, slot6.dndDelayMinutes)
+
+    val slot7 = defaults[6]
+    assertEquals(7, slot7.slotNumber)
+    assertEquals("Isha", slot7.title)
+    assertEquals(1200, slot7.startTimeMinute) // 08:00 PM
+    assertEquals(35, slot7.durationMinutes)
+    assertEquals("এশার সময় হয়েছে।", slot7.voiceMessage)
+    assertTrue(slot7.enableDnd)
+    assertEquals(10, slot7.dndDelayMinutes)
+  }
 }

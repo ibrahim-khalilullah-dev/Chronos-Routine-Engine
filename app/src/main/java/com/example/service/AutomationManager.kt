@@ -235,6 +235,7 @@ object AutomationManager {
     var effectiveDurationMin = task.durationMinutes
     var effectiveTitle = task.title
     var effectiveVoiceMessage = task.voiceMessage
+    var effectiveDndDelay = task.dndDelayMinutes
 
     // Find next valid occurrence millis
     val startMillis = calculateNextOccurrenceMillis(effectiveStartMin, task.selectedDays)
@@ -258,6 +259,7 @@ object AutomationManager {
       effectiveStartMin = task.fridayStartTimeMinute ?: task.startTimeMinute
       effectiveDurationMin = task.fridayDurationMinutes ?: task.durationMinutes
       effectiveVoiceMessage = task.fridayVoiceMessage?.ifBlank { null } ?: task.voiceMessage
+      effectiveDndDelay = 5
 
       targetCal.apply {
         set(Calendar.HOUR_OF_DAY, effectiveStartMin / 60)
@@ -286,7 +288,7 @@ object AutomationManager {
       putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
       putExtra(EXTRA_CATEGORY_NAME, catName)
       putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)
-      putExtra(EXTRA_DND_DELAY_MINUTES, task.dndDelayMinutes)
+      putExtra(EXTRA_DND_DELAY_MINUTES, effectiveDndDelay)
     }
 
     val pendingStart = PendingIntent.getBroadcast(
