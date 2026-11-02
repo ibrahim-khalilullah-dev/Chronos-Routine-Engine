@@ -719,15 +719,36 @@ fun DynamicTaskCard(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Column(modifier = Modifier.weight(1f)) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+          ) {
             Text(
               text = task.title,
               color = TextPrimary,
               fontWeight = FontWeight.SemiBold,
               fontSize = 16.sp,
               maxLines = 1,
-              overflow = TextOverflow.Ellipsis
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.weight(1f, fill = false)
             )
+
+            if (task.isHighPriority) {
+              Spacer(modifier = Modifier.width(6.dp))
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(Color(0xFFEF4444).copy(alpha = 0.22f))
+                  .padding(horizontal = 6.dp, vertical = 2.dp)
+              ) {
+                Text(
+                  text = "Priority",
+                  color = Color(0xFFFCA5A5),
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold
+                )
+              }
+            }
 
             if (task.isFluidTwin) {
               Spacer(modifier = Modifier.width(6.dp))
@@ -738,7 +759,7 @@ fun DynamicTaskCard(
                   .padding(horizontal = 6.dp, vertical = 2.dp)
               ) {
                 Text(
-                  text = "Fluid Twin P${task.fluidTwinPart ?: 1}",
+                  text = "Twin P${task.fluidTwinPart ?: 1}",
                   color = Color(0xFFC4B5FD),
                   fontSize = 10.sp,
                   fontWeight = FontWeight.Bold

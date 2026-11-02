@@ -217,7 +217,8 @@ fun TaskModalBottomSheet(
     fridayStartTimeMinute: Int?,
     fridayDurationMinutes: Int?,
     fridayVoiceMessage: String?,
-    voiceVolume: Float
+    voiceVolume: Float,
+    dndDelayMinutes: Int
   ) -> Unit,
   onSaveSlot5: (title: String, voiceMessage: String, selectedDays: Set<RoutineDay>) -> Unit,
   onMoveToTrash: (taskId: String) -> Unit = {}
@@ -281,6 +282,10 @@ fun TaskModalBottomSheet(
   var durationHoursInput by remember { mutableStateOf(((initialTask?.durationMinutes ?: 60) / 60).toString()) }
   var durationMinsInput by remember { mutableStateOf(((initialTask?.durationMinutes ?: 60) % 60).toString()) }
   var toleranceMinutes by remember { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
+  var customFlexibilityMinutes by remember { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
+  var customFlexInput by remember { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
+  var isHighPriority by remember { mutableStateOf(initialTask?.isHighPriority ?: false) }
+  var allowSplitting by remember { mutableStateOf(initialTask?.allowSplitting ?: false) }
   var isVoiceEnabled by remember { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
   var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
   var voiceVolume by remember { mutableFloatStateOf(initialTask?.voiceVolume ?: 1f) }
@@ -312,6 +317,7 @@ fun TaskModalBottomSheet(
   var customRingtoneUri by remember { mutableStateOf(initialTask?.customRingtoneUri) }
   var customRingtoneTitle by remember { mutableStateOf(initialTask?.customRingtoneTitle ?: "Default Notification Tone") }
   var enableDnd by remember { mutableStateOf(initialTask?.enableDnd ?: false) }
+  var dndDelayMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.dndDelayMinutes ?: 0) }
   var enableHaptic by remember { mutableStateOf(initialTask?.enableHaptic ?: true) }
   var selectedDays by remember { mutableStateOf(initialTask?.selectedDays ?: RoutineDay.allDays()) }
   var isDailyRecurrence by remember { mutableStateOf(selectedDays.size == 7) }
@@ -421,6 +427,9 @@ fun TaskModalBottomSheet(
           (initialTask.category != null && selectedCategory.id != initialTask.category) ||
           selectedDays != initialTask.selectedDays ||
           voiceVolume != initialTask.voiceVolume ||
+          isHighPriority != (initialTask.isHighPriority ?: false) ||
+          customFlexibilityMinutes != (initialTask.customFlexibilityMinutes ?: 0) ||
+          allowSplitting != (initialTask.allowSplitting ?: false) ||
           (isSlot3 && (
             fridayTitle != (initialTask.fridayTitle ?: "Friday Jumu'ah & Reflection") ||
             (fridayDurationHours * 60 + fridayDurationMins) != (initialTask.fridayDurationMinutes ?: 150) ||
@@ -475,7 +484,8 @@ fun TaskModalBottomSheet(
             null,
             null,
             null,
-            voiceVolume
+            voiceVolume,
+            0
           )
         } else {
           onSaveAnchorDetails(
@@ -497,7 +507,8 @@ fun TaskModalBottomSheet(
             if (isSlot3) calculatedFriStart else null,
             if (isSlot3) calculatedFriDuration else null,
             if (isSlot3) fridayVoiceMessage.ifBlank { null } else null,
-            voiceVolume
+            voiceVolume,
+            if (isSlot1 || isSlot5) 0 else dndDelayMinutes.coerceIn(0, 25)
           )
         }
       }
@@ -543,7 +554,9 @@ fun TaskModalBottomSheet(
         voiceMessage = voiceMessage,
         enableDnd = enableDnd,
         enableHaptic = enableHaptic,
-        allowSplitting = true,
+        allowSplitting = allowSplitting,
+        isHighPriority = isHighPriority,
+        customFlexibilityMinutes = customFlexibilityMinutes,
         selectedDays = selectedDays,
         isVoiceEnabled = isVoiceEnabled,
         customNotificationTitle = actualTitle,
@@ -720,6 +733,8 @@ fun TaskModalBottomSheet(
             onVoiceVolumeChange = { voiceVolume = it },
             enableDnd = enableDnd,
             onEnableDndChange = { enableDnd = it },
+            dndDelayMinutes = dndDelayMinutes,
+            onDndDelayMinutesChange = { dndDelayMinutes = it },
             isSoundAlertEnabled = isSoundAlertEnabled,
             onIsSoundAlertEnabledChange = { isSoundAlertEnabled = it },
             customRingtoneTitle = customRingtoneTitle,
@@ -1115,6 +1130,192 @@ fun TaskModalBottomSheet(
                     modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
                   )
                 }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Custom Flexibility Numeric Box
+            Surface(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(14.dp)),
+              color = Color(0xFF121620)
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = "Custom Flexibility (± min)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF8FAFC)
+                  )
+                  Text(
+                    text = "Fine-tune duration compression allowance (0 to 30 min)",
+                    fontSize = 11.sp,
+                    color = Color(0xFF94A3B8)
+                  )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                OutlinedTextField(
+                  value = customFlexInput,
+                  onValueChange = { raw ->
+                    val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                    customFlexInput = clean
+                    customFlexibilityMinutes = parsed.coerceIn(0, 30)
+                  },
+                  prefix = { Text("±", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold) },
+                  suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 12.sp) },
+                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  modifier = Modifier.width(96.dp).testTag("custom_flexibility_input"),
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF0F141E),
+                    unfocusedContainerColor = Color(0xFF0F141E),
+                    focusedBorderColor = Color(0xFF38BDF8),
+                    unfocusedBorderColor = Color(0xFF1F2637),
+                    focusedTextColor = Color(0xFFF8FAFC),
+                    unfocusedTextColor = Color(0xFFF8FAFC)
+                  ),
+                  shape = RoundedCornerShape(10.dp),
+                  singleLine = true
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // High Priority (Anchor Wall Fence) Card with Switch
+            Surface(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .border(
+                  BorderStroke(
+                    1.dp,
+                    if (isHighPriority) Color(0xFFEF4444).copy(alpha = 0.6f) else Color(0xFF1F2637)
+                  ),
+                  RoundedCornerShape(16.dp)
+                ),
+              color = if (isHighPriority) Color(0xFF1A1215) else Color(0xFF121620)
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                  Box(
+                    modifier = Modifier
+                      .size(38.dp)
+                      .clip(RoundedCornerShape(10.dp))
+                      .background(if (isHighPriority) Color(0xFFEF4444).copy(alpha = 0.2f) else Color(0xFF1F2637)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Shield,
+                      contentDescription = null,
+                      tint = if (isHighPriority) Color(0xFFEF4444) else Color(0xFF94A3B8),
+                      modifier = Modifier.size(20.dp)
+                    )
+                  }
+                  Spacer(modifier = Modifier.width(12.dp))
+                  Column {
+                    Text(
+                      text = "High Priority (Anchor Wall Fence)",
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = if (isHighPriority) Color(0xFFFCA5A5) else Color(0xFFF8FAFC)
+                    )
+                    Text(
+                      text = "Strictly confines task to its inter-anchor gap. Moves to overflow rather than jumping across anchor walls.",
+                      fontSize = 11.sp,
+                      color = Color(0xFF94A3B8)
+                    )
+                  }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Switch(
+                  checked = isHighPriority,
+                  onCheckedChange = { isHighPriority = it },
+                  colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color(0xFFEF4444),
+                    uncheckedThumbColor = Color(0xFF94A3B8),
+                    uncheckedTrackColor = Color(0xFF1F2637)
+                  ),
+                  modifier = Modifier.testTag("high_priority_switch")
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Allow Auto-Splitting (>60m) Card with Switch
+            Surface(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
+              color = Color(0xFF121620)
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                  Box(
+                    modifier = Modifier
+                      .size(38.dp)
+                      .clip(RoundedCornerShape(10.dp))
+                      .background(Color(0xFF1F2637)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.AutoMirrored.Filled.CallSplit,
+                      contentDescription = null,
+                      tint = Color(0xFF06B6D4),
+                      modifier = Modifier.size(20.dp)
+                    )
+                  }
+                  Spacer(modifier = Modifier.width(12.dp))
+                  Column {
+                    Text(
+                      text = "Allow Auto-Splitting (>60m)",
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFFF8FAFC)
+                    )
+                    Text(
+                      text = "Splits session into >=15m parts if no continuous gap is found.",
+                      fontSize = 11.sp,
+                      color = Color(0xFF94A3B8)
+                    )
+                  }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Switch(
+                  checked = allowSplitting,
+                  onCheckedChange = { allowSplitting = it },
+                  colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color(0xFF06B6D4),
+                    uncheckedThumbColor = Color(0xFF94A3B8),
+                    uncheckedTrackColor = Color(0xFF1F2637)
+                  ),
+                  modifier = Modifier.testTag("allow_splitting_switch")
+                )
               }
             }
 
@@ -2059,6 +2260,8 @@ private fun AnchorEditSection(
   onVoiceVolumeChange: (Float) -> Unit,
   enableDnd: Boolean,
   onEnableDndChange: (Boolean) -> Unit,
+  dndDelayMinutes: Int,
+  onDndDelayMinutesChange: (Int) -> Unit,
   isSoundAlertEnabled: Boolean,
   onIsSoundAlertEnabledChange: (Boolean) -> Unit,
   customRingtoneTitle: String,
@@ -2721,6 +2924,91 @@ private fun AnchorEditSection(
             onCheckedChange = onEnableDndChange,
             colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF8B5CF6))
           )
+        }
+
+        // Delayed DND for Anchor Slots 2, 3, 4, 6, 7
+        if (enableDnd && !isSlot1 && !isSlot5) {
+          Spacer(modifier = Modifier.height(10.dp))
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFF0F141E))
+              .border(BorderStroke(1.dp, Color(0xFF2E1065)), RoundedCornerShape(12.dp)),
+            color = Color.Transparent
+          ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.weight(1f)
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Schedule,
+                    contentDescription = null,
+                    tint = Color(0xFFC4B5FD),
+                    modifier = Modifier.size(16.dp)
+                  )
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Text(
+                    text = "Auto-engage DND after:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFFE2E8F0)
+                  )
+                }
+
+                var delayInputText by remember(dndDelayMinutes) { mutableStateOf(dndDelayMinutes.toString()) }
+                OutlinedTextField(
+                  value = delayInputText,
+                  onValueChange = { raw ->
+                    val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                    delayInputText = clean
+                    onDndDelayMinutesChange(parsed.coerceIn(0, 25))
+                  },
+                  modifier = Modifier
+                    .width(88.dp)
+                    .testTag("anchor_dnd_delay_input"),
+                  trailingIcon = {
+                    Text(
+                      text = "min",
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF8B5CF6)
+                    )
+                  },
+                  singleLine = true,
+                  textStyle = androidx.compose.ui.text.TextStyle(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF8FAFC),
+                    textAlign = TextAlign.Center
+                  ),
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF161B26),
+                    unfocusedContainerColor = Color(0xFF161B26),
+                    focusedBorderColor = Color(0xFF8B5CF6),
+                    unfocusedBorderColor = Color(0xFF1F2637),
+                    focusedTextColor = Color(0xFFF8FAFC),
+                    unfocusedTextColor = Color(0xFFF8FAFC)
+                  ),
+                  shape = RoundedCornerShape(10.dp)
+                )
+              }
+
+              Spacer(modifier = Modifier.height(6.dp))
+              Text(
+                text = "0 = Immediate start • Max 25 mins delay after task begins",
+                fontSize = 10.sp,
+                color = Color(0xFF94A3B8),
+                lineHeight = 14.sp
+              )
+            }
+          }
         }
 
         Spacer(modifier = Modifier.height(12.dp))

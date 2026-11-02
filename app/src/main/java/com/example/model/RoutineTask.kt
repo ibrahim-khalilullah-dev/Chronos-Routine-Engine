@@ -56,7 +56,9 @@ data class RoutineTask(
   val voiceMessage: String = "",
   val enableDnd: Boolean = false,
   val enableHaptic: Boolean = true,
-  val allowSplitting: Boolean = true,
+  val allowSplitting: Boolean = false,
+  val isHighPriority: Boolean = false,
+  val customFlexibilityMinutes: Int = 0,
   val selectedDays: Set<RoutineDay> = RoutineDay.allDays(),
   val isSplitPart: Boolean = false,
   val splitPartLabel: String? = null, // e.g. "Part 1/2 (45m)"
@@ -85,7 +87,8 @@ data class RoutineTask(
   val voiceVolume: Float = 1.0f,
   val isPausedIndefinitely: Boolean = false,
   val pausedUntilDateMillis: Long? = null,
-  val isPausedTodayOnly: Boolean = false
+  val isPausedTodayOnly: Boolean = false,
+  val dndDelayMinutes: Int = 0 // Auto-engage DND delay in minutes (0 to 25m, default 0)
 ) {
   fun isCurrentlyPaused(currentDateMillis: Long = System.currentTimeMillis()): Boolean {
     if (isPausedIndefinitely) return true

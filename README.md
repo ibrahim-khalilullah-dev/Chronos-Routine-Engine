@@ -67,24 +67,36 @@ Link two distinct routine sessions under a unified duration pool:
 - **Hydraulic Adjustment:** Extending Session A proportionally contracts Session B in real time without manual re-calculation.
 - **Anchor Wall Protection:** Both twins respect immovable anchor boundaries and enforce a 45-minute safety floor.
 
-### 5. 3-Mode Task Pause & Vacation Engine (In Engine Settings)
+### 5. High Priority Anchor Wall Fence & Custom Flexibility 🛡️
+- **Anchor Fence Enforcement:** Mark critical tasks as **High Priority** to strictly confine them inside their preferred inter-anchor gap. If room is insufficient, Chronos moves them safely into the Overflow pool rather than allowing jarring timetable jumps across anchor walls.
+- **Custom Flexibility (±0m to ±30m):** Precision fine-tuning of compression allowances to smoothly accommodate tasks into tight circadian windows.
+- **Anti-Squish Card Ergonomics:** Responsive title-shrinking and non-collapsing badge layouts designed for compact and standard displays.
+
+### 6. 3-Mode Task Pause & Vacation Engine (In Engine Settings)
 Manage temporary routine suspensions without deleting tasks:
 - **Pause for Today Only:** Temporarily deactivates the task for the remainder of today; auto-resumes at midnight.
 - **Pause for N Days:** Enter a custom day count (e.g. 5 days); automatically counts down and re-engages on day N+1.
 - **Pause Indefinitely:** Holds the task in suspension until manually resumed via a 1-tap Amber badge.
 - **Dynamic Gap Liberation:** Pausing any task (including Slot 5) opens up 100% of its scheduled interval as an open gap for other tasks.
 
-### 6. Quantified Self, 90-Day History & Circadian Visualizer
+### 7. Quantified Self, 90-Day History & Circadian Visualizer
 - **Two-Step Completion Evaluation:** Grade task quality from [0%] to [100%] in 25% increments with permanent 5-Star badges.
 - **90-Day Rating History:** Historical ratings persist across restarts and task modifications for 3 months with automatic expiration.
 - **24-Hour Circadian Donut Dial:** Interactive SVG canvas dial displaying today's 1,440-minute distribution with tap-to-inspect segment readouts.
 - **Interactive Progress Accordion:** Expand any category in progress view to inspect individual task ratings, durations, and timestamps.
 
-### 7. Samsung Deep Sleep Immunity & Hardware Automations
+### 8. Samsung Deep Sleep Immunity & Hardware Automations
 - **AlarmManager.setAlarmClock Engine:** Alarms are scheduled via system clock alarm architecture, granting complete immunity against Samsung One UI aggressive deep-sleep suspension and Doze suppression.
-- **Priority Do Not Disturb (DND):** Automatically switches system interruption filters on task start and restores original status upon completion.
+- **Priority Do Not Disturb (DND) with 0–25m Delay Timer:** Automatically switches system interruption filters on task start and restores original status upon completion. For Anchor Slots 2, 3, 4, 6, 7, users can configure an optional delay timer (0 to 25 mins) before DND engages.
 - **Audio-Ducking Lock-Screen TTS:** Announces custom task briefings through TextToSpeech with transient audio focus ducking.
 - **Offline Storage Vault:** Multi-tier automated snapshots restore routines with zero clicks upon fresh reinstallation.
+
+### 9. Supercharged Bulk Terminal CLI Engine 💻
+A developer-first, high-throughput monospace Obsidian terminal console with real-time grammar parsing, diagnostics, and context-aware ghost text prediction:
+- **`ANCHOR` Directive:** `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Message` (plus optional Friday overrides for Slot 3).
+- **`TWIN` Directive:** `TWIN | TotalPool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND(Y/N) | Days | Flex | Rest`.
+- **`DYNAMIC` Directive:** `Task Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0/15/30) | Rest(0-30)`.
+- **Zero Dummy Data:** Starts with an unconfigured, pristine canvas. 1-tap "Template" button provides instant reference syntax.
 
 ---
 

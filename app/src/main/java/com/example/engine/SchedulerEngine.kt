@@ -472,12 +472,171 @@ object SchedulerEngine {
     }
 
     // 3. Schedule Standard Dynamic Tasks
+    val anchorGaps = findAvailableGaps(dayAnchors, interTaskBufferMinutes)
+
     for (dynamicTask in standardTasks) {
       val gaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
       val requiredDuration = dynamicTask.durationMinutes
-
-      // Try continuous placement first near preferred start time
       val prefStart = dynamicTask.startTimeMinute
+      val effectiveTolerance = maxOf(dynamicTask.toleranceMinutes, dynamicTask.customFlexibilityMinutes).coerceIn(0, 30)
+
+      // High Priority Anchor Wall Fence: strictly confine to inter-anchor gap enclosing prefStart
+      if (dynamicTask.isHighPriority) {
+        val enclosingAnchorGap = anchorGaps.find { prefStart in it.startMinute until it.endMinute }
+        if (enclosingAnchorGap == null) {
+          overflowTasks.add(
+            dynamicTask.copy(
+              isOverflow = true,
+              overflowReason = "High Priority task preferred time conflicts directly with an anchor wall."
+            )
+          )
+          continue
+        }
+
+        val fencedGaps = gaps.filter {
+          it.startMinute >= enclosingAnchorGap.startMinute && it.endMinute <= enclosingAnchorGap.endMinute
+        }
+
+        // Try continuous placement in fencedGaps
+        var bestGap: ScheduleGap? = null
+        var bestPlacementStart = -1
+        var minDistance = Int.MAX_VALUE
+
+        for (gap in fencedGaps) {
+          if (gap.durationMinutes >= requiredDuration) {
+            val possibleStart = when {
+              prefStart in gap.startMinute..(gap.endMinute - requiredDuration) -> prefStart
+              prefStart < gap.startMinute -> gap.startMinute
+              else -> gap.endMinute - requiredDuration
+            }
+            val distance = Math.abs(possibleStart - prefStart)
+            if (distance < minDistance) {
+              minDistance = distance
+              bestGap = gap
+              bestPlacementStart = possibleStart
+            }
+          }
+        }
+
+        if (bestGap != null && bestPlacementStart != -1) {
+          scheduledTasks.add(
+            dynamicTask.copy(
+              startTimeMinute = bestPlacementStart,
+              durationMinutes = requiredDuration,
+              isSplitPart = false,
+              isOverflow = false
+            )
+          )
+          continue
+        }
+
+        // Try tolerance / custom flexibility within fencedGaps
+        if (effectiveTolerance > 0) {
+          val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(MIN_SPLIT_MINUTES)
+          var flexGap: ScheduleGap? = null
+          var flexStart = -1
+          var flexDuration = -1
+          var minFlexDist = Int.MAX_VALUE
+
+          for (gap in fencedGaps) {
+            if (gap.durationMinutes >= minViable) {
+              val fittedDuration = gap.durationMinutes.coerceIn(minViable, requiredDuration)
+              val possibleStart = when {
+                prefStart in gap.startMinute..(gap.endMinute - fittedDuration) -> prefStart
+                prefStart < gap.startMinute -> gap.startMinute
+                else -> gap.endMinute - fittedDuration
+              }
+              val distance = Math.abs(possibleStart - prefStart)
+              if (distance < minFlexDist) {
+                minFlexDist = distance
+                flexGap = gap
+                flexStart = possibleStart
+                flexDuration = fittedDuration
+              }
+            }
+          }
+
+          if (flexGap != null && flexStart != -1 && flexDuration >= minViable) {
+            scheduledTasks.add(
+              dynamicTask.copy(
+                startTimeMinute = flexStart,
+                durationMinutes = flexDuration,
+                isSplitPart = false,
+                isOverflow = false
+              )
+            )
+            continue
+          }
+        }
+
+        // Try splitting strictly within fencedGaps
+        if (dynamicTask.allowSplitting && requiredDuration > SPLIT_THRESHOLD_MINUTES) {
+          val viableGaps = fencedGaps.filter { it.durationMinutes >= MIN_SPLIT_MINUTES }
+          val totalCapacity = viableGaps.sumOf { it.durationMinutes }
+
+          if (totalCapacity >= requiredDuration) {
+            var remaining = requiredDuration
+            val splitParts = mutableListOf<RoutineTask>()
+            var partIndex = 1
+
+            val sortedGaps = viableGaps.sortedBy { gap ->
+              val center = (gap.startMinute + gap.endMinute) / 2
+              Math.abs(center - prefStart)
+            }
+
+            for (gap in sortedGaps) {
+              if (remaining <= 0) break
+
+              val availableInGap = gap.durationMinutes
+              val chunkDuration = when {
+                remaining <= availableInGap -> remaining
+                else -> availableInGap
+              }
+
+              if (chunkDuration < MIN_SPLIT_MINUTES) continue
+
+              val actualChunk = if (remaining - chunkDuration in 1 until MIN_SPLIT_MINUTES) {
+                val adjusted = chunkDuration - (MIN_SPLIT_MINUTES - (remaining - chunkDuration))
+                if (adjusted >= MIN_SPLIT_MINUTES) adjusted else chunkDuration
+              } else {
+                chunkDuration
+              }
+
+              if (actualChunk < MIN_SPLIT_MINUTES) continue
+
+              val part = dynamicTask.copy(
+                id = "${dynamicTask.id}_part_${partIndex}",
+                title = "${dynamicTask.title} (Part $partIndex)",
+                startTimeMinute = gap.startMinute,
+                durationMinutes = actualChunk,
+                isSplitPart = true,
+                splitPartLabel = "Part $partIndex (${actualChunk}m)",
+                parentTaskId = dynamicTask.id,
+                isOverflow = false
+              )
+              splitParts.add(part)
+              remaining -= actualChunk
+              partIndex++
+            }
+
+            if (remaining == 0) {
+              scheduledTasks.addAll(splitParts)
+              continue
+            }
+          }
+        }
+
+        // High priority task cannot fit between assigned anchor boundaries without overleaping walls
+        overflowTasks.add(
+          dynamicTask.copy(
+            isOverflow = true,
+            overflowReason = "High Priority task cannot fit between assigned anchor boundaries without overleaping walls."
+          )
+        )
+        continue
+      }
+
+      // Try continuous placement first near preferred start time across all gaps
       var bestGap: ScheduleGap? = null
       var bestPlacementStart = -1
       var minDistance = Int.MAX_VALUE
@@ -510,11 +669,9 @@ object SchedulerEngine {
         continue
       }
 
-      // Schedule Float / Tolerance Margin (±5m to ±15m flexibility)
-      // Safely compresses duration within tolerance margin to fit tight anchor boundaries without overflowing
-      if (dynamicTask.toleranceMinutes > 0) {
-        val tolerance = dynamicTask.toleranceMinutes.coerceIn(0, 15)
-        val minViable = (requiredDuration - tolerance).coerceAtLeast(MIN_SPLIT_MINUTES)
+      // Schedule Float / Tolerance Margin / Custom Flexibility (±5m to ±30m flexibility)
+      if (effectiveTolerance > 0) {
+        val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(MIN_SPLIT_MINUTES)
         var flexGap: ScheduleGap? = null
         var flexStart = -1
         var flexDuration = -1

@@ -29,17 +29,19 @@ object ConsoleParser {
   // Default is clean and empty so no dummy tasks are accidentally committed
   const val DEFAULT_CONSOLE_TEMPLATE = ""
 
-  // Sample template available on-demand via "Quick-Copy Template"
+  // Sample template showcasing ANCHOR, TWIN, and DYNAMIC directives
   val SAMPLE_SNIPPET = """
 # Chronos Routine Terminal Console
-# Syntax: Task Name | Duration(m) | Preferred Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Custom Notification/Voice
-# Days: Sat,Sun,Mon,Tue,Wed,Thu,Fri or ALL, WEEKDAYS, WEEKENDS
+# Directives: ANCHOR, TWIN, DYNAMIC
+#
+# 1. ANCHOR: ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message
+# 2. TWIN:   TWIN | TotalPool(m) | Part1Title | Part1Start | Part1Dur | Part1Voice | Part2Title | Part2Start | Part2Dur | Part2Voice | DND(Y/N) | Days | Flex | Rest
+# 3. DYNAMIC: Task Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flexibility(0/15/30) | RestBuffer(0-30)
 
-Quick Morning Review | 30 | 06:15 | N | ALL | Y | Time for morning review and daily priorities
-Client Strategy Sprint | 90 | 10:00 | Y | Mon,Tue,Wed,Thu | Y | Strategy sprint initiated. DND engaged.
-Speed Cardio & Stretch | 45 | 16:30 | Y | ALL | N | High intensity cardio block starting now
-Algorithm Practice | 60 | 17:30 | N | Mon,Wed,Fri | Y | Time for coding algorithms and problem solving
-Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and financial balance
+ANCHOR | 2 | Morning Routine | 05:00 | 30 | Y | 5 | Y | Morning time starting now
+TWIN | 180 | Deep Focus (Part 1) | 09:00 | 90 | Focus sprint one | Deep Focus (Part 2) | 14:00 | 90 | Focus sprint two | Y | Mon,Tue,Wed,Thu | 15 | 5
+Speed Cardio & Stretch | 45 | 16:30 | Y | ALL | N | High intensity cardio block | 0 | 5
+Algorithm Practice | 60 | 17:30 | N | Mon,Wed,Fri | Y | Time for coding algorithms | 15 | 5
 """.trimIndent()
 
   fun parse(text: String): ConsoleParseResult {
@@ -67,7 +69,6 @@ Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and fin
       }
 
       if (trimmed.startsWith("#")) {
-        // Check for backup configuration directives
         if (trimmed.startsWith("# SLEEP_MINUTES=")) {
           sleepMinutes = trimmed.substringAfter("=").trim().toIntOrNull()
         } else if (trimmed.startsWith("# BUFFER_MINUTES=")) {
@@ -85,48 +86,314 @@ Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and fin
       }
 
       val rawTokens = trimmed.split("|").map { it.trim() }
+      val directive = rawTokens[0].uppercase()
 
-      // Backup format support: ANCHOR | Slot | Title | Start | Duration | DND | Voice
-      if (rawTokens[0].equals("ANCHOR", ignoreCase = true)) {
-        if (rawTokens.size >= 5) {
-          val slot = rawTokens[1].toIntOrNull() ?: 1
-          val title = rawTokens[2]
-          val startMinutes = RoutineTask.parseTime24(rawTokens[3]) ?: 480
-          val duration = rawTokens[4].toIntOrNull() ?: 60
-          val dnd = rawTokens.getOrNull(5)?.equals("Y", ignoreCase = true) == true
-          val voice = rawTokens.getOrNull(6)?.equals("N", ignoreCase = true) != true
-
-          val anchorType = when (slot) {
-            1 -> TaskType.ANCHOR_SLEEP
-            5 -> TaskType.ANCHOR_ELASTIC
-            else -> TaskType.ANCHOR_STANDARD
-          }
-
-          val anchorTask = RoutineTask(
-            id = "slot_$slot",
-            title = title,
-            type = anchorType,
-            slotNumber = slot,
-            startTimeMinute = startMinutes,
-            durationMinutes = duration,
-            enableDnd = dnd,
-            isVoiceEnabled = voice
-          )
-          parsedAnchors.add(anchorTask)
+      // -------------------------------------------------------------
+      // DIRECTIVE 1: ANCHOR
+      // Syntax: ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message
+      // Optional Friday overrides for Slot 3: | FriTitle | FriStart | FriDuration | FriMessage
+      // -------------------------------------------------------------
+      if (directive == "ANCHOR") {
+        if (rawTokens.size < 5) {
           diagnostics.add(
             ConsoleLineDiagnostic(
               lineNumber = lineNum,
               rawLine = rawLine,
-              isValid = true,
-              parsedTask = anchorTask
+              isValid = false,
+              errorMessage = "ANCHOR requires at least: ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m)"
             )
           )
           continue
         }
+
+        val slot = rawTokens[1].toIntOrNull()
+        if (slot == null || slot !in 1..7) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "Invalid slot number '${rawTokens[1]}'. Must be 1 to 7."
+            )
+          )
+          continue
+        }
+
+        val title = rawTokens[2]
+        if (title.isBlank()) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "Anchor title cannot be empty."
+            )
+          )
+          continue
+        }
+
+        val startMinutes = RoutineTask.parseTime24(rawTokens[3])
+        if (startMinutes == null && slot != 1 && slot != 5) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "Invalid start time '${rawTokens[3]}'. Expected HH:mm (e.g. 05:00)."
+            )
+          )
+          continue
+        }
+
+        val duration = rawTokens[4].toIntOrNull()
+        if ((duration == null || duration <= 0) && slot != 5) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "Invalid duration '${rawTokens[4]}'. Must be positive minutes."
+            )
+          )
+          continue
+        }
+
+        val dndToken = rawTokens.getOrNull(5)?.uppercase() ?: "N"
+        val enableDnd = dndToken in setOf("Y", "YES", "TRUE", "1")
+
+        // Disambiguate token 6: can be DndDelay (0..25) or Voice (Y/N)
+        var dndDelayMinutes = 0
+        var isVoiceEnabled = true
+        var message = "$title starting now."
+        var nextIdx = 6
+
+        if (rawTokens.size > 6) {
+          val tok6 = rawTokens[6]
+          val parsedDelay = tok6.toIntOrNull()
+          if (parsedDelay != null) {
+            dndDelayMinutes = parsedDelay.coerceIn(0, 25)
+            nextIdx = 7
+            if (rawTokens.size > nextIdx) {
+              val voiceTok = rawTokens[nextIdx].uppercase()
+              isVoiceEnabled = voiceTok in setOf("Y", "YES", "TRUE", "1")
+              nextIdx++
+            }
+            if (rawTokens.size > nextIdx) {
+              message = rawTokens[nextIdx].ifBlank { "$title starting now." }
+              nextIdx++
+            }
+          } else {
+            // Backward-compatible: token 6 is voice
+            val voiceTok = tok6.uppercase()
+            isVoiceEnabled = voiceTok in setOf("Y", "YES", "TRUE", "1")
+            nextIdx = 7
+            if (rawTokens.size > nextIdx) {
+              message = rawTokens[nextIdx].ifBlank { "$title starting now." }
+              nextIdx++
+            }
+          }
+        }
+
+        // Optional Friday overrides for Slot 3
+        var friTitle: String? = null
+        var friStart: Int? = null
+        var friDur: Int? = null
+        var friVoice: String? = null
+
+        if (slot == 3 && rawTokens.size > nextIdx) {
+          friTitle = rawTokens.getOrNull(nextIdx)?.takeIf { it.isNotBlank() }
+          nextIdx++
+          friStart = rawTokens.getOrNull(nextIdx)?.let { RoutineTask.parseTime24(it) }
+          nextIdx++
+          friDur = rawTokens.getOrNull(nextIdx)?.toIntOrNull()
+          nextIdx++
+          friVoice = rawTokens.getOrNull(nextIdx)?.takeIf { it.isNotBlank() }
+        }
+
+        val anchorType = when (slot) {
+          1 -> TaskType.ANCHOR_SLEEP
+          5 -> TaskType.ANCHOR_ELASTIC
+          else -> TaskType.ANCHOR_STANDARD
+        }
+
+        val anchorTask = RoutineTask(
+          id = "slot_$slot",
+          title = title,
+          type = anchorType,
+          slotNumber = slot,
+          startTimeMinute = startMinutes ?: 0,
+          durationMinutes = duration ?: 60,
+          voiceMessage = message,
+          enableDnd = enableDnd,
+          dndDelayMinutes = if (slot == 1 || slot == 5) 0 else dndDelayMinutes,
+          isVoiceEnabled = isVoiceEnabled,
+          fridayTitle = friTitle,
+          fridayStartTimeMinute = friStart,
+          fridayDurationMinutes = friDur,
+          fridayVoiceMessage = friVoice
+        )
+        parsedAnchors.add(anchorTask)
+        diagnostics.add(
+          ConsoleLineDiagnostic(
+            lineNumber = lineNum,
+            rawLine = rawLine,
+            isValid = true,
+            parsedTask = anchorTask
+          )
+        )
+        continue
       }
 
-      // Check if line is prepended with "DYNAMIC |"
-      val tokens = if (rawTokens[0].equals("DYNAMIC", ignoreCase = true)) {
+      // -------------------------------------------------------------
+      // DIRECTIVE 2: TWIN
+      // Syntax: TWIN | TotalPool(m) | Part1Title | Part1Start(HH:mm) | Part1Dur(m) | Part1Voice | Part2Title | Part2Start(HH:mm) | Part2Dur(m) | Part2Voice | DND(Y/N) | Days | Flexibility | RestBuffer
+      // -------------------------------------------------------------
+      if (directive == "TWIN") {
+        if (rawTokens.size < 10) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "TWIN requires: TWIN | TotalPool | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice"
+            )
+          )
+          continue
+        }
+
+        val requestedPool = rawTokens[1].toIntOrNull() ?: 180
+        val p1Title = rawTokens[2].ifBlank { "Session 1" }
+        val p1Start = RoutineTask.parseTime24(rawTokens[3])
+        if (p1Start == null) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "Invalid Part 1 start time '${rawTokens[3]}'. Expected HH:mm."
+            )
+          )
+          continue
+        }
+
+        val p1Dur = rawTokens[4].toIntOrNull()
+        if (p1Dur == null || p1Dur < 15) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "Invalid Part 1 duration '${rawTokens[4]}'. Minimum 15m."
+            )
+          )
+          continue
+        }
+
+        val p1Voice = rawTokens[5].ifBlank { "$p1Title starting now." }
+
+        val p2Title = rawTokens[6].ifBlank { "Session 2" }
+        val p2Start = RoutineTask.parseTime24(rawTokens[7])
+        if (p2Start == null) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "Invalid Part 2 start time '${rawTokens[7]}'. Expected HH:mm."
+            )
+          )
+          continue
+        }
+
+        val p2Dur = rawTokens[8].toIntOrNull()
+        if (p2Dur == null || p2Dur < 15) {
+          diagnostics.add(
+            ConsoleLineDiagnostic(
+              lineNumber = lineNum,
+              rawLine = rawLine,
+              isValid = false,
+              errorMessage = "Invalid Part 2 duration '${rawTokens[8]}'. Minimum 15m."
+            )
+          )
+          continue
+        }
+
+        val p2Voice = rawTokens[9].ifBlank { "$p2Title starting now." }
+
+        val dndToken = rawTokens.getOrNull(10)?.uppercase() ?: "N"
+        val enableDnd = dndToken in setOf("Y", "YES", "TRUE", "1")
+
+        val daysToken = rawTokens.getOrNull(11) ?: "ALL"
+        val parsedDays = parseDaysToken(daysToken)
+
+        val flex = rawTokens.getOrNull(12)?.toIntOrNull()?.coerceIn(0, 30) ?: 0
+        val rest = rawTokens.getOrNull(13)?.toIntOrNull()?.coerceIn(0, 30) ?: 5
+
+        val totalPool = requestedPool.coerceAtLeast(p1Dur + p2Dur)
+        val twinId = "fluid_${UUID.randomUUID().toString().take(8)}"
+
+        val part1 = RoutineTask(
+          id = "${twinId}_p1",
+          title = p1Title,
+          type = TaskType.DYNAMIC,
+          startTimeMinute = p1Start,
+          durationMinutes = p1Dur,
+          voiceMessage = p1Voice,
+          enableDnd = enableDnd,
+          enableHaptic = true,
+          allowSplitting = false,
+          selectedDays = parsedDays,
+          isVoiceEnabled = true,
+          customNotificationTitle = p1Title,
+          customNotificationBody = p1Voice,
+          isFluidTwin = true,
+          fluidTwinId = twinId,
+          fluidTwinPart = 1,
+          fluidTotalPoolMinutes = totalPool,
+          toleranceMinutes = flex,
+          interTaskBufferMinutes = rest
+        )
+
+        val part2 = RoutineTask(
+          id = "${twinId}_p2",
+          title = p2Title,
+          type = TaskType.DYNAMIC,
+          startTimeMinute = p2Start,
+          durationMinutes = p2Dur,
+          voiceMessage = p2Voice,
+          enableDnd = enableDnd,
+          enableHaptic = true,
+          allowSplitting = false,
+          selectedDays = parsedDays,
+          isVoiceEnabled = true,
+          customNotificationTitle = p2Title,
+          customNotificationBody = p2Voice,
+          isFluidTwin = true,
+          fluidTwinId = twinId,
+          fluidTwinPart = 2,
+          fluidTotalPoolMinutes = totalPool,
+          toleranceMinutes = flex,
+          interTaskBufferMinutes = rest
+        )
+
+        validTasks.add(part1)
+        validTasks.add(part2)
+        diagnostics.add(
+          ConsoleLineDiagnostic(
+            lineNumber = lineNum,
+            rawLine = rawLine,
+            isValid = true,
+            parsedTask = part1
+          )
+        )
+        continue
+      }
+
+      // -------------------------------------------------------------
+      // DIRECTIVE 3: DYNAMIC (or default without prefix)
+      // Syntax: Task Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flexibility(0/15/30) | RestBuffer(0-30)
+      // -------------------------------------------------------------
+      val tokens = if (directive == "DYNAMIC") {
         rawTokens.drop(1)
       } else {
         rawTokens
@@ -184,7 +451,7 @@ Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and fin
       }
 
       val dndToken = tokens.getOrNull(3)?.uppercase() ?: "N"
-      val enableDnd = dndToken == "Y" || dndToken == "YES" || dndToken == "TRUE" || dndToken == "1"
+      val enableDnd = dndToken in setOf("Y", "YES", "TRUE", "1")
 
       val daysToken = tokens.getOrNull(4)?.trim() ?: "ALL"
       val parsedDays = parseDaysToken(daysToken)
@@ -206,24 +473,44 @@ Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and fin
 
       if (tokens.size >= 7) {
         val voiceToken = tokens[5].uppercase()
-        isVoiceEnabled = voiceToken == "Y" || voiceToken == "YES" || voiceToken == "TRUE" || voiceToken == "1"
+        isVoiceEnabled = voiceToken in setOf("Y", "YES", "TRUE", "1")
         customMessage = tokens[6].ifBlank { "$name starting now." }
       } else if (tokens.size == 6) {
         val t5Upper = tokens[5].uppercase()
         if (t5Upper in setOf("Y", "N", "YES", "NO", "TRUE", "FALSE", "1", "0")) {
-          isVoiceEnabled = t5Upper == "Y" || t5Upper == "YES" || t5Upper == "TRUE" || t5Upper == "1"
+          isVoiceEnabled = t5Upper in setOf("Y", "YES", "TRUE", "1")
         } else {
           isVoiceEnabled = true
           customMessage = tokens[5].ifBlank { "$name starting now." }
         }
       }
 
-      // Extended fields: Fluid Twin & Ringtone
-      val isFluidTwin = tokens.getOrNull(7)?.equals("Y", ignoreCase = true) == true
-      val fluidPart = tokens.getOrNull(8)?.toIntOrNull()
-      val fluidPool = tokens.getOrNull(9)?.toIntOrNull()
-      val ringtoneUri = tokens.getOrNull(10)?.takeIf { it != "DEFAULT" && it.isNotBlank() }
-      val ringtoneTitle = tokens.getOrNull(11)?.takeIf { it != "Default" && it.isNotBlank() }
+      // Flexibility (toleranceMinutes) & Rest Buffer (interTaskBufferMinutes) OR Exported Twin Tokens
+      var tolerance = 0
+      var restBuffer = 5
+      var isFluidTwin = false
+      var fluidPart: Int? = null
+      var fluidPool: Int? = null
+      var ringtoneUri: String? = null
+      var ringtoneTitle: String? = null
+
+      if (tokens.size > 7) {
+        val t7 = tokens[7]
+        if (t7.equals("Y", ignoreCase = true)) {
+          // Exported Fluid Twin format
+          isFluidTwin = true
+          fluidPart = tokens.getOrNull(8)?.toIntOrNull()
+          fluidPool = tokens.getOrNull(9)?.toIntOrNull()
+          ringtoneUri = tokens.getOrNull(10)?.takeIf { it != "DEFAULT" && it.isNotBlank() }
+          ringtoneTitle = tokens.getOrNull(11)?.takeIf { it != "Default" && it.isNotBlank() }
+        } else {
+          // Regular dynamic: Flexibility & RestBuffer
+          tolerance = t7.toIntOrNull()?.coerceIn(0, 30) ?: 0
+          if (tokens.size > 8) {
+            restBuffer = tokens[8].toIntOrNull()?.coerceIn(0, 30) ?: 5
+          }
+        }
+      }
 
       val task = RoutineTask(
         id = "dynamic_${UUID.randomUUID().toString().take(8)}",
@@ -244,7 +531,9 @@ Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and fin
         fluidTwinPart = fluidPart,
         fluidTotalPoolMinutes = fluidPool,
         customRingtoneUri = ringtoneUri,
-        customRingtoneTitle = ringtoneTitle
+        customRingtoneTitle = ringtoneTitle,
+        toleranceMinutes = tolerance,
+        interTaskBufferMinutes = restBuffer
       )
 
       validTasks.add(task)
@@ -300,9 +589,8 @@ Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and fin
   }
 
   /**
-   * Evaluates how many pipe '|' delimiters exist in the active typing line
+   * Evaluates the directive and pipe '|' delimiters in the active typing line
    * and generates a context-aware inline syntax ghost prediction recommendation.
-   * E.g., if line is "Study |", returns " 45 | 10:00 | N | ALL | Y | Focus session".
    */
   fun getSyntaxPrediction(currentLine: String): String? {
     val trimmed = currentLine.trim()
@@ -310,28 +598,71 @@ Weekly Budget Sync | 40 | 21:00 | N | Sat,Sun | N | Review weekly budget and fin
       return null
     }
 
+    val upper = trimmed.uppercase()
     val pipeCount = currentLine.count { it == '|' }
     val endsWithPipe = currentLine.trimEnd().endsWith("|")
-    val endsWithSpace = currentLine.endsWith(" ")
 
+    // ANCHOR branch
+    if (upper.startsWith("ANCHOR")) {
+      return when (pipeCount) {
+        0 -> " | 2 | Morning Routine | 05:00 | 30 | Y | 0 | Y | Morning time"
+        1 -> if (endsWithPipe) " 2 | Morning Routine | 05:00 | 30 | Y | 0 | Y | Morning time" else " | Morning Routine | 05:00 | 30 | Y | 0 | Y | Morning time"
+        2 -> if (endsWithPipe) " Morning Routine | 05:00 | 30 | Y | 0 | Y | Morning time" else " | 05:00 | 30 | Y | 0 | Y | Morning time"
+        3 -> if (endsWithPipe) " 05:00 | 30 | Y | 0 | Y | Morning time" else " | 30 | Y | 0 | Y | Morning time"
+        4 -> if (endsWithPipe) " 30 | Y | 0 | Y | Morning time" else " | Y | 0 | Y | Morning time"
+        5 -> if (endsWithPipe) " Y | 0 | Y | Morning time" else " | 0 | Y | Morning time"
+        6 -> if (endsWithPipe) " 0 | Y | Morning time" else " | Y | Morning time"
+        7 -> if (endsWithPipe) " Y | Morning time" else " | Morning time"
+        8 -> if (endsWithPipe) " Morning time starting now" else null
+        else -> null
+      }
+    }
+
+    // TWIN branch
+    if (upper.startsWith("TWIN")) {
+      return when (pipeCount) {
+        0 -> " | 180 | Morning Focus | 09:00 | 90 | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL"
+        1 -> if (endsWithPipe) " 180 | Morning Focus | 09:00 | 90 | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL" else " | Morning Focus | 09:00 | 90 | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL"
+        2 -> if (endsWithPipe) " Morning Focus | 09:00 | 90 | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL" else " | 09:00 | 90 | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL"
+        3 -> if (endsWithPipe) " 09:00 | 90 | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL" else " | 90 | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL"
+        4 -> if (endsWithPipe) " 90 | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL" else " | Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL"
+        5 -> if (endsWithPipe) " Sprint 1 | Review | 14:00 | 90 | Sprint 2 | Y | ALL" else " | Review | 14:00 | 90 | Sprint 2 | Y | ALL"
+        6 -> if (endsWithPipe) " Review | 14:00 | 90 | Sprint 2 | Y | ALL" else " | 14:00 | 90 | Sprint 2 | Y | ALL"
+        7 -> if (endsWithPipe) " 14:00 | 90 | Sprint 2 | Y | ALL" else " | 90 | Sprint 2 | Y | ALL"
+        8 -> if (endsWithPipe) " 90 | Sprint 2 | Y | ALL" else " | Sprint 2 | Y | ALL"
+        9 -> if (endsWithPipe) " Sprint 2 | Y | ALL" else " | Y | ALL"
+        10 -> if (endsWithPipe) " Y | ALL" else " | ALL"
+        11 -> if (endsWithPipe) " ALL" else null
+        else -> null
+      }
+    }
+
+    // Standard DYNAMIC branch
+    val endsWithSpace = currentLine.endsWith(" ")
     return when (pipeCount) {
-      0 -> " | 45 | 10:00 | N | ALL | Y | Focus session"
-      1 -> if (endsWithPipe) " 45 | 10:00 | N | ALL | Y | Focus session"
-           else if (endsWithSpace) "| 10:00 | N | ALL | Y | Focus session"
-           else " | 10:00 | N | ALL | Y | Focus session"
-      2 -> if (endsWithPipe) " 10:00 | N | ALL | Y | Focus session"
-           else if (endsWithSpace) "| N | ALL | Y | Focus session"
-           else " | N | ALL | Y | Focus session"
-      3 -> if (endsWithPipe) " N | ALL | Y | Focus session"
-           else if (endsWithSpace) "| ALL | Y | Focus session"
-           else " | ALL | Y | Focus session"
-      4 -> if (endsWithPipe) " ALL | Y | Focus session"
-           else if (endsWithSpace) "| Y | Focus session"
-           else " | Y | Focus session"
-      5 -> if (endsWithPipe) " Y | Focus session"
-           else if (endsWithSpace) "| Focus session"
-           else " | Focus session"
-      6 -> if (endsWithPipe) " Focus session" else null
+      0 -> " | 45 | 10:00 | N | ALL | Y | Focus session | 15 | 5"
+      1 -> if (endsWithPipe) " 45 | 10:00 | N | ALL | Y | Focus session | 15 | 5"
+           else if (endsWithSpace) "| 10:00 | N | ALL | Y | Focus session | 15 | 5"
+           else " | 10:00 | N | ALL | Y | Focus session | 15 | 5"
+      2 -> if (endsWithPipe) " 10:00 | N | ALL | Y | Focus session | 15 | 5"
+           else if (endsWithSpace) "| N | ALL | Y | Focus session | 15 | 5"
+           else " | N | ALL | Y | Focus session | 15 | 5"
+      3 -> if (endsWithPipe) " N | ALL | Y | Focus session | 15 | 5"
+           else if (endsWithSpace) "| ALL | Y | Focus session | 15 | 5"
+           else " | ALL | Y | Focus session | 15 | 5"
+      4 -> if (endsWithPipe) " ALL | Y | Focus session | 15 | 5"
+           else if (endsWithSpace) "| Y | Focus session | 15 | 5"
+           else " | Y | Focus session | 15 | 5"
+      5 -> if (endsWithPipe) " Y | Focus session | 15 | 5"
+           else if (endsWithSpace) "| Focus session | 15 | 5"
+           else " | Focus session | 15 | 5"
+      6 -> if (endsWithPipe) " Focus session | 15 | 5"
+           else if (endsWithSpace) "| 15 | 5"
+           else " | 15 | 5"
+      7 -> if (endsWithPipe) " 15 | 5"
+           else if (endsWithSpace) "| 5"
+           else " | 5"
+      8 -> if (endsWithPipe) " 5" else null
       else -> null
     }
   }

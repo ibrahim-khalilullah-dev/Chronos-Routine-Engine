@@ -39,6 +39,7 @@ object AutomationManager {
   const val EXTRA_CATEGORY_EMOJI = "extra_category_emoji"
   const val EXTRA_CATEGORY_NAME = "extra_category_name"
   const val EXTRA_FORMATTED_DURATION = "extra_formatted_duration"
+  const val EXTRA_DND_DELAY_MINUTES = "extra_dnd_delay_minutes"
 
   fun resolveCategoryInfo(task: RoutineTask, activeDay: RoutineDay = RoutineDay.today()): Pair<String, String> {
     return when {
@@ -180,26 +181,67 @@ object AutomationManager {
     } catch (_: Exception) {}
   }
 
+  fun calculateNextOccurrenceMillis(
+    startMinuteOfDay: Int,
+    selectedDays: Set<RoutineDay>,
+    currentMillis: Long = System.currentTimeMillis()
+  ): Long {
+    if (selectedDays.isEmpty()) return -1L
+
+    val nowCal = Calendar.getInstance().apply { timeInMillis = currentMillis }
+
+    for (dayOffset in 0..7) {
+      val testCal = (nowCal.clone() as Calendar).apply {
+        add(Calendar.DAY_OF_YEAR, dayOffset)
+        set(Calendar.HOUR_OF_DAY, startMinuteOfDay / 60)
+        set(Calendar.MINUTE, startMinuteOfDay % 60)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+      }
+
+      val routineDay = when (testCal.get(Calendar.DAY_OF_WEEK)) {
+        Calendar.SATURDAY -> RoutineDay.SATURDAY
+        Calendar.SUNDAY -> RoutineDay.SUNDAY
+        Calendar.MONDAY -> RoutineDay.MONDAY
+        Calendar.TUESDAY -> RoutineDay.TUESDAY
+        Calendar.WEDNESDAY -> RoutineDay.WEDNESDAY
+        Calendar.THURSDAY -> RoutineDay.THURSDAY
+        Calendar.FRIDAY -> RoutineDay.FRIDAY
+        else -> RoutineDay.SATURDAY
+      }
+
+      if (selectedDays.contains(routineDay)) {
+        if (dayOffset > 0 || testCal.timeInMillis > currentMillis + 1500L) {
+          return testCal.timeInMillis
+        }
+      }
+    }
+    return -1L
+  }
+
   fun scheduleTaskAlarms(context: Context, task: RoutineTask) {
     if (task.isDeleted) return
     val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+
+    // Cancel any existing alarms for this task first to avoid stale duplicates
+    cancelTaskAlarms(context, task.id)
+
+    // Slot 5 deactivation check: if selectedDays is empty or task is paused, do not schedule
+    if (task.slotNumber == 5 && task.selectedDays.isEmpty()) {
+      return
+    }
 
     var effectiveStartMin = task.startTimeMinute
     var effectiveDurationMin = task.durationMinutes
     var effectiveTitle = task.title
     var effectiveVoiceMessage = task.voiceMessage
 
-    val startCal = Calendar.getInstance().apply {
-      set(Calendar.HOUR_OF_DAY, effectiveStartMin / 60)
-      set(Calendar.MINUTE, effectiveStartMin % 60)
-      set(Calendar.SECOND, 0)
-      set(Calendar.MILLISECOND, 0)
-      if (timeInMillis <= System.currentTimeMillis()) {
-        add(Calendar.DAY_OF_YEAR, 1)
-      }
-    }
+    // Find next valid occurrence millis
+    val startMillis = calculateNextOccurrenceMillis(effectiveStartMin, task.selectedDays)
+    if (startMillis <= 0L) return
 
-    val targetRoutineDay = when (startCal.get(Calendar.DAY_OF_WEEK)) {
+    val targetCal = Calendar.getInstance().apply { timeInMillis = startMillis }
+    val targetRoutineDay = when (targetCal.get(Calendar.DAY_OF_WEEK)) {
       Calendar.SATURDAY -> RoutineDay.SATURDAY
       Calendar.SUNDAY -> RoutineDay.SUNDAY
       Calendar.MONDAY -> RoutineDay.MONDAY
@@ -210,11 +252,6 @@ object AutomationManager {
       else -> RoutineDay.SATURDAY
     }
 
-    // Slot 5 deactivation check: if target day is not in selectedDays, do not schedule
-    if (task.slotNumber == 5 && !task.selectedDays.contains(targetRoutineDay)) {
-      return
-    }
-
     // Slot 3 Friday dual-mode check: if target day is Friday, use Friday overrides
     if (task.slotNumber == 3 && targetRoutineDay == RoutineDay.FRIDAY) {
       effectiveTitle = task.fridayTitle?.ifBlank { null } ?: task.title
@@ -222,7 +259,7 @@ object AutomationManager {
       effectiveDurationMin = task.fridayDurationMinutes ?: task.durationMinutes
       effectiveVoiceMessage = task.fridayVoiceMessage?.ifBlank { null } ?: task.voiceMessage
 
-      startCal.apply {
+      targetCal.apply {
         set(Calendar.HOUR_OF_DAY, effectiveStartMin / 60)
         set(Calendar.MINUTE, effectiveStartMin % 60)
         set(Calendar.SECOND, 0)
@@ -230,6 +267,7 @@ object AutomationManager {
       }
     }
 
+    val finalStartMillis = targetCal.timeInMillis
     val (catEmoji, catName) = resolveCategoryInfo(task, targetRoutineDay)
 
     val startIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
@@ -248,6 +286,7 @@ object AutomationManager {
       putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
       putExtra(EXTRA_CATEGORY_NAME, catName)
       putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)
+      putExtra(EXTRA_DND_DELAY_MINUTES, task.dndDelayMinutes)
     }
 
     val pendingStart = PendingIntent.getBroadcast(
@@ -260,33 +299,23 @@ object AutomationManager {
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         if (am.canScheduleExactAlarms()) {
-          am.setAlarmClock(AlarmManager.AlarmClockInfo(startCal.timeInMillis, pendingStart), pendingStart)
+          am.setAlarmClock(AlarmManager.AlarmClockInfo(finalStartMillis, pendingStart), pendingStart)
         } else {
-          am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pendingStart)
+          am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, finalStartMillis, pendingStart)
         }
       } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-        am.setAlarmClock(AlarmManager.AlarmClockInfo(startCal.timeInMillis, pendingStart), pendingStart)
+        am.setAlarmClock(AlarmManager.AlarmClockInfo(finalStartMillis, pendingStart), pendingStart)
       } else {
-        am.setExact(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pendingStart)
+        am.setExact(AlarmManager.RTC_WAKEUP, finalStartMillis, pendingStart)
       }
     } catch (_: SecurityException) {
       try {
-        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, startCal.timeInMillis, pendingStart)
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, finalStartMillis, pendingStart)
       } catch (_: Exception) {}
     } catch (_: Exception) {}
 
-    // Also schedule end alarm to automatically stop DND & automation when task completes
-    val endMinute = (effectiveStartMin + effectiveDurationMin) % 1440
-    val endCal = Calendar.getInstance().apply {
-      set(Calendar.HOUR_OF_DAY, endMinute / 60)
-      set(Calendar.MINUTE, endMinute % 60)
-      set(Calendar.SECOND, 0)
-      set(Calendar.MILLISECOND, 0)
-      if (timeInMillis <= System.currentTimeMillis()) {
-        add(Calendar.DAY_OF_YEAR, 1)
-      }
-    }
-
+    // Synchronize end alarm: exactly finalStartMillis + (effectiveDurationMin * 60 * 1000L)
+    val endMillis = finalStartMillis + (effectiveDurationMin * 60L * 1000L)
     val endIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
       action = ACTION_END_TASK
       putExtra(EXTRA_TASK_ID, task.id)
@@ -298,7 +327,11 @@ object AutomationManager {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
     try {
-      am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endCal.timeInMillis, pendingEnd)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && am.canScheduleExactAlarms()) {
+        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endMillis, pendingEnd)
+      } else {
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endMillis, pendingEnd)
+      }
     } catch (_: Exception) {}
   }
 
@@ -365,6 +398,7 @@ object AutomationManager {
       putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
       putExtra(EXTRA_CATEGORY_NAME, catName)
       putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)
+      putExtra(EXTRA_DND_DELAY_MINUTES, task.dndDelayMinutes)
     }
     try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

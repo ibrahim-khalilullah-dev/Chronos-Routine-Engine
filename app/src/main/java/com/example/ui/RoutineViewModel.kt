@@ -424,7 +424,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     fridayStartTimeMinute: Int? = null,
     fridayDurationMinutes: Int? = null,
     fridayVoiceMessage: String? = null,
-    voiceVolume: Float = 1.0f
+    voiceVolume: Float = 1.0f,
+    dndDelayMinutes: Int = 0
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
@@ -454,7 +455,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
               fridayStartTimeMinute = if (slotNumber == 3) fridayStartTimeMinute else task.fridayStartTimeMinute,
               fridayDurationMinutes = if (slotNumber == 3) fridayDurationMinutes else task.fridayDurationMinutes,
               fridayVoiceMessage = if (slotNumber == 3) fridayVoiceMessage else task.fridayVoiceMessage,
-              voiceVolume = voiceVolume
+              voiceVolume = voiceVolume,
+              dndDelayMinutes = if (slotNumber == 1 || slotNumber == 5) 0 else dndDelayMinutes.coerceIn(0, 25)
             )
           } else {
             task
@@ -463,6 +465,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         val recalculated = SchedulerEngine.calculateAnchors(current, activeSleepMins)
         _anchors.value = recalculated
         repository.saveAnchors(recalculated)
+        recalculated.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
       }
     }
   }
@@ -660,9 +663,19 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           repository.setBufferMinutes(buf)
         }
         if (parsedAnchors.isNotEmpty()) {
-          val recalculated = SchedulerEngine.calculateAnchors(parsedAnchors, _sleepDurationMinutes.value)
+          val currentAnchors = _anchors.value.toMutableList()
+          for (parsed in parsedAnchors) {
+            val idx = currentAnchors.indexOfFirst { it.slotNumber == parsed.slotNumber }
+            if (idx >= 0) {
+              currentAnchors[idx] = parsed
+            } else {
+              currentAnchors.add(parsed)
+            }
+          }
+          val recalculated = SchedulerEngine.calculateAnchors(currentAnchors, _sleepDurationMinutes.value)
           _anchors.value = recalculated
           repository.saveAnchors(recalculated)
+          recalculated.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
         }
 
         val list = if (replaceExisting) {

@@ -289,8 +289,8 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
         NavigationTab.CONSOLE -> {
           ConsoleTerminalScreen(
             anchors = anchors,
-            onApplyTasks = { newTasks, replaceAll ->
-              viewModel.applyBulkConsoleTasks(newTasks, replaceAll)
+            onApplyTasks = { newTasks, replaceAll, parsedAnchors ->
+              viewModel.applyBulkConsoleTasks(newTasks, replaceAll, parsedAnchors)
               viewModel.selectTab(NavigationTab.TIMELINE)
             },
             onExportRoutine = {
@@ -560,7 +560,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               isSoundAlertEnabled = isSoundAlert
             )
           },
-          onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle, isSoundAlert, friTitle, friStart, friDur, friVoice, volume ->
+          onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle, isSoundAlert, friTitle, friStart, friDur, friVoice, volume, dndDelay ->
             if (slot == 1) {
               viewModel.updateSleepDuration(duration / 60f)
             }
@@ -583,7 +583,8 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               fridayStartTimeMinute = friStart,
               fridayDurationMinutes = friDur,
               fridayVoiceMessage = friVoice,
-              voiceVolume = volume
+              voiceVolume = volume,
+              dndDelayMinutes = dndDelay
             )
           },
           onSaveSlot5 = { title, voice, days ->

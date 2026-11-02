@@ -96,7 +96,7 @@ import com.example.ui.theme.WarningAmber
 @Composable
 fun ConsoleTerminalScreen(
   anchors: List<RoutineTask>,
-  onApplyTasks: (tasks: List<RoutineTask>, replaceAll: Boolean) -> Unit,
+  onApplyTasks: (tasks: List<RoutineTask>, replaceAll: Boolean, parsedAnchors: List<RoutineTask>) -> Unit,
   onExportRoutine: () -> String = { "" },
   onBack: () -> Unit = {},
   modifier: Modifier = Modifier
@@ -188,7 +188,7 @@ fun ConsoleTerminalScreen(
     Spacer(modifier = Modifier.height(14.dp))
 
     // ==============================================================
-    // 3. COMPACT 1-LINE SYNTAX FORMAT BANNER (Requirement 9)
+    // 3. COMPACT SYNTAX FORMAT BANNER (ANCHOR • TWIN • DYNAMIC)
     // ==============================================================
     Surface(
       modifier = Modifier
@@ -198,23 +198,32 @@ fun ConsoleTerminalScreen(
         .testTag("compact_syntax_format_banner"),
       color = OneUiSurfaceElevated
     ) {
-      Row(
-        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically
+      Column(
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
       ) {
-        Icon(
-          imageVector = Icons.Default.Code,
-          contentDescription = null,
-          tint = Color(0xFF06B6D4),
-          modifier = Modifier.size(16.dp)
-        )
-        Spacer(modifier = Modifier.width(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Default.Code,
+            contentDescription = null,
+            tint = Color(0xFF06B6D4),
+            modifier = Modifier.size(16.dp)
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "CLI GRAMMAR: ANCHOR | TWIN | DYNAMIC",
+            color = Color(0xFF67E8F9),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace
+          )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
         Text(
-          text = "Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message",
-          color = Color(0xFF67E8F9),
+          text = "• ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Msg\n• TWIN | Pool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days\n• DYNAMIC: Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Msg | Flex(0-30) | Rest(0-30)",
+          color = Color(0xFF94A3B8),
           fontFamily = FontFamily.Monospace,
-          fontSize = 11.sp,
-          fontWeight = FontWeight.SemiBold
+          fontSize = 10.sp,
+          lineHeight = 15.sp
         )
       }
     }
@@ -510,7 +519,7 @@ fun ConsoleTerminalScreen(
     Spacer(modifier = Modifier.height(18.dp))
 
     // Dual Schedule Action Buttons
-    val isProcessEnabled = parseResult.validTasks.isNotEmpty() && parseResult.errorCount == 0
+    val isProcessEnabled = (parseResult.validTasks.isNotEmpty() || parseResult.parsedAnchors.isNotEmpty()) && parseResult.errorCount == 0
 
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -526,7 +535,7 @@ fun ConsoleTerminalScreen(
             if (isProcessEnabled) {
               Modifier.clickable {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onApplyTasks(parseResult.validTasks, false)
+                onApplyTasks(parseResult.validTasks, false, parseResult.parsedAnchors)
               }
             } else Modifier
           )
@@ -572,7 +581,7 @@ fun ConsoleTerminalScreen(
             if (isProcessEnabled) {
               Modifier.clickable {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onApplyTasks(parseResult.validTasks, true)
+                onApplyTasks(parseResult.validTasks, true, parseResult.parsedAnchors)
               }
             } else Modifier
           )

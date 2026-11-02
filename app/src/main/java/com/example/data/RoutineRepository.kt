@@ -476,6 +476,8 @@ class RoutineRepository(context: Context) {
         put("enableDnd", t.enableDnd)
         put("enableHaptic", t.enableHaptic)
         put("allowSplitting", t.allowSplitting)
+        put("isHighPriority", t.isHighPriority)
+        put("customFlexibilityMinutes", t.customFlexibilityMinutes)
         put("isDeleted", t.isDeleted)
         if (t.deletedTimestamp != null) put("deletedTimestamp", t.deletedTimestamp)
         put("isVoiceEnabled", t.isVoiceEnabled)
@@ -499,6 +501,7 @@ class RoutineRepository(context: Context) {
         put("isPausedIndefinitely", t.isPausedIndefinitely)
         if (t.pausedUntilDateMillis != null) put("pausedUntilDateMillis", t.pausedUntilDateMillis)
         put("isPausedTodayOnly", t.isPausedTodayOnly)
+        put("dndDelayMinutes", t.dndDelayMinutes)
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -537,7 +540,9 @@ class RoutineRepository(context: Context) {
         voiceMessage = obj.optString("voiceMessage", ""),
         enableDnd = obj.optBoolean("enableDnd", false),
         enableHaptic = obj.optBoolean("enableHaptic", true),
-        allowSplitting = obj.optBoolean("allowSplitting", true),
+        allowSplitting = obj.optBoolean("allowSplitting", false),
+        isHighPriority = obj.optBoolean("isHighPriority", false),
+        customFlexibilityMinutes = obj.optInt("customFlexibilityMinutes", 0),
         selectedDays = daysSet,
         isDeleted = obj.optBoolean("isDeleted", false),
         deletedTimestamp = if (obj.has("deletedTimestamp")) obj.getLong("deletedTimestamp") else null,
@@ -561,7 +566,8 @@ class RoutineRepository(context: Context) {
         voiceVolume = if (obj.has("voiceVolume")) obj.getDouble("voiceVolume").toFloat() else 1.0f,
         isPausedIndefinitely = obj.optBoolean("isPausedIndefinitely", false),
         pausedUntilDateMillis = if (obj.has("pausedUntilDateMillis")) obj.getLong("pausedUntilDateMillis") else null,
-        isPausedTodayOnly = obj.optBoolean("isPausedTodayOnly", false)
+        isPausedTodayOnly = obj.optBoolean("isPausedTodayOnly", false),
+        dndDelayMinutes = obj.optInt("dndDelayMinutes", 0).coerceIn(0, 25)
       )
       list.add(task)
     }

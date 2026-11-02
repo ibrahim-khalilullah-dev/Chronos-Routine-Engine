@@ -14,7 +14,9 @@ import android.media.AudioManager
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -59,6 +61,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   private var pendingSpeechText: String? = null
   private var activeTaskId: String? = null
   private var currentDndApplied = false
+  private var dndHandler: Handler? = null
+  private var dndRunnable: Runnable? = null
   private var isVoiceEnabled = true
   private var voiceVolume = 1.0f
 
@@ -154,6 +158,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     val title = intent.getStringExtra(AutomationManager.EXTRA_TASK_TITLE) ?: "Scheduled Task"
     val voiceMessage = intent.getStringExtra(AutomationManager.EXTRA_VOICE_MESSAGE) ?: "$title is starting now."
     val enableDnd = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_DND, false)
+    val dndDelayMinutes = intent.getIntExtra(AutomationManager.EXTRA_DND_DELAY_MINUTES, 0).coerceIn(0, 25)
     val enableHaptic = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_HAPTIC, true)
     isVoiceEnabled = intent.getBooleanExtra(AutomationManager.EXTRA_IS_VOICE_ENABLED, true)
     voiceVolume = intent.getFloatExtra(AutomationManager.EXTRA_VOICE_VOLUME, 1.0f)
@@ -190,11 +195,36 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       nm?.notify(NOTIFICATION_ID, notification)
     }
 
-    // Apply DND mode strictly guarded by permission check
-    currentDndApplied = if (enableDnd && AutomationManager.isDndPermissionGranted(this)) {
-      AutomationManager.setDndMode(this, true)
+    // Cancel any previous pending DND timer
+    dndRunnable?.let { dndHandler?.removeCallbacks(it) }
+    dndRunnable = null
+    dndHandler = null
+
+    // Apply DND mode strictly guarded by permission check with optional 0-25m delay
+    if (enableDnd && AutomationManager.isDndPermissionGranted(this)) {
+      if (dndDelayMinutes <= 0) {
+        currentDndApplied = AutomationManager.setDndMode(this, true)
+      } else {
+        if (currentDndApplied) {
+          AutomationManager.setDndMode(this, false)
+        }
+        currentDndApplied = false
+        val handler = Handler(Looper.getMainLooper())
+        dndHandler = handler
+        val runnable = Runnable {
+          if (_serviceState.value.isRunning && activeTaskId == taskId) {
+            currentDndApplied = AutomationManager.setDndMode(this@RoutineAutomationService, true)
+            _serviceState.value = _serviceState.value.copy(isDndActive = currentDndApplied)
+          }
+        }
+        dndRunnable = runnable
+        handler.postDelayed(runnable, dndDelayMinutes * 60 * 1000L)
+      }
     } else {
-      false
+      if (currentDndApplied) {
+        AutomationManager.setDndMode(this, false)
+      }
+      currentDndApplied = false
     }
 
     // Audio & Haptic Alerts: strictly respect isSoundAlertEnabled toggle
@@ -299,6 +329,9 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
 
   private fun stopAutomation() {
     try {
+      dndRunnable?.let { dndHandler?.removeCallbacks(it) }
+      dndRunnable = null
+      dndHandler = null
       if (currentDndApplied) {
         AutomationManager.setDndMode(this, false)
         currentDndApplied = false
