@@ -11,17 +11,6 @@
 </a>
 <p><sub>Tap the button above to instantly download <b>chronos.apk</b> directly to your phone.</sub></p>
 
-<br/>
-
-[![Android 14/15/16 Ready](https://img.shields.io/badge/Android-API%2026--36-3DDC84?style=flat-square&logo=android&logoColor=white)](https://developer.android.com)
-[![Kotlin 2.0](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
-[![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-M3%201.4.0-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
-[![Architecture](https://img.shields.io/badge/Architecture-Clean%20%7C%20MVVM%20%7C%20Mutex-000000?style=flat-square)](https://developer.android.com/topic/architecture)
-[![100% Offline & Private](https://img.shields.io/badge/Privacy-100%25%20Offline%20%26%20Zero%20Analytics-EF4444?style=flat-square)](https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square)](LICENSE)
-
-<br/>
-
 *Engineered specifically for low-overhead, zero-polling execution on memory-constrained devices (Samsung Galaxy A24 / MediaTek Helio G99, 4GB RAM) with complete immunity against aggressive OEM battery killer heuristics.*
 
 </div>
