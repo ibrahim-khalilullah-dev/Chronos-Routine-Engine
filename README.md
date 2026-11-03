@@ -7,7 +7,7 @@
 <br/>
 
 <a href="https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk">
-  <img src="https://img.shields.io/badge/INSTALL%20CHRONOS-ANDROID%20APK-10B981?style=for-the-badge&logo=android&logoColor=white" height="54" alt="Install Chronos APK" />
+  <img src="https://img.shields.io/badge/INSTALL%20CHRONOS-ANDROID%20APK-10B981?style=for-the-badge&logo=android&logoColor=white" height="54" alt="Install" />
 </a>
 <p><sub>Tap the button above to instantly download <b>chronos.apk</b> directly to your phone.</sub></p>
 
