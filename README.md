@@ -6,10 +6,18 @@
 
 <br/>
 
-<a href="https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk">
-  <img src="https://img.shields.io/badge/INSTALL%20CHRONOS-ANDROID%20APK-10B981?style=for-the-badge&logo=android&logoColor=white" height="54" alt="Install" />
+<a href="https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk">
+  <img src="https://img.shields.io/badge/INSTALL%20CHRONOS-ANDROID%20APK-10B981?style=for-the-badge&logo=android&logoColor=white" height="54" alt="Install Chronos APK" />
 </a>
-<p><sub>Tap the button above to instantly download <b>chronos.apk</b> directly to your phone.</sub></p>
+
+<p>
+  <sub>
+    📲 <b>Download Links:</b> 
+    <a href="https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk"><b>Direct APK Download (Raw CDN)</b></a> &nbsp;•&nbsp; 
+    <a href="https://github.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/raw/main/chronos.apk"><b>GitHub Mirror</b></a> &nbsp;•&nbsp; 
+    <a href="chronos.apk"><b>Repo File</b></a>
+  </sub>
+</p>
 
 *Engineered specifically for low-overhead, zero-polling execution on memory-constrained devices (Samsung Galaxy A24 / MediaTek Helio G99, 4GB RAM) with complete immunity against aggressive OEM battery killer heuristics.*
 
