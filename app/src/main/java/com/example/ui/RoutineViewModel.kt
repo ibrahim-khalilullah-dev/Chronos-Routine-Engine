@@ -253,6 +253,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         )
         _anchors.value = updated
         repository.saveAnchors(updated)
+        updated.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
       }
     }
   }
@@ -266,6 +267,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         val recalculated = SchedulerEngine.calculateAnchors(_anchors.value, mins)
         _anchors.value = recalculated
         repository.saveAnchors(recalculated)
+        recalculated.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
       }
     }
   }
@@ -339,6 +341,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           _dynamicTasks.value = updated
           repository.saveDynamicTasks(updated)
         }
+        AutomationManager.cancelTaskAlarms(getApplication(), taskId)
       }
     }
   }
@@ -376,6 +379,10 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           }
           _dynamicTasks.value = updated
           repository.saveDynamicTasks(updated)
+        }
+        val resumedTask = (if (targetIsAnchor) _anchors.value else _dynamicTasks.value).firstOrNull { it.id == taskId }
+        if (resumedTask != null) {
+          AutomationManager.scheduleTaskAlarms(getApplication(), resumedTask)
         }
       }
     }

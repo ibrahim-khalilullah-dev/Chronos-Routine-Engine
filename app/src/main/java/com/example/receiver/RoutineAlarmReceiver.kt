@@ -21,9 +21,22 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
           context.startService(serviceIntent)
         }
       }
+      AutomationManager.ACTION_APPLY_DND -> {
+        val serviceIntent = Intent(context, RoutineAutomationService::class.java).apply {
+          this.action = AutomationManager.ACTION_APPLY_DND
+          putExtras(intent)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          context.startForegroundService(serviceIntent)
+        } else {
+          context.startService(serviceIntent)
+        }
+      }
       AutomationManager.ACTION_END_TASK -> {
+        val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
         val stopIntent = Intent(context, RoutineAutomationService::class.java).apply {
           this.action = RoutineAutomationService.ACTION_STOP_AUTOMATION
+          putExtra(AutomationManager.EXTRA_TASK_ID, taskId)
         }
         context.startService(stopIntent)
       }

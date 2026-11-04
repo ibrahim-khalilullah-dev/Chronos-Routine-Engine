@@ -25,6 +25,7 @@ object AutomationManager {
 
   const val ACTION_START_TASK = "com.example.ACTION_START_TASK"
   const val ACTION_END_TASK = "com.example.ACTION_END_TASK"
+  const val ACTION_APPLY_DND = "com.example.ACTION_APPLY_DND"
   const val EXTRA_TASK_ID = "extra_task_id"
   const val EXTRA_TASK_TITLE = "extra_task_title"
   const val EXTRA_VOICE_MESSAGE = "extra_voice_message"
@@ -182,21 +183,16 @@ object AutomationManager {
   }
 
   fun calculateNextOccurrenceMillis(
-    startMinuteOfDay: Int,
-    selectedDays: Set<RoutineDay>,
+    task: RoutineTask,
     currentMillis: Long = System.currentTimeMillis()
   ): Long {
-    if (selectedDays.isEmpty()) return -1L
+    if (task.selectedDays.isEmpty()) return -1L
 
     val nowCal = Calendar.getInstance().apply { timeInMillis = currentMillis }
 
     for (dayOffset in 0..7) {
       val testCal = (nowCal.clone() as Calendar).apply {
         add(Calendar.DAY_OF_YEAR, dayOffset)
-        set(Calendar.HOUR_OF_DAY, startMinuteOfDay / 60)
-        set(Calendar.MINUTE, startMinuteOfDay % 60)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
       }
 
       val routineDay = when (testCal.get(Calendar.DAY_OF_WEEK)) {
@@ -210,7 +206,20 @@ object AutomationManager {
         else -> RoutineDay.SATURDAY
       }
 
-      if (selectedDays.contains(routineDay)) {
+      if (task.selectedDays.contains(routineDay)) {
+        val dayStartMinute = if (task.slotNumber == 3 && routineDay == RoutineDay.FRIDAY) {
+          task.fridayStartTimeMinute ?: task.startTimeMinute
+        } else {
+          task.startTimeMinute
+        }
+
+        testCal.apply {
+          set(Calendar.HOUR_OF_DAY, dayStartMinute / 60)
+          set(Calendar.MINUTE, dayStartMinute % 60)
+          set(Calendar.SECOND, 0)
+          set(Calendar.MILLISECOND, 0)
+        }
+
         if (dayOffset > 0 || testCal.timeInMillis > currentMillis + 1500L) {
           return testCal.timeInMillis
         }
@@ -219,8 +228,27 @@ object AutomationManager {
     return -1L
   }
 
+  fun calculateNextOccurrenceMillis(
+    startMinuteOfDay: Int,
+    selectedDays: Set<RoutineDay>,
+    currentMillis: Long = System.currentTimeMillis()
+  ): Long {
+    val dummyTask = RoutineTask(
+      id = "temp_calc",
+      title = "Temp",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = startMinuteOfDay,
+      durationMinutes = 0,
+      selectedDays = selectedDays
+    )
+    return calculateNextOccurrenceMillis(dummyTask, currentMillis)
+  }
+
   fun scheduleTaskAlarms(context: Context, task: RoutineTask) {
-    if (task.isDeleted) return
+    if (task.isDeleted || task.isCurrentlyPaused()) {
+      cancelTaskAlarms(context, task.id)
+      return
+    }
     val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
 
     // Cancel any existing alarms for this task first to avoid stale duplicates
@@ -231,14 +259,13 @@ object AutomationManager {
       return
     }
 
-    var effectiveStartMin = task.startTimeMinute
     var effectiveDurationMin = task.durationMinutes
     var effectiveTitle = task.title
     var effectiveVoiceMessage = task.voiceMessage
     var effectiveDndDelay = task.dndDelayMinutes
 
     // Find next valid occurrence millis
-    val startMillis = calculateNextOccurrenceMillis(effectiveStartMin, task.selectedDays)
+    val startMillis = calculateNextOccurrenceMillis(task)
     if (startMillis <= 0L) return
 
     val targetCal = Calendar.getInstance().apply { timeInMillis = startMillis }
@@ -256,20 +283,12 @@ object AutomationManager {
     // Slot 3 Friday dual-mode check: if target day is Friday, use Friday overrides
     if (task.slotNumber == 3 && targetRoutineDay == RoutineDay.FRIDAY) {
       effectiveTitle = task.fridayTitle?.ifBlank { null } ?: task.title
-      effectiveStartMin = task.fridayStartTimeMinute ?: task.startTimeMinute
       effectiveDurationMin = task.fridayDurationMinutes ?: task.durationMinutes
       effectiveVoiceMessage = task.fridayVoiceMessage?.ifBlank { null } ?: task.voiceMessage
       effectiveDndDelay = 5
-
-      targetCal.apply {
-        set(Calendar.HOUR_OF_DAY, effectiveStartMin / 60)
-        set(Calendar.MINUTE, effectiveStartMin % 60)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-      }
     }
 
-    val finalStartMillis = targetCal.timeInMillis
+    val finalStartMillis = startMillis
     val (catEmoji, catName) = resolveCategoryInfo(task, targetRoutineDay)
 
     val startIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
@@ -315,6 +334,28 @@ object AutomationManager {
         am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, finalStartMillis, pendingStart)
       } catch (_: Exception) {}
     } catch (_: Exception) {}
+
+    // Deep Sleep Immune Delayed DND via AlarmManager
+    if (task.enableDnd && effectiveDndDelay > 0) {
+      val dndTriggerMillis = finalStartMillis + (effectiveDndDelay * 60L * 1000L)
+      val dndIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
+        action = ACTION_APPLY_DND
+        putExtra(EXTRA_TASK_ID, task.id)
+      }
+      val pendingDnd = PendingIntent.getBroadcast(
+        context,
+        (task.id + "_dnd").hashCode(),
+        dndIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && am.canScheduleExactAlarms()) {
+          am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, dndTriggerMillis, pendingDnd)
+        } else {
+          am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, dndTriggerMillis, pendingDnd)
+        }
+      } catch (_: Exception) {}
+    }
 
     // Synchronize end alarm: exactly finalStartMillis + (effectiveDurationMin * 60 * 1000L)
     val endMillis = finalStartMillis + (effectiveDurationMin * 60L * 1000L)
@@ -363,6 +404,19 @@ object AutomationManager {
     )
     if (pendingEnd != null) {
       am.cancel(pendingEnd)
+    }
+
+    val dndIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
+      action = ACTION_APPLY_DND
+    }
+    val pendingDnd = PendingIntent.getBroadcast(
+      context,
+      (taskId + "_dnd").hashCode(),
+      dndIntent,
+      PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+    )
+    if (pendingDnd != null) {
+      am.cancel(pendingDnd)
     }
   }
 

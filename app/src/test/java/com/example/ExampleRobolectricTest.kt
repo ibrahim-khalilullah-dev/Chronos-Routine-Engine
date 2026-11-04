@@ -497,12 +497,12 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `scheduler enforces interTaskBufferMinutes between anchors and dynamic tasks`() {
+  fun `scheduler enforces interTaskBufferMinutes between dynamic tasks and respects anchor boundaries without bleed`() {
     val anchors = SchedulerEngine.createDefaultAnchors(420)
     val slot2 = anchors.first { it.slotNumber == 2 }
     val slot2End = slot2.startTimeMinute + slot2.durationMinutes
 
-    val dynamicTask = RoutineTask(
+    val dynamicTask1 = RoutineTask(
       id = "dyn_1",
       title = "Morning Deep Focus",
       type = TaskType.DYNAMIC,
@@ -511,19 +511,33 @@ class ExampleRobolectricTest {
       allowSplitting = false
     )
 
+    val dynamicTask2 = RoutineTask(
+      id = "dyn_2",
+      title = "Second Focus Session",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = slot2End + 60, // Requests to start immediately when dynamicTask1 ends
+      durationMinutes = 60,
+      allowSplitting = false
+    )
+
     val buffer = 10
     val result = SchedulerEngine.scheduleDay(
       anchors = anchors,
-      dynamicTasks = listOf(dynamicTask),
+      dynamicTasks = listOf(dynamicTask1, dynamicTask2),
       activeDay = RoutineDay.MONDAY,
       interTaskBufferMinutes = buffer
     )
 
-    val scheduled = result.scheduledTasks.firstOrNull { it.id == "dyn_1" }
-    assertNotNull("Dynamic task must be scheduled", scheduled)
+    val scheduled1 = result.scheduledTasks.firstOrNull { it.id == "dyn_1" }
+    assertNotNull("Dynamic task 1 must be scheduled", scheduled1)
+    // Anchors possess hard mathematical boundaries; do NOT bleed rest buffers across adjacent tasks
+    assertEquals("Dynamic task 1 starts immediately at anchor boundary without buffer bleed", slot2End, scheduled1!!.startTimeMinute)
+
+    val scheduled2 = result.scheduledTasks.firstOrNull { it.id == "dyn_2" }
+    assertNotNull("Dynamic task 2 must be scheduled", scheduled2)
     assertTrue(
-      "Dynamic task must not start before [Anchor End + buffer]",
-      scheduled!!.startTimeMinute >= slot2End + buffer
+      "Dynamic task 2 must not start before [Dynamic Task 1 End + buffer]",
+      scheduled2!!.startTimeMinute >= (slot2End + 60 + buffer)
     )
   }
 }

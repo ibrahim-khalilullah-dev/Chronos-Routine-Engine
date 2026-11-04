@@ -150,8 +150,21 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     if (intent == null) return START_NOT_STICKY
 
     if (intent.action == ACTION_STOP_AUTOMATION || intent.action == AutomationManager.ACTION_END_TASK) {
-      stopAutomation()
+      val targetTaskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
+      // Guard: Only stop if targetTaskId is null (manual user stop) or matches activeTaskId!
+      if (targetTaskId == null || targetTaskId == activeTaskId) {
+        stopAutomation()
+      }
       return START_NOT_STICKY
+    }
+
+    if (intent.action == AutomationManager.ACTION_APPLY_DND) {
+      val targetTaskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
+      if (activeTaskId == targetTaskId && AutomationManager.isDndPermissionGranted(this)) {
+        currentDndApplied = AutomationManager.setDndMode(this, true)
+        _serviceState.value = _serviceState.value.copy(isDndActive = currentDndApplied)
+      }
+      return START_STICKY
     }
 
     val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID) ?: "task_${System.currentTimeMillis()}"
@@ -195,12 +208,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       nm?.notify(NOTIFICATION_ID, notification)
     }
 
-    // Cancel any previous pending DND timer
-    dndRunnable?.let { dndHandler?.removeCallbacks(it) }
-    dndRunnable = null
-    dndHandler = null
-
-    // Apply DND mode strictly guarded by permission check with optional 0-25m delay
+    // Apply DND mode strictly guarded by permission check:
+    // If dndDelayMinutes <= 0 && enableDnd, engage DND immediately; if dndDelayMinutes > 0, AlarmManager fires ACTION_APPLY_DND
     if (enableDnd && AutomationManager.isDndPermissionGranted(this)) {
       if (dndDelayMinutes <= 0) {
         currentDndApplied = AutomationManager.setDndMode(this, true)
@@ -209,16 +218,6 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
           AutomationManager.setDndMode(this, false)
         }
         currentDndApplied = false
-        val handler = Handler(Looper.getMainLooper())
-        dndHandler = handler
-        val runnable = Runnable {
-          if (_serviceState.value.isRunning && activeTaskId == taskId) {
-            currentDndApplied = AutomationManager.setDndMode(this@RoutineAutomationService, true)
-            _serviceState.value = _serviceState.value.copy(isDndActive = currentDndApplied)
-          }
-        }
-        dndRunnable = runnable
-        handler.postDelayed(runnable, dndDelayMinutes * 60 * 1000L)
       }
     } else {
       if (currentDndApplied) {
@@ -339,6 +338,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       tts?.stop()
     } catch (_: Exception) {
     } finally {
+      activeTaskId = null
       abandonTransientAudioFocus()
       releaseWakeLock()
       _serviceState.value = ActiveAutomationState(isRunning = false)

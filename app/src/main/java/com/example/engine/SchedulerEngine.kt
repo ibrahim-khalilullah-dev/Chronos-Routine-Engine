@@ -329,7 +329,7 @@ object SchedulerEngine {
       val taskBuffer = if (task.type == TaskType.DYNAMIC) {
         task.interTaskBufferMinutes.coerceAtLeast(interTaskBufferMinutes)
       } else {
-        interTaskBufferMinutes
+        0 // Anchors possess hard mathematical boundaries; do NOT bleed rest buffers across adjacent anchors
       }
       val totalBlock = task.durationMinutes + taskBuffer
 
