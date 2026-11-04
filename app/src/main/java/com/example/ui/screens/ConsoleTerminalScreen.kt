@@ -1,9 +1,5 @@
 package com.example.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -43,7 +39,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -66,7 +61,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
@@ -97,11 +91,9 @@ import com.example.ui.theme.WarningAmber
 fun ConsoleTerminalScreen(
   anchors: List<RoutineTask>,
   onApplyTasks: (tasks: List<RoutineTask>, replaceAll: Boolean, parsedAnchors: List<RoutineTask>) -> Unit,
-  onExportRoutine: () -> String = { "" },
   onBack: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
-  val context = LocalContext.current
   val haptic = LocalHapticFeedback.current
   BackHandler { onBack() }
 
@@ -230,7 +222,7 @@ fun ConsoleTerminalScreen(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // Quick Action Bar: "Quick-Copy Template", "Export / Copy", & "Clear"
+    // Quick Action Bar: "Template" & "Clear"
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -241,31 +233,28 @@ fun ConsoleTerminalScreen(
           val template = ConsoleParser.SAMPLE_SNIPPET
           consoleTextFieldValue = TextFieldValue(template, TextRange(template.length))
         },
-        modifier = Modifier.weight(1f).testTag("quick_copy_template_button"),
+        modifier = Modifier
+          .weight(1f)
+          .testTag("quick_copy_template_button"),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.6f))
+        border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.6f)),
+        colors = ButtonDefaults.outlinedButtonColors(
+          containerColor = Color(0xFF06B6D4).copy(alpha = 0.08f)
+        )
       ) {
-        Icon(imageVector = Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFF06B6D4))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text("Template", color = Color(0xFF06B6D4), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-      }
-
-      OutlinedButton(
-        onClick = {
-          haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-          val script = onExportRoutine()
-          val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-          val clip = ClipData.newPlainText("Chronos Routine", script)
-          clipboard?.setPrimaryClip(clip)
-          Toast.makeText(context, "Dynamic routine copied! (Anchors excluded)", Toast.LENGTH_SHORT).show()
-        },
-        modifier = Modifier.weight(1.2f).testTag("export_routine_button"),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.6f))
-      ) {
-        Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFF10B981))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text("Export Routine", color = Color(0xFF10B981), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Icon(
+          imageVector = Icons.Default.ContentPaste,
+          contentDescription = null,
+          modifier = Modifier.size(15.dp),
+          tint = Color(0xFF06B6D4)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          "Template",
+          color = Color(0xFF06B6D4),
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Bold
+        )
       }
 
       if (consoleText.isNotBlank()) {
@@ -278,7 +267,12 @@ fun ConsoleTerminalScreen(
           shape = RoundedCornerShape(12.dp),
           border = BorderStroke(1.dp, OneUiBorder)
         ) {
-          Icon(imageVector = Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
+          Icon(
+            imageVector = Icons.Default.Clear,
+            contentDescription = null,
+            modifier = Modifier.size(15.dp),
+            tint = TextSecondary
+          )
           Spacer(modifier = Modifier.width(4.dp))
           Text("Clear", color = TextSecondary, fontSize = 11.sp)
         }
@@ -455,7 +449,10 @@ fun ConsoleTerminalScreen(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+          modifier = Modifier.weight(1f, fill = false),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
           Icon(
             imageVector = if (parseResult.errorCount == 0) Icons.Default.CheckCircle else Icons.Default.Error,
             contentDescription = null,
@@ -473,14 +470,19 @@ fun ConsoleTerminalScreen(
             },
             color = if (parseResult.errorCount == 0) TextPrimary else DangerRed,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp
+            fontSize = 13.sp,
+            maxLines = 1
           )
         }
+
+        Spacer(modifier = Modifier.width(8.dp))
 
         Text(
           text = "${parseResult.diagnostics.size} total lines",
           color = TextSecondary,
-          fontSize = 11.sp
+          fontSize = 11.sp,
+          maxLines = 1,
+          softWrap = false
         )
       }
     }

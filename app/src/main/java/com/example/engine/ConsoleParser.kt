@@ -29,19 +29,49 @@ object ConsoleParser {
   // Default is clean and empty so no dummy tasks are accidentally committed
   const val DEFAULT_CONSOLE_TEMPLATE = ""
 
-  // Sample template showcasing ANCHOR, TWIN, and DYNAMIC directives
+  // Sample template showcasing user's precision circadian routine
   val SAMPLE_SNIPPET = """
-# Chronos Routine Terminal Console
-# Directives: ANCHOR, TWIN, DYNAMIC
-#
-# 1. ANCHOR: ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message
-# 2. TWIN:   TWIN | TotalPool(m) | Part1Title | Part1Start | Part1Dur | Part1Voice | Part2Title | Part2Start | Part2Dur | Part2Voice | DND(Y/N) | Days | Flex | Rest
-# 3. DYNAMIC: Task Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flexibility(0/15/30) | RestBuffer(0-30)
+# ==============================================================
+# CHRONOS PRECISION CIRCADIAN ROUTINE
+# ==============================================================
 
-ANCHOR | 2 | Morning Routine | 05:00 | 30 | Y | 5 | Y | Morning time starting now
-TWIN | 180 | Deep Focus (Part 1) | 09:00 | 90 | Focus sprint one | Deep Focus (Part 2) | 14:00 | 90 | Focus sprint two | Y | Mon,Tue,Wed,Thu | 15 | 5
-Speed Cardio & Stretch | 45 | 16:30 | Y | ALL | N | High intensity cardio block | 0 | 5
-Algorithm Practice | 60 | 17:30 | N | Mon,Wed,Fri | Y | Time for coding algorithms | 15 | 5
+# 1. THE 7 CIRCADIAN ANCHORS (Daily Fixed Boundaries)
+ANCHOR | 1 | রাতের ঘুম | 23:00 | 360 | Y | 0 | Y | শুভ রাত্রি।
+ANCHOR | 2 | ফজরের সালাত | 05:40 | 20 | Y | 5 | Y | ফজরের সালাতের সময়।
+ANCHOR | 3 | জোহরের সালাত | 13:25 | 25 | Y | 5 | Y | জোহরের সালাতের সময়। | জুমার সালাত | 12:30 | 120 | জুমার সালাতের সময়।
+ANCHOR | 4 | আসরের সালাত | 16:15 | 15 | Y | 5 | Y | আসরের সালাতের সময়।
+ANCHOR | 5 | ফ্রি টাইম | 16:30 | 45 | N | 0 | Y | বিকেলের ফ্রি টাইম।
+ANCHOR | 6 | মাগরিবের সালাত | 17:25 | 20 | Y | 5 | Y | মাগরিবের সালাতের সময়।
+ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশার সালাতের সময়।
+
+# 2. SATURDAY - THURSDAY DAILY DYNAMIC ROUTINE
+ঘুম থেকে ওঠা | 25 | 05:00 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | ঘুম থেকে ওঠার সময়। | 0 | 0
+ফজর প্রস্তুতি | 15 | 05:25 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | ফজরের প্রস্তুতি নিন। | 0 | 0
+শরীরচর্চা | 40 | 06:05 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | শরীরচর্চা শুরু করুন। | 0 | 0
+সকালের নাস্তা ও প্রস্তুতি | 45 | 06:50 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | সকালের নাস্তা সেরে নিন। | 0 | 0
+কোর ফোকাস ব্লক ১ | 150 | 07:45 | Y | Sat,Sun,Mon,Tue,Wed,Thu | Y | প্রথম ফোকাস সেশন শুরু। | 0 | 0
+হালকা রিফ্রেশমেন্ট | 20 | 10:20 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | কিছুটা বিশ্রাম নিন। | 0 | 0
+কোর ফোকাস ব্লক ২ | 160 | 10:45 | Y | Sat,Sun,Mon,Tue,Wed,Thu | Y | দ্বিতীয় ফোকাস সেশন শুরু। | 0 | 0
+দুপুরের খাবার ও বিশ্রাম | 60 | 13:55 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | খাবার ও কাইলুলাহ বিশ্রাম। | 0 | 0
+বিকেলের স্টাডি ও স্কিল | 75 | 15:00 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | স্কিল প্র্যাকটিস ও পড়াশোনা। | 0 | 0
+সন্ধ্যার কোডিং ও প্রজেক্ট | 115 | 17:50 | Y | Sat,Sun,Mon,Tue,Wed,Thu | Y | সন্ধ্যার কোডিং ও প্রজেক্ট কাজ। | 0 | 0
+রাতের খাবার ও পরিবার | 50 | 20:15 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | রাতের খাবার ও পারিবারিক সময়। | 0 | 0
+দিনের পর্যালোচনা ও পরিকল্পনা | 45 | 21:10 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | সারাদিনের পর্যালোচনা। | 0 | 0
+ঘুমের প্রস্তুতি | 60 | 22:00 | N | Sat,Sun,Mon,Tue,Wed,Thu | Y | স্ক্রিন বন্ধ করে ঘুমের প্রস্তুতি। | 0 | 0
+
+# 3. FRIDAY SPECIAL ROUTINE
+ঘুম থেকে ওঠা | 25 | 05:00 | N | Fri | Y | ঘুম থেকে ওঠার সময়। | 0 | 0
+ফজর প্রস্তুতি | 15 | 05:25 | N | Fri | Y | ফজরের প্রস্তুতি নিন। | 0 | 0
+সূরা কাহাফ তিলাওয়াত ও জিকির | 60 | 06:05 | N | Fri | Y | সূরা কাহাফ ও জিকির তিলাওয়াত। | 0 | 0
+সকালের নাস্তা ও বিশ্রাম | 60 | 07:15 | N | Fri | Y | সকালের নাস্তা ও বিশ্রাম। | 0 | 0
+ব্যক্তিগত প্রজেক্ট ও গবেষণা | 120 | 08:30 | Y | Fri | Y | ব্যক্তিগত প্রজেক্ট ও গবেষণা কাজ। | 0 | 0
+জুমার প্রস্তুতি ও গোসল | 60 | 11:15 | N | Fri | Y | জুমার সালাতের প্রস্তুতি ও গোসল। | 0 | 0
+জুমার দুপুরের খাবার ও বিশ্রাম | 60 | 14:35 | N | Fri | Y | জুমার দুপুরের খাবার ও বিশ্রাম। | 0 | 0
+পারিবারিক আলোচনা ও বই পড়া | 35 | 15:40 | N | Fri | Y | পারিবারিক আলোচনা ও বই পড়া। | 0 | 0
+সাপ্তাহিক পর্যালোচনা ও পরিকল্পনা | 115 | 17:50 | N | Fri | Y | সাপ্তাহিক পর্যালোচনা ও পরিকল্পনা। | 0 | 0
+রাতের খাবার ও আড্ডা | 50 | 20:15 | N | Fri | Y | রাতের খাবার ও পারিবারিক সময়। | 0 | 0
+পরবর্তী সপ্তাহের প্রস্তুতি ও বই | 50 | 21:10 | N | Fri | Y | বই পড়া ও প্রস্তুতি। | 0 | 0
+ঘুমের প্রস্তুতি | 55 | 22:05 | N | Fri | Y | ঘুমের প্রস্তুতি নিন। | 0 | 0
 """.trimIndent()
 
   fun parse(text: String): ConsoleParseResult {

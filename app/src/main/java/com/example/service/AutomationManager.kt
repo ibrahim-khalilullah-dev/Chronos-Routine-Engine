@@ -40,6 +40,7 @@ object AutomationManager {
   const val EXTRA_CATEGORY_EMOJI = "extra_category_emoji"
   const val EXTRA_CATEGORY_NAME = "extra_category_name"
   const val EXTRA_FORMATTED_DURATION = "extra_formatted_duration"
+  const val EXTRA_FORMATTED_END_TIME = "extra_formatted_end_time"
   const val EXTRA_DND_DELAY_MINUTES = "extra_dnd_delay_minutes"
 
   fun resolveCategoryInfo(task: RoutineTask, activeDay: RoutineDay = RoutineDay.today()): Pair<String, String> {
@@ -291,6 +292,9 @@ object AutomationManager {
     val finalStartMillis = startMillis
     val (catEmoji, catName) = resolveCategoryInfo(task, targetRoutineDay)
 
+    val endHourMin = ((targetCal.get(Calendar.HOUR_OF_DAY) * 60 + targetCal.get(Calendar.MINUTE) + effectiveDurationMin) % 1440 + 1440) % 1440
+    val formattedEndTime = RoutineTask.formatTime(endHourMin)
+
     val startIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
       action = ACTION_START_TASK
       putExtra(EXTRA_TASK_ID, task.id)
@@ -307,6 +311,7 @@ object AutomationManager {
       putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
       putExtra(EXTRA_CATEGORY_NAME, catName)
       putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)
+      putExtra(EXTRA_FORMATTED_END_TIME, formattedEndTime)
       putExtra(EXTRA_DND_DELAY_MINUTES, effectiveDndDelay)
     }
 
@@ -438,6 +443,9 @@ object AutomationManager {
     if (task.isDeleted) return
     val (catEmoji, catName) = resolveCategoryInfo(task)
 
+    val endHourMin = ((task.startTimeMinute + task.durationMinutes) % 1440 + 1440) % 1440
+    val formattedEndTime = RoutineTask.formatTime(endHourMin)
+
     val serviceIntent = Intent(context, RoutineAutomationService::class.java).apply {
       action = ACTION_START_TASK
       putExtra(EXTRA_TASK_ID, task.id)
@@ -454,6 +462,7 @@ object AutomationManager {
       putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
       putExtra(EXTRA_CATEGORY_NAME, catName)
       putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)
+      putExtra(EXTRA_FORMATTED_END_TIME, formattedEndTime)
       putExtra(EXTRA_DND_DELAY_MINUTES, task.dndDelayMinutes)
     }
     try {

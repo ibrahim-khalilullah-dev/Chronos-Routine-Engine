@@ -310,7 +310,6 @@ fun AnchorSlotCard(
   ) {
     Column(
       modifier = Modifier
-        .animateContentSize()
         .background(subtleGradientBrush)
         .padding(18.dp)
     ) {
@@ -685,6 +684,7 @@ fun DynamicTaskCard(
   currentMinute: Int = -1,
   isToday: Boolean = true,
   onEditClick: () -> Unit,
+  onDeleteClick: ((RoutineTask) -> Unit)? = null,
   onRateTask: ((taskId: String, ratingPct: Int) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
@@ -709,7 +709,6 @@ fun DynamicTaskCard(
   ) {
     Column(
       modifier = Modifier
-        .animateContentSize()
         .background(DynamicSubtleBrush)
         .padding(16.dp)
     ) {
@@ -832,6 +831,23 @@ fun DynamicTaskCard(
               tint = TextSecondary,
               modifier = Modifier.size(18.dp)
             )
+          }
+
+          if (onDeleteClick != null) {
+            IconButton(
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onDeleteClick(task)
+              },
+              modifier = Modifier.size(36.dp).testTag("delete_task_${task.id}")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete Task",
+                tint = DangerRed.copy(alpha = 0.8f),
+                modifier = Modifier.size(18.dp)
+              )
+            }
           }
         }
       }
@@ -1040,7 +1056,6 @@ fun OverflowTaskCard(
   ) {
     Column(
       modifier = Modifier
-        .animateContentSize()
         .background(OverflowSubtleBrush)
         .padding(14.dp)
     ) {

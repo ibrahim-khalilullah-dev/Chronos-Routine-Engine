@@ -110,6 +110,14 @@ class ExampleUnitTest {
   }
 
   @Test
+  fun testSampleSnippetParsesWithZeroErrors() {
+    val result = ConsoleParser.parse(ConsoleParser.SAMPLE_SNIPPET)
+    assertEquals("Should have 0 errors", 0, result.errorCount)
+    assertEquals("7 anchors parsed", 7, result.parsedAnchors.size)
+    assertTrue("Should have multiple dynamic tasks", result.validTasks.size >= 20)
+  }
+
+  @Test
   fun testHighPriorityAnchorWallFencePreventsTimetableJumping() {
     val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(420)
     // Anchor 2 is 05:00 - 05:30 (300m - 330m)

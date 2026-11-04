@@ -293,9 +293,6 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               viewModel.applyBulkConsoleTasks(newTasks, replaceAll, parsedAnchors)
               viewModel.selectTab(NavigationTab.TIMELINE)
             },
-            onExportRoutine = {
-              viewModel.exportFullRoutineScript()
-            },
             onBack = {
               viewModel.selectTab(NavigationTab.TIMELINE)
             }

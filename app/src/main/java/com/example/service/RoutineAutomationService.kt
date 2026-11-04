@@ -39,7 +39,8 @@ data class ActiveAutomationState(
   val isSpeaking: Boolean = false,
   val isVoiceEnabled: Boolean = true,
   val notificationTitle: String? = null,
-  val notificationBody: String? = null
+  val notificationBody: String? = null,
+  val formattedEndTime: String? = null
 )
 
 class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
@@ -184,6 +185,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     val categoryEmoji = intent.getStringExtra(AutomationManager.EXTRA_CATEGORY_EMOJI) ?: "⏱️"
     val categoryName = intent.getStringExtra(AutomationManager.EXTRA_CATEGORY_NAME) ?: "Routine Focus"
     val formattedDuration = intent.getStringExtra(AutomationManager.EXTRA_FORMATTED_DURATION) ?: ""
+    val formattedEndTime = intent.getStringExtra(AutomationManager.EXTRA_FORMATTED_END_TIME) ?: ""
 
     activeTaskId = taskId
 
@@ -195,6 +197,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       categoryEmoji = categoryEmoji,
       categoryName = categoryName,
       formattedDuration = formattedDuration,
+      formattedEndTime = formattedEndTime,
       voiceMessage = voiceMessage
     )
     try {
@@ -268,7 +271,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       isSpeaking = isVoiceEnabled,
       isVoiceEnabled = isVoiceEnabled,
       notificationTitle = notifTitle,
-      notificationBody = notifBody
+      notificationBody = notifBody,
+      formattedEndTime = formattedEndTime.ifBlank { null }
     )
 
     return START_STICKY
@@ -374,6 +378,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     categoryEmoji: String,
     categoryName: String,
     formattedDuration: String,
+    formattedEndTime: String = "",
     voiceMessage: String
   ): Notification {
     val openIntent = Intent(this, MainActivity::class.java).apply {
@@ -385,14 +390,12 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     )
 
     // Clean One UI layout without prefixes like "Category:" or "Duration:".
-    // Format: ${categoryEmoji} ${categoryName}  •  ${formattedDuration}
-    val contentLine = if (categoryName.isNotBlank() && formattedDuration.isNotBlank()) {
-      "$categoryEmoji $categoryName  •  $formattedDuration"
-    } else if (formattedDuration.isNotBlank()) {
-      "$categoryEmoji $formattedDuration"
-    } else {
-      "$categoryEmoji $categoryName"
-    }
+    // Format: ${categoryEmoji} ${categoryName}  •  ${formattedDuration}  •  Ends at ${formattedEndTime}
+    val parts = mutableListOf<String>()
+    if (categoryName.isNotBlank()) parts.add("$categoryEmoji $categoryName")
+    if (formattedDuration.isNotBlank()) parts.add(formattedDuration)
+    if (formattedEndTime.isNotBlank()) parts.add("Ends at $formattedEndTime")
+    val contentLine = if (parts.isNotEmpty()) parts.joinToString("  •  ") else "$categoryEmoji Routine"
 
     // Clean, bold task title ONLY (No "Name:" or "Title:" prefix)
     val cleanTitle = title.trim()

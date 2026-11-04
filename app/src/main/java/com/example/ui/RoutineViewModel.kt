@@ -54,7 +54,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   private val _activeTab = MutableStateFlow(NavigationTab.TIMELINE)
   val activeTab: StateFlow<NavigationTab> = _activeTab.asStateFlow()
 
-  private val _activeDay = MutableStateFlow(repository.getActiveDay())
+  private val _activeDay = MutableStateFlow(RoutineDay.today())
   val activeDay: StateFlow<RoutineDay> = _activeDay.asStateFlow()
 
   private val _sortMode = MutableStateFlow(repository.getSortMode())
@@ -98,10 +98,17 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     for (r in history) {
       com.example.ui.components.taskRatingCache[r.taskId] = r.ratingPct
     }
-    // Clock synchronization ticker for real-time progress bar & auto-scroll
+    // Clock synchronization ticker for real-time progress bar, day rollover & auto-scroll
     viewModelScope.launch {
+      var lastKnownDay = RoutineDay.today()
       while (isActive) {
         _currentMinute.value = getCurrentMinuteOfDay()
+        val currentDay = RoutineDay.today()
+        if (currentDay != lastKnownDay) {
+          lastKnownDay = currentDay
+          _activeDay.value = currentDay
+          repository.setActiveDay(currentDay)
+        }
         delay(15000L) // Refresh every 15 seconds
       }
     }
@@ -585,6 +592,58 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     }
   }
 
+  fun deleteBothFluidTwinParts(twinId: String) {
+    viewModelScope.launch {
+      scheduleMutex.withLock {
+        val twins = _dynamicTasks.value.filter { it.fluidTwinId == twinId }
+        twins.forEach { task ->
+          repository.softDeleteTask(task.id)
+          AutomationManager.cancelTaskAlarms(getApplication(), task.id)
+          if (_activeAutomationStateIsTask(task.id)) {
+            stopActiveAutomation()
+          }
+        }
+        _dynamicTasks.value = repository.getDynamicTasks()
+        _deletedTasks.value = repository.getDeletedTasks()
+      }
+    }
+  }
+
+  fun deleteTwinAndAbsorbTime(taskToDeleteId: String, partnerTaskId: String) {
+    viewModelScope.launch {
+      scheduleMutex.withLock {
+        val taskToDelete = _dynamicTasks.value.firstOrNull { it.id == taskToDeleteId }
+        val partnerTask = _dynamicTasks.value.firstOrNull { it.id == partnerTaskId }
+        if (taskToDelete != null && partnerTask != null) {
+          val absorbedDuration = (partnerTask.durationMinutes + taskToDelete.durationMinutes)
+            .coerceAtLeast(partnerTask.fluidTotalPoolMinutes ?: (partnerTask.durationMinutes + taskToDelete.durationMinutes))
+          val updatedPartner = partnerTask.copy(
+            durationMinutes = absorbedDuration,
+            isFluidTwin = false,
+            fluidTwinId = null,
+            fluidTwinPart = null,
+            fluidTotalPoolMinutes = null
+          )
+          repository.softDeleteTask(taskToDeleteId)
+          AutomationManager.cancelTaskAlarms(getApplication(), taskToDeleteId)
+          if (_activeAutomationStateIsTask(taskToDeleteId)) {
+            stopActiveAutomation()
+          }
+
+          val updatedList = repository.getDynamicTasks().map {
+            if (it.id == partnerTaskId) updatedPartner else it
+          }
+          repository.saveDynamicTasks(updatedList)
+          _dynamicTasks.value = updatedList
+          _deletedTasks.value = repository.getDeletedTasks()
+          AutomationManager.scheduleTaskAlarms(getApplication(), updatedPartner)
+        } else if (taskToDelete != null) {
+          moveToTrash(taskToDeleteId)
+        }
+      }
+    }
+  }
+
   fun restoreFromTrash(taskId: String) {
     viewModelScope.launch {
       scheduleMutex.withLock {
@@ -625,30 +684,6 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
 
   private fun _activeAutomationStateIsTask(taskId: String): Boolean {
     return activeAutomation.value.isRunning && activeAutomation.value.taskId == taskId
-  }
-
-  fun exportFullRoutineScript(): String {
-    val sb = StringBuilder()
-    sb.appendLine("# CHRONOS DYNAMIC ROUTINE EXPORT")
-    sb.appendLine("# User dynamic tasks and fluid twins (Core anchors are preserved in the engine)")
-    sb.appendLine("# Format: Task Name | Duration(m) | Preferred Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Custom Message")
-    sb.appendLine("")
-    for (task in _dynamicTasks.value.filter { !it.isDeleted }) {
-      val dnd = if (task.enableDnd) "Y" else "N"
-      val voice = if (task.isVoiceEnabled) "Y" else "N"
-      val days = if (task.selectedDays.size == 7) "ALL" else task.selectedDays.joinToString(",") { it.shortName }
-      val msg = task.voiceMessage.ifBlank { task.title }
-      if (task.isFluidTwin) {
-        val part = task.fluidTwinPart ?: 1
-        val pool = task.fluidTotalPoolMinutes ?: task.durationMinutes
-        val rUri = task.customRingtoneUri ?: "DEFAULT"
-        val rTitle = task.customRingtoneTitle ?: "Default"
-        sb.appendLine("DYNAMIC | ${task.title} | ${task.durationMinutes} | ${task.formattedStartTime} | $dnd | $days | $voice | $msg | Y | $part | $pool | $rUri | $rTitle")
-      } else {
-        sb.appendLine("${task.title} | ${task.durationMinutes} | ${task.formattedStartTime} | $dnd | $days | $voice | $msg")
-      }
-    }
-    return sb.toString()
   }
 
   fun applyBulkConsoleTasks(

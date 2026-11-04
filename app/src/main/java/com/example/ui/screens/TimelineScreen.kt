@@ -26,12 +26,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Brush
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.RoutineViewModel
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.GpsFixed
@@ -85,6 +90,7 @@ import com.example.ui.components.DynamicTaskCard
 import com.example.ui.components.OverflowTaskCard
 import com.example.ui.components.isTaskActiveAt
 import com.example.ui.theme.AnchorGradientStart
+import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.DynamicGradientEnd
 import com.example.ui.theme.DynamicGradientStart
@@ -93,6 +99,7 @@ import com.example.ui.theme.OneUiBackground
 import com.example.ui.theme.OneUiBorder
 import com.example.ui.theme.OneUiSurfaceElevated
 import com.example.ui.theme.SleepGradientStart
+import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
@@ -117,7 +124,10 @@ fun TimelineScreen(
   onStopAutomation: () -> Unit,
   onRefreshDndPermission: () -> Unit,
   onRateTask: ((RoutineTask, Int) -> Unit)? = null,
-  modifier: Modifier = Modifier
+  onDeleteBothFluidTwinParts: ((String) -> Unit)? = null,
+  onDeleteTwinAndAbsorbTime: ((String, String) -> Unit)? = null,
+  modifier: Modifier = Modifier,
+  viewModel: RoutineViewModel = viewModel()
 ) {
   val context = LocalContext.current
   val haptic = LocalHapticFeedback.current
@@ -145,9 +155,10 @@ fun TimelineScreen(
 
   // Header offset in LazyColumn items:
   // Item 0: OneUiHeader
-  // Item 1 (if !isDndGranted): DndPermissionBanner
+  // Item 1: LiveCountdownTimerBanner
+  // Item 2 (if !isDndGranted): DndPermissionBanner
   // Item: Section Title "Daily Timeline & Anchors"
-  val headerItemsOffset = 1 + (if (!isDndGranted) 1 else 0) + 1
+  val headerItemsOffset = 2 + (if (!isDndGranted) 1 else 0) + 1
 
   // Real-time active running task (strictly evaluated only when viewing today)
   val activeTaskIndex = remember(scheduleResult.scheduledTasks, currentMinute, isToday) {
@@ -167,13 +178,15 @@ fun TimelineScreen(
     if (!hasAutoScrolledInitially && activeLazyItemIndex >= 0) {
       hasAutoScrolledInitially = true
       try {
-        listState.animateScrollToItem(activeLazyItemIndex)
+        if (activeLazyItemIndex < listState.layoutInfo.totalItemsCount) {
+          listState.animateScrollToItem(activeLazyItemIndex)
+        }
       } catch (_: Exception) {}
     }
   }
 
   // Floating Jump Pill visibility states
-  val showScrollToTop by remember {
+  val showScrollToTop by remember(activeLazyItemIndex) {
     derivedStateOf {
       val firstVisible = listState.firstVisibleItemIndex
       if (activeLazyItemIndex >= 0) {
@@ -184,7 +197,7 @@ fun TimelineScreen(
     }
   }
 
-  val showScrollToActive by remember {
+  val showScrollToActive by remember(activeLazyItemIndex) {
     derivedStateOf {
       val firstVisible = listState.firstVisibleItemIndex
       activeLazyItemIndex >= 0 && firstVisible < activeLazyItemIndex
@@ -231,6 +244,16 @@ fun TimelineScreen(
 
 
 
+      // Live Countdown Timer Banner
+      item {
+        LiveCountdownTimerBanner(
+          activeDay = activeDay,
+          isToday = isToday,
+          currentMinute = currentMinute,
+          scheduledTasks = scheduleResult.scheduledTasks
+        )
+      }
+
       // DND Permission Alert Banner
       if (!isDndGranted) {
         item {
@@ -266,10 +289,10 @@ fun TimelineScreen(
       }
 
       // Scheduled items: 7 Anchors and fitted Dynamic Tasks
-      items(
+      itemsIndexed(
         items = scheduleResult.scheduledTasks,
-        key = { it.id }
-      ) { task ->
+        key = { index, task -> "${task.id}_${task.slotNumber ?: ""}_${task.startTimeMinute}_$index" }
+      ) { _, task ->
         when (task.type) {
           TaskType.ANCHOR_SLEEP,
           TaskType.ANCHOR_STANDARD,
@@ -292,6 +315,7 @@ fun TimelineScreen(
               currentMinute = currentMinute,
               isToday = isToday,
               onEditClick = { onEditTask(task) },
+              onDeleteClick = { taskToDeleteConfirm = task },
               onRateTask = { _, rating -> onRateTask?.invoke(task, rating) }
             )
           }
@@ -366,10 +390,10 @@ fun TimelineScreen(
           }
         }
 
-        items(
+        itemsIndexed(
           items = scheduleResult.overflowTasks,
-          key = { "overflow_${it.id}" }
-        ) { task ->
+          key = { index, task -> "overflow_${task.id}_${task.startTimeMinute}_$index" }
+        ) { _, task ->
           OverflowTaskCard(
             task = task,
             onEditClick = { onEditTask(task) }
@@ -464,55 +488,169 @@ fun TimelineScreen(
     }
   }
 
-  // Samsung One UI Styled Safe Delete Confirmation Dialog
+  // Samsung One UI Styled Safe Delete / Fluid Twin Action Dialog
   taskToDeleteConfirm?.let { task ->
-    AlertDialog(
-      onDismissRequest = { taskToDeleteConfirm = null },
-      title = {
-        Text(
-          text = "Delete Task?",
-          fontWeight = FontWeight.Bold,
-          color = TextPrimary,
-          fontSize = 18.sp
-        )
-      },
-      text = {
-        Text(
-          text = "This task will be moved to the Trash Bin. You can restore it within 30 days.",
-          color = TextSecondary,
-          fontSize = 13.sp,
-          lineHeight = 18.sp
-        )
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            val id = task.id
-            taskToDeleteConfirm = null
-            onMoveToTrash(id)
-          },
-          colors = ButtonDefaults.buttonColors(
-            containerColor = DangerRed,
-            contentColor = Color.White
-          ),
-          shape = RoundedCornerShape(12.dp),
-          modifier = Modifier.testTag("confirm_move_to_trash_button")
-        ) {
-          Text("Move to Trash", fontWeight = FontWeight.Bold)
-        }
-      },
-      dismissButton = {
-        TextButton(
-          onClick = { taskToDeleteConfirm = null },
-          modifier = Modifier.testTag("cancel_delete_task_button")
-        ) {
-          Text("Cancel", color = TextSecondary)
-        }
-      },
-      containerColor = OneUiSurfaceElevated,
-      shape = RoundedCornerShape(24.dp)
-    )
+    val partnerTask = if (task.isFluidTwin && !task.fluidTwinId.isNullOrBlank()) {
+      (scheduleResult.scheduledTasks + scheduleResult.overflowTasks).firstOrNull {
+        it.fluidTwinId == task.fluidTwinId && it.id != task.id
+      }
+    } else null
+
+    if (task.isFluidTwin && !task.fluidTwinId.isNullOrBlank() && partnerTask != null) {
+      // Specialized Fluid Twin Dialog
+      AlertDialog(
+        onDismissRequest = { taskToDeleteConfirm = null },
+        title = {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Default.CallSplit,
+              contentDescription = null,
+              tint = CyanAccent,
+              modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = "Fluid Twin Task Action",
+              fontWeight = FontWeight.Bold,
+              color = TextPrimary,
+              fontSize = 18.sp
+            )
+          }
+        },
+        text = {
+          Column {
+            Text(
+              text = "“${task.title}” is linked with “${partnerTask.title}” (Total Pool: ${task.fluidTotalPoolMinutes ?: (task.durationMinutes + partnerTask.durationMinutes)}m).",
+              color = TextPrimary,
+              fontSize = 14.sp,
+              fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+              text = "Would you like to absorb this task's ${task.durationMinutes}m into “${partnerTask.title}”, or delete both parts completely?",
+              color = TextSecondary,
+              fontSize = 13.sp,
+              lineHeight = 18.sp
+            )
+          }
+        },
+        confirmButton = {
+          Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Button(
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                val targetId = task.id
+                val partnerId = partnerTask.id
+                taskToDeleteConfirm = null
+                if (onDeleteTwinAndAbsorbTime != null) {
+                  onDeleteTwinAndAbsorbTime(targetId, partnerId)
+                } else if (viewModel != null) {
+                  viewModel.deleteTwinAndAbsorbTime(targetId, partnerId)
+                } else {
+                  onMoveToTrash(targetId)
+                }
+              },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = CyanAccent,
+                contentColor = Color.Black
+              ),
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("absorb_twin_duration_button")
+            ) {
+              Text("Absorb Time into Partner", fontWeight = FontWeight.Bold)
+            }
+
+            Button(
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                val twinId = task.fluidTwinId!!
+                taskToDeleteConfirm = null
+                if (onDeleteBothFluidTwinParts != null) {
+                  onDeleteBothFluidTwinParts(twinId)
+                } else if (viewModel != null) {
+                  viewModel.deleteBothFluidTwinParts(twinId)
+                } else {
+                  onMoveToTrash(task.id)
+                }
+              },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = DangerRed,
+                contentColor = Color.White
+              ),
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("delete_both_twin_parts_button")
+            ) {
+              Text("Delete Both Parts", fontWeight = FontWeight.Bold)
+            }
+          }
+        },
+        dismissButton = {
+          TextButton(
+            onClick = { taskToDeleteConfirm = null },
+            modifier = Modifier.testTag("cancel_fluid_twin_dialog_button")
+          ) {
+            Text("Cancel", color = TextSecondary)
+          }
+        },
+        containerColor = OneUiSurfaceElevated,
+        shape = RoundedCornerShape(24.dp)
+      )
+    } else {
+      AlertDialog(
+        onDismissRequest = { taskToDeleteConfirm = null },
+        title = {
+          Text(
+            text = "Delete Task?",
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary,
+            fontSize = 18.sp
+          )
+        },
+        text = {
+          Text(
+            text = "This task will be moved to the Trash Bin. You can restore it within 30 days.",
+            color = TextSecondary,
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+          )
+        },
+        confirmButton = {
+          Button(
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+              val id = task.id
+              taskToDeleteConfirm = null
+              onMoveToTrash(id)
+            },
+            colors = ButtonDefaults.buttonColors(
+              containerColor = DangerRed,
+              contentColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.testTag("confirm_move_to_trash_button")
+          ) {
+            Text("Move to Trash", fontWeight = FontWeight.Bold)
+          }
+        },
+        dismissButton = {
+          TextButton(
+            onClick = { taskToDeleteConfirm = null },
+            modifier = Modifier.testTag("cancel_delete_task_button")
+          ) {
+            Text("Cancel", color = TextSecondary)
+          }
+        },
+        containerColor = OneUiSurfaceElevated,
+        shape = RoundedCornerShape(24.dp)
+      )
+    }
   }
 }
 
@@ -964,6 +1102,175 @@ fun DndPermissionBanner(
         modifier = Modifier.testTag("grant_dnd_permission_button")
       ) {
         Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+      }
+    }
+  }
+}
+
+private data class BannerDetails(
+  val emoji: String,
+  val status: String,
+  val title: String,
+  val countdown: String
+)
+
+@Composable
+fun LiveCountdownTimerBanner(
+  activeDay: RoutineDay,
+  isToday: Boolean,
+  currentMinute: Int,
+  scheduledTasks: List<RoutineTask>,
+  modifier: Modifier = Modifier
+) {
+  val activeTask = if (isToday) {
+    scheduledTasks.firstOrNull { isTaskActiveAt(it, currentMinute, isToday = true) }
+  } else null
+
+  val upcomingTask = if (isToday && activeTask == null) {
+    scheduledTasks.firstOrNull { it.startTimeMinute > currentMinute }
+      ?: scheduledTasks.firstOrNull()
+  } else null
+
+  val banner = when {
+    !isToday -> {
+      BannerDetails(
+        emoji = "📅",
+        status = "Viewing Day Plan",
+        title = activeDay.fullName,
+        countdown = "${scheduledTasks.size} tasks"
+      )
+    }
+    activeTask != null -> {
+      val endMin = activeTask.startTimeMinute + activeTask.durationMinutes
+      val remMinutes = if (endMin >= currentMinute) endMin - currentMinute else (endMin + 1440) - currentMinute
+      val h = remMinutes / 60
+      val m = remMinutes % 60
+      val timeStr = if (h > 0) "${h}h ${m}m left" else "${m}m left"
+      val emoji = when (activeTask.type) {
+        TaskType.ANCHOR_SLEEP -> "🌙"
+        TaskType.ANCHOR_ELASTIC -> "🛡️"
+        TaskType.ANCHOR_STANDARD -> "⚓"
+        else -> "⏱️"
+      }
+      BannerDetails(
+        emoji = emoji,
+        status = "Active Now • Ends ${RoutineTask.formatTime(endMin % 1440)}",
+        title = activeTask.title,
+        countdown = timeStr
+      )
+    }
+    upcomingTask != null -> {
+      val diffMinutes = if (upcomingTask.startTimeMinute >= currentMinute) {
+        upcomingTask.startTimeMinute - currentMinute
+      } else {
+        (upcomingTask.startTimeMinute + 1440) - currentMinute
+      }
+      val h = diffMinutes / 60
+      val m = diffMinutes % 60
+      val timeStr = if (h > 0) "In ${h}h ${m}m" else "In ${m}m"
+      BannerDetails(
+        emoji = "⏳",
+        status = "Next Up • ${RoutineTask.formatTime(upcomingTask.startTimeMinute)}",
+        title = upcomingTask.title,
+        countdown = timeStr
+      )
+    }
+    else -> {
+      BannerDetails(
+        emoji = "✨",
+        status = "Routine Complete",
+        title = "All tasks finished for today",
+        countdown = "Rest"
+      )
+    }
+  }
+
+  Surface(
+    modifier = modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(22.dp))
+      .border(
+        BorderStroke(
+          1.dp,
+          Brush.linearGradient(listOf(CyanAccent.copy(alpha = 0.5f), SuccessGreen.copy(alpha = 0.5f)))
+        ),
+        RoundedCornerShape(22.dp)
+      )
+      .testTag("live_countdown_timer_banner"),
+    color = OneUiSurfaceElevated,
+    shape = RoundedCornerShape(22.dp)
+  ) {
+    Box(
+      modifier = Modifier
+        .background(
+          Brush.horizontalGradient(
+            listOf(
+              CyanAccent.copy(alpha = 0.12f),
+              SuccessGreen.copy(alpha = 0.08f),
+              OneUiSurfaceElevated
+            )
+          )
+        )
+        .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(
+          modifier = Modifier.weight(1f),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          // Frosted squircle with glowing emerald/cyan clock icon
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = OneUiBackground.copy(alpha = 0.75f),
+            border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.45f)),
+            modifier = Modifier.size(44.dp)
+          ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+              Icon(
+                imageVector = Icons.Default.Schedule,
+                contentDescription = "Live Countdown Clock",
+                tint = CyanAccent,
+                modifier = Modifier.size(22.dp)
+              )
+            }
+          }
+          Spacer(modifier = Modifier.width(12.dp))
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = "${banner.emoji} ${banner.status}",
+              color = CyanAccent,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.SemiBold,
+              letterSpacing = 0.4.sp,
+              maxLines = 1
+            )
+            Text(
+              text = banner.title,
+              color = TextPrimary,
+              fontSize = 15.sp,
+              fontWeight = FontWeight.Bold,
+              maxLines = 1
+            )
+          }
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Surface(
+          shape = RoundedCornerShape(10.dp),
+          color = SuccessGreen.copy(alpha = 0.18f),
+          border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.4f))
+        ) {
+          Text(
+            text = banner.countdown,
+            color = SuccessGreen,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+          )
+        }
       }
     }
   }
