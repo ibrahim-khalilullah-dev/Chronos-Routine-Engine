@@ -285,7 +285,6 @@ fun TaskModalBottomSheet(
   var customFlexibilityMinutes by remember { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
   var customFlexInput by remember { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
   var isHighPriority by remember { mutableStateOf(initialTask?.isHighPriority ?: false) }
-  var allowSplitting by remember { mutableStateOf(initialTask?.allowSplitting ?: false) }
   var isVoiceEnabled by remember { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
   var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
   var voiceVolume by remember { mutableFloatStateOf(initialTask?.voiceVolume ?: 1f) }
@@ -429,7 +428,6 @@ fun TaskModalBottomSheet(
           voiceVolume != initialTask.voiceVolume ||
           isHighPriority != (initialTask.isHighPriority ?: false) ||
           customFlexibilityMinutes != (initialTask.customFlexibilityMinutes ?: 0) ||
-          allowSplitting != (initialTask.allowSplitting ?: false) ||
           (isSlot3 && (
             fridayTitle != (initialTask.fridayTitle ?: "Jumu'ah") ||
             (fridayDurationHours * 60 + fridayDurationMins) != (initialTask.fridayDurationMinutes ?: 120) ||
@@ -554,7 +552,7 @@ fun TaskModalBottomSheet(
         voiceMessage = voiceMessage,
         enableDnd = enableDnd,
         enableHaptic = enableHaptic,
-        allowSplitting = allowSplitting,
+        allowSplitting = false,
         isHighPriority = isHighPriority,
         customFlexibilityMinutes = customFlexibilityMinutes,
         selectedDays = selectedDays,
@@ -655,21 +653,79 @@ fun TaskModalBottomSheet(
             }
           }
 
-          // Subtle Glowing Badge
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(10.dp))
-              .background(Color(0xFF3B82F6).copy(alpha = 0.15f))
-              .border(BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.4f)), RoundedCornerShape(10.dp))
-              .padding(horizontal = 8.dp, vertical = 4.dp)
-          ) {
-            Text(
-              text = if (isAnchor) "ANCHOR" else "STUDIO",
-              fontSize = 10.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace,
-              color = if (isAnchor) Color(0xFFA5B4FC) else Color(0xFF60A5FA)
-            )
+          if (isAnchor) {
+            // Subtle Glowing Badge for Anchors
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF3B82F6).copy(alpha = 0.15f))
+                .border(BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.4f)), RoundedCornerShape(10.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+              Text(
+                text = "ANCHOR",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFFA5B4FC)
+              )
+            }
+          } else {
+            // Header Pill Controls (Priority & Split)
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              // 1. Priority Pill Button
+              Surface(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .border(
+                    BorderStroke(
+                      1.dp,
+                      if (isHighPriority) Color(0xFFF59E0B) else Color(0xFF334155)
+                    ),
+                    RoundedCornerShape(8.dp)
+                  )
+                  .clickable { isHighPriority = !isHighPriority }
+                  .testTag("header_priority_pill"),
+                color = if (isHighPriority) Color(0xFFF59E0B).copy(alpha = 0.22f) else Color(0xFF1E293B)
+              ) {
+                Text(
+                  text = "Priority",
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  color = if (isHighPriority) Color(0xFFFDE68A) else Color(0xFF94A3B8),
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
+
+              // 2. Split Pill Button
+              Surface(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .border(
+                    BorderStroke(
+                      1.dp,
+                      if (isFluidTwinMode) Color(0xFF8B5CF6) else Color(0xFF334155)
+                    ),
+                    RoundedCornerShape(8.dp)
+                  )
+                  .clickable { isFluidTwinMode = !isFluidTwinMode }
+                  .testTag("header_split_pill"),
+                color = if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.22f) else Color(0xFF1E293B)
+              ) {
+                Text(
+                  text = "Split",
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  color = if (isFluidTwinMode) Color(0xFFDDD6FE) else Color(0xFF94A3B8),
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
+            }
           }
         }
 
@@ -753,292 +809,152 @@ fun TaskModalBottomSheet(
           )
         } else {
           // -----------------------------------------------------------
-          // LUXURY ROUTINE STUDIO FORM (DYNAMIC TASKS)
+          // LUXURY ROUTINE STUDIO FORM (DYNAMIC TASKS - OBSIDIAN STUDIO)
           // -----------------------------------------------------------
 
-          // 2. 13-CATEGORY SELECTOR CARD
-          Surface(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(18.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(18.dp))
-              .clickable { showCategoryGridModal = true }
-              .testTag("category_selector_card"),
-            color = Color(0xFF121620)
-          ) {
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 13.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                  modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF3B82F6).copy(alpha = 0.18f)),
-                  contentAlignment = Alignment.Center
-                ) {
-                  Text(text = selectedCategory.icon, fontSize = 18.sp)
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                  Text(
-                    text = "Active Domain",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 11.sp
-                  )
-                  Text(
-                    text = "${selectedCategory.icon} ${selectedCategory.title}",
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                  )
-                }
-              }
-
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                  text = "Change",
-                  color = Color(0xFF60A5FA),
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                  imageVector = Icons.Default.KeyboardArrowDown,
-                  contentDescription = null,
-                  tint = Color(0xFF60A5FA),
-                  modifier = Modifier.size(18.dp)
-                )
-              }
-            }
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          // 3. "SPLIT INTO 2 SESSIONS" MODE SWITCHER (Samsung-style animated toggle)
-          Surface(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(18.dp))
-              .border(
-                BorderStroke(
-                  1.dp,
-                  if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.6f) else Color(0xFF1F2637)
-                ),
-                RoundedCornerShape(18.dp)
-              ),
-            color = Color(0xFF121620)
-          ) {
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                  modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(
-                      if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.25f)
-                      else Color(0xFF1E293B)
-                    ),
-                  contentAlignment = Alignment.Center
-                ) {
-                  Icon(
-                    imageVector = Icons.AutoMirrored.Filled.CallSplit,
-                    contentDescription = null,
-                    tint = if (isFluidTwinMode) Color(0xFFC4B5FD) else Color(0xFF94A3B8),
-                    modifier = Modifier.size(18.dp)
-                  )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                  Text(
-                    text = "Split into 2 Sessions",
-                    color = Color(0xFFF8FAFC),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                  )
-                  Text(
-                    text = "Auto-balancing communicating vessels linked to total duration pool",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp
-                  )
-                }
-              }
-
-              Spacer(modifier = Modifier.width(8.dp))
-
-              Switch(
-                checked = isFluidTwinMode,
-                onCheckedChange = { isFluidTwinMode = it },
-                colors = SwitchDefaults.colors(
-                  checkedThumbColor = Color.White,
-                  checkedTrackColor = Color(0xFF8B5CF6),
-                  uncheckedThumbColor = Color(0xFF94A3B8),
-                  uncheckedTrackColor = Color(0xFF1E293B)
-                ),
-                modifier = Modifier.testTag("toggle_fluid_twin_switch")
-              )
-            }
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          // -----------------------------------------------------------
-          // MODE 1: SPLIT TOGGLE IS OFF (Standard Single Session)
-          // -----------------------------------------------------------
           if (!isFluidTwinMode) {
-            // Master Task Title Input
-            Text(
-              text = "Task Title",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.SemiBold,
-              color = Color(0xFF94A3B8)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
+            // Task Title Label & Domain Pill Row
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                text = "TASK TITLE",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 1.sp,
+                color = Color(0xFF94A3B8)
+              )
+
+              // Interactive Category Pill Dropdown
+              Surface(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(20.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(20.dp))
+                  .clickable { showCategoryGridModal = true }
+                  .testTag("category_selector_card"),
+                color = Color(0xFF0F172A)
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text(text = selectedCategory.icon, fontSize = 13.sp)
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text(
+                    text = selectedCategory.title,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFFE2E8F0)
+                  )
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = Color(0xFF94A3B8),
+                    modifier = Modifier.size(14.dp)
+                  )
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Task Title Input Field
             OutlinedTextField(
               value = title,
               onValueChange = { title = it },
-              placeholder = { Text("Enter routine task title...", color = TextTertiary) },
+              placeholder = { Text("e.g. Deep Work Session", color = Color(0xFF475569)) },
               modifier = Modifier.fillMaxWidth().testTag("task_title_input"),
               colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF121620),
-                unfocusedContainerColor = Color(0xFF121620),
-                focusedBorderColor = Color(0xFF3B82F6),
-                unfocusedBorderColor = Color(0xFF1F2637),
+                focusedContainerColor = Color(0xFF0A0F1D),
+                unfocusedContainerColor = Color(0xFF0A0F1D),
+                focusedBorderColor = Color(0xFF06B6D4),
+                unfocusedBorderColor = Color(0xFF1E2C45),
                 focusedTextColor = Color(0xFFF8FAFC),
                 unfocusedTextColor = Color(0xFFF8FAFC)
               ),
-              shape = RoundedCornerShape(16.dp),
+              shape = RoundedCornerShape(14.dp),
               singleLine = true
             )
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Start Time Picker Card
-            Text(
-              text = "Preferred Start Time",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.SemiBold,
-              color = Color(0xFF94A3B8)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Surface(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp))
-                .clickable {
-                  clockTarget = 0
-                  showAnalogClockModal = true
-                }
-                .testTag("open_time_picker_button"),
-              color = Color(0xFF121620)
+            // 3-Box Start Time & Duration Matrix
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              Row(
+              // Start Time Box
+              Surface(
                 modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(horizontal = 16.dp, vertical = 13.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                  .weight(1.3f)
+                  .clip(RoundedCornerShape(14.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+                  .clickable {
+                    clockTarget = 0
+                    showAnalogClockModal = true
+                  }
+                  .testTag("open_time_picker_button"),
+                color = Color(0xFF0A0F1D)
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Icon(
-                    imageVector = Icons.Default.Schedule,
-                    contentDescription = null,
-                    tint = Color(0xFF38BDF8),
-                    modifier = Modifier.size(20.dp)
-                  )
-                  Spacer(modifier = Modifier.width(12.dp))
-                  Column {
+                Column(modifier = Modifier.padding(10.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
                     Text(
-                      text = RoutineTask.formatTime(startHour * 60 + startMinute),
-                      fontSize = 18.sp,
+                      text = "START TIME",
+                      fontSize = 9.sp,
                       fontWeight = FontWeight.Bold,
-                      color = Color(0xFFF8FAFC)
-                    )
-                    Text(
-                      text = "24h: ${String.format(Locale.US, "%02d:%02d", startHour, startMinute)} • Tap to open watch dial",
-                      fontSize = 11.sp,
+                      fontFamily = FontFamily.Monospace,
+                      letterSpacing = 0.5.sp,
                       color = Color(0xFF94A3B8)
                     )
+                    Icon(
+                      imageVector = Icons.Default.Schedule,
+                      contentDescription = null,
+                      tint = Color(0xFF06B6D4),
+                      modifier = Modifier.size(13.dp)
+                    )
                   }
-                }
-
-                Box(
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF38BDF8).copy(alpha = 0.15f))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
+                  Spacer(modifier = Modifier.height(6.dp))
                   Text(
-                    text = "Change 🕒",
-                    color = Color(0xFF38BDF8),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    text = RoutineTask.formatTime(startHour * 60 + startMinute),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF8FAFC)
+                  )
+                  Text(
+                    text = String.format(Locale.US, "%02d:%02d 24h", startHour, startMinute),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF64748B)
                   )
                 }
               }
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Planned Duration (Numeric Hours & Minutes)
-            Text(
-              text = "Planned Duration",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.SemiBold,
-              color = Color(0xFF94A3B8)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Surface(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF121620)
-            ) {
-              Column(modifier = Modifier.padding(14.dp)) {
-                val totalMins = durationHours * 60 + durationMins
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                      imageVector = Icons.Default.AccessTime,
-                      contentDescription = null,
-                      tint = Color(0xFF10B981),
-                      modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                      text = "${durationHours}h ${durationMins}m ($totalMins mins)",
-                      fontSize = 16.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFFF8FAFC)
-                    )
-                  }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+              // Duration Hours Box
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .clip(RoundedCornerShape(14.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+                color = Color(0xFF0A0F1D)
+              ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                  Text(
+                    text = "HOURS",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.5.sp,
+                    color = Color(0xFF94A3B8)
+                  )
+                  Spacer(modifier = Modifier.height(4.dp))
                   OutlinedTextField(
                     value = durationHoursInput,
                     onValueChange = { raw ->
@@ -1046,21 +962,41 @@ fun TaskModalBottomSheet(
                       durationHoursInput = clean
                       durationHours = parsed.coerceIn(0, 12)
                     },
-                    label = { Text("Hours") },
+                    suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f).testTag("duration_hours_input"),
+                    modifier = Modifier.fillMaxWidth().testTag("duration_hours_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F141E),
-                      unfocusedContainerColor = Color(0xFF0F141E),
-                      focusedBorderColor = Color(0xFF10B981),
-                      unfocusedBorderColor = Color(0xFF1F2637),
+                      focusedContainerColor = Color.Transparent,
+                      unfocusedContainerColor = Color.Transparent,
+                      focusedBorderColor = Color(0xFF06B6D4),
+                      unfocusedBorderColor = Color.Transparent,
                       focusedTextColor = Color(0xFFF8FAFC),
                       unfocusedTextColor = Color(0xFFF8FAFC)
                     ),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     singleLine = true
                   )
+                }
+              }
 
+              // Duration Minutes Box
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .clip(RoundedCornerShape(14.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+                color = Color(0xFF0A0F1D)
+              ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                  Text(
+                    text = "MINS",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.5.sp,
+                    color = Color(0xFF94A3B8)
+                  )
+                  Spacer(modifier = Modifier.height(4.dp))
                   OutlinedTextField(
                     value = durationMinsInput,
                     onValueChange = { raw ->
@@ -1068,266 +1004,160 @@ fun TaskModalBottomSheet(
                       durationMinsInput = clean
                       durationMins = parsed.coerceIn(0, 59)
                     },
-                    label = { Text("Minutes") },
+                    suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f).testTag("duration_mins_input"),
+                    modifier = Modifier.fillMaxWidth().testTag("duration_mins_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F141E),
-                      unfocusedContainerColor = Color(0xFF0F141E),
-                      focusedBorderColor = Color(0xFF10B981),
-                      unfocusedBorderColor = Color(0xFF1F2637),
+                      focusedContainerColor = Color.Transparent,
+                      unfocusedContainerColor = Color.Transparent,
+                      focusedBorderColor = Color(0xFF06B6D4),
+                      unfocusedBorderColor = Color.Transparent,
                       focusedTextColor = Color(0xFFF8FAFC),
                       unfocusedTextColor = Color(0xFFF8FAFC)
                     ),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     singleLine = true
                   )
                 }
               }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Schedule Flexibility Chips
-            Text(
-              text = "Schedule Flexibility",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.SemiBold,
-              color = Color(0xFF94A3B8)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-
+            // Dynamic Duration Badge Pill
+            val currentTotalMins = durationHours * 60 + durationMins
             Row(
               modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
             ) {
-              listOf(
-                0 to "Strict (±0m)",
-                15 to "Balanced (±15m)",
-                30 to "Flexible (±30m)"
-              ).forEach { (tol, label) ->
-                val isSelected = toleranceMinutes == tol
-                Surface(
-                  modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .border(
-                      BorderStroke(
-                        1.dp,
-                        if (isSelected) Color(0xFF3B82F6) else Color(0xFF1F2637)
-                      ),
-                      RoundedCornerShape(12.dp)
-                    )
-                    .clickable { toleranceMinutes = tol },
-                  color = if (isSelected) Color(0xFF3B82F6).copy(alpha = 0.2f) else Color(0xFF121620)
-                ) {
-                  Text(
-                    text = label,
-                    fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSelected) Color(0xFF60A5FA) else Color(0xFF94A3B8),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
-                  )
-                }
+              Text(
+                text = "DURATION PREVIEW",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFF64748B)
+              )
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(Color(0xFF06B6D4).copy(alpha = 0.12f))
+                  .border(BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.3f)), RoundedCornerShape(8.dp))
+                  .padding(horizontal = 8.dp, vertical = 3.dp)
+              ) {
+                Text(
+                  text = "${durationHours}h ${durationMins}m ($currentTotalMins mins total)",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFF22D3EE)
+                )
               }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Custom Flexibility Numeric Box
+            // Micro-Tile: Custom Flexibility Stepper
             Surface(
               modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(14.dp)),
-              color = Color(0xFF121620)
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+              color = Color(0xFF0A0F1D)
             ) {
               Row(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .padding(horizontal = 14.dp, vertical = 10.dp),
+                  .padding(horizontal = 14.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
               ) {
-                Column(modifier = Modifier.weight(1f)) {
-                  Text(
-                    text = "Custom Flexibility (± min)",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFF8FAFC)
-                  )
-                  Text(
-                    text = "Fine-tune duration compression allowance (0 to 30 min)",
-                    fontSize = 11.sp,
-                    color = Color(0xFF94A3B8)
-                  )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                OutlinedTextField(
-                  value = customFlexInput,
-                  onValueChange = { raw ->
-                    val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                    customFlexInput = clean
-                    customFlexibilityMinutes = parsed.coerceIn(0, 30)
-                  },
-                  prefix = { Text("±", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold) },
-                  suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 12.sp) },
-                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                  modifier = Modifier.width(96.dp).testTag("custom_flexibility_input"),
-                  colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFF0F141E),
-                    unfocusedContainerColor = Color(0xFF0F141E),
-                    focusedBorderColor = Color(0xFF38BDF8),
-                    unfocusedBorderColor = Color(0xFF1F2637),
-                    focusedTextColor = Color(0xFFF8FAFC),
-                    unfocusedTextColor = Color(0xFFF8FAFC)
-                  ),
-                  shape = RoundedCornerShape(10.dp),
-                  singleLine = true
-                )
-              }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // High Priority (Anchor Wall Fence) Card with Switch
-            Surface(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .border(
-                  BorderStroke(
-                    1.dp,
-                    if (isHighPriority) Color(0xFFEF4444).copy(alpha = 0.6f) else Color(0xFF1F2637)
-                  ),
-                  RoundedCornerShape(16.dp)
-                ),
-              color = if (isHighPriority) Color(0xFF1A1215) else Color(0xFF121620)
-            ) {
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                   Box(
                     modifier = Modifier
-                      .size(38.dp)
-                      .clip(RoundedCornerShape(10.dp))
-                      .background(if (isHighPriority) Color(0xFFEF4444).copy(alpha = 0.2f) else Color(0xFF1F2637)),
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
                   ) {
                     Icon(
-                      imageVector = Icons.Default.Shield,
-                      contentDescription = null,
-                      tint = if (isHighPriority) Color(0xFFEF4444) else Color(0xFF94A3B8),
-                      modifier = Modifier.size(20.dp)
-                    )
-                  }
-                  Spacer(modifier = Modifier.width(12.dp))
-                  Column {
-                    Text(
-                      text = "High Priority (Anchor Wall Fence)",
-                      fontSize = 13.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = if (isHighPriority) Color(0xFFFCA5A5) else Color(0xFFF8FAFC)
-                    )
-                    Text(
-                      text = "Strictly confines task to its inter-anchor gap. Moves to overflow rather than jumping across anchor walls.",
-                      fontSize = 11.sp,
-                      color = Color(0xFF94A3B8)
-                    )
-                  }
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Switch(
-                  checked = isHighPriority,
-                  onCheckedChange = { isHighPriority = it },
-                  colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color(0xFFEF4444),
-                    uncheckedThumbColor = Color(0xFF94A3B8),
-                    uncheckedTrackColor = Color(0xFF1F2637)
-                  ),
-                  modifier = Modifier.testTag("high_priority_switch")
-                )
-              }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Allow Auto-Splitting (>60m) Card with Switch
-            Surface(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF121620)
-            ) {
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-              ) {
-                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                  Box(
-                    modifier = Modifier
-                      .size(38.dp)
-                      .clip(RoundedCornerShape(10.dp))
-                      .background(Color(0xFF1F2637)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.AutoMirrored.Filled.CallSplit,
+                      imageVector = Icons.Default.AccessTime,
                       contentDescription = null,
                       tint = Color(0xFF06B6D4),
-                      modifier = Modifier.size(20.dp)
+                      modifier = Modifier.size(15.dp)
                     )
                   }
-                  Spacer(modifier = Modifier.width(12.dp))
+                  Spacer(modifier = Modifier.width(10.dp))
                   Column {
                     Text(
-                      text = "Allow Auto-Splitting (>60m)",
-                      fontSize = 13.sp,
+                      text = "FLEXIBILITY",
+                      fontSize = 11.sp,
                       fontWeight = FontWeight.Bold,
-                      color = Color(0xFFF8FAFC)
+                      fontFamily = FontFamily.Monospace,
+                      color = Color(0xFFE2E8F0)
                     )
                     Text(
-                      text = "Splits session into >=15m parts if no continuous gap is found.",
-                      fontSize = 11.sp,
-                      color = Color(0xFF94A3B8)
+                      text = "Duration compression tolerance",
+                      fontSize = 10.sp,
+                      color = Color(0xFF64748B)
                     )
                   }
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                Switch(
-                  checked = allowSplitting,
-                  onCheckedChange = { allowSplitting = it },
-                  colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color(0xFF06B6D4),
-                    uncheckedThumbColor = Color(0xFF94A3B8),
-                    uncheckedTrackColor = Color(0xFF1F2637)
-                  ),
-                  modifier = Modifier.testTag("allow_splitting_switch")
-                )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  IconButton(
+                    onClick = {
+                      customFlexibilityMinutes = (customFlexibilityMinutes - 5).coerceAtLeast(0)
+                      customFlexInput = customFlexibilityMinutes.toString()
+                    },
+                    modifier = Modifier.size(30.dp)
+                  ) {
+                    Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                  }
+                  OutlinedTextField(
+                    value = customFlexInput,
+                    onValueChange = { raw ->
+                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                      customFlexInput = clean
+                      customFlexibilityMinutes = parsed.coerceIn(0, 30)
+                    },
+                    prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                    suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 11.sp) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.width(80.dp).testTag("custom_flexibility_input"),
+                    colors = OutlinedTextFieldDefaults.colors(
+                      focusedContainerColor = Color(0xFF0F172A),
+                      unfocusedContainerColor = Color(0xFF0F172A),
+                      focusedBorderColor = Color(0xFF06B6D4),
+                      unfocusedBorderColor = Color(0xFF1E2C45),
+                      focusedTextColor = Color(0xFFF8FAFC),
+                      unfocusedTextColor = Color(0xFFF8FAFC)
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                  )
+                  IconButton(
+                    onClick = {
+                      customFlexibilityMinutes = (customFlexibilityMinutes + 5).coerceAtMost(30)
+                      customFlexInput = customFlexibilityMinutes.toString()
+                    },
+                    modifier = Modifier.size(30.dp)
+                  ) {
+                    Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                  }
+                }
               }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
 
-            // Master Voice Announcement Card with TTS test & volume slider
+
+            // Voice Announcement Studio Card
             Surface(
               modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(18.dp)),
-              color = Color(0xFF121620)
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(18.dp)),
+              color = Color(0xFF0A0F1D)
             ) {
               Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -1336,24 +1166,32 @@ fun TaskModalBottomSheet(
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                      imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                      contentDescription = null,
-                      tint = Color(0xFF38BDF8),
-                      modifier = Modifier.size(18.dp)
-                    )
+                    Box(
+                      modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Icon(
+                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(16.dp)
+                      )
+                    }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                       Text(
                         text = "Voice Announcement",
                         color = Color(0xFFF8FAFC),
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 13.sp
                       )
                       Text(
-                        text = "TTS announcement at task initiation",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 11.sp
+                        text = "Hardware speech synthesis at start trigger",
+                        color = Color(0xFF64748B),
+                        fontSize = 10.sp
                       )
                     }
                   }
@@ -1363,9 +1201,9 @@ fun TaskModalBottomSheet(
                     onCheckedChange = { isVoiceEnabled = it },
                     colors = SwitchDefaults.colors(
                       checkedThumbColor = Color.White,
-                      checkedTrackColor = Color(0xFF38BDF8),
+                      checkedTrackColor = Color(0xFF10B981),
                       uncheckedThumbColor = Color(0xFF94A3B8),
-                      uncheckedTrackColor = Color(0xFF1E293B)
+                      uncheckedTrackColor = Color(0xFF1E2C45)
                     )
                   )
                 }
@@ -1375,7 +1213,7 @@ fun TaskModalBottomSheet(
                   OutlinedTextField(
                     value = voiceMessage,
                     onValueChange = { voiceMessage = it },
-                    placeholder = { Text("e.g., Time for deep work session", color = TextTertiary) },
+                    placeholder = { Text("e.g. Focus sprint starting now", color = Color(0xFF475569)) },
                     trailingIcon = {
                       IconButton(
                         onClick = {
@@ -1388,16 +1226,16 @@ fun TaskModalBottomSheet(
                         Icon(
                           imageVector = Icons.Default.PlayArrow,
                           contentDescription = "Test Voice",
-                          tint = Color(0xFF38BDF8)
+                          tint = Color(0xFF10B981)
                         )
                       }
                     },
                     modifier = Modifier.fillMaxWidth().testTag("voice_message_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F141E),
-                      unfocusedContainerColor = Color(0xFF0F141E),
-                      focusedBorderColor = Color(0xFF38BDF8),
-                      unfocusedBorderColor = Color(0xFF1F2637),
+                      focusedContainerColor = Color(0xFF0F172A),
+                      unfocusedContainerColor = Color(0xFF0F172A),
+                      focusedBorderColor = Color(0xFF10B981),
+                      unfocusedBorderColor = Color(0xFF1E2C45),
                       focusedTextColor = Color(0xFFF8FAFC),
                       unfocusedTextColor = Color(0xFFF8FAFC)
                     ),
@@ -1406,7 +1244,7 @@ fun TaskModalBottomSheet(
 
                   Spacer(modifier = Modifier.height(10.dp))
 
-                  // Volume Slider (0% to 100%)
+                  // Volume Slider
                   Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -1414,7 +1252,7 @@ fun TaskModalBottomSheet(
                     Icon(
                       imageVector = Icons.AutoMirrored.Filled.VolumeMute,
                       contentDescription = null,
-                      tint = Color(0xFF94A3B8),
+                      tint = Color(0xFF64748B),
                       modifier = Modifier.size(16.dp)
                     )
                     Slider(
@@ -1423,15 +1261,15 @@ fun TaskModalBottomSheet(
                       valueRange = 0f..1f,
                       modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                       colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF38BDF8),
-                        activeTrackColor = Color(0xFF38BDF8),
-                        inactiveTrackColor = Color(0xFF1E293B)
+                        thumbColor = Color(0xFF10B981),
+                        activeTrackColor = Color(0xFF10B981),
+                        inactiveTrackColor = Color(0xFF1E2C45)
                       )
                     )
                     Icon(
                       imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                       contentDescription = null,
-                      tint = Color(0xFF38BDF8),
+                      tint = Color(0xFF10B981),
                       modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -1655,30 +1493,38 @@ fun TaskModalBottomSheet(
             Surface(
               modifier = Modifier
                 .weight(1f)
-                .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(18.dp)),
-              color = Color(0xFF121620)
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+              color = Color(0xFF0A0F1D)
             ) {
-              Column(modifier = Modifier.padding(14.dp)) {
+              Column(modifier = Modifier.padding(12.dp)) {
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Icon(
-                    imageVector = Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = Color(0xFF38BDF8),
-                    modifier = Modifier.size(20.dp)
-                  )
+                  Box(
+                    modifier = Modifier
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.MusicNote,
+                      contentDescription = null,
+                      tint = Color(0xFF06B6D4),
+                      modifier = Modifier.size(16.dp)
+                    )
+                  }
                   Switch(
                     checked = isSoundAlertEnabled,
                     onCheckedChange = { isSoundAlertEnabled = it },
                     colors = SwitchDefaults.colors(
                       checkedThumbColor = Color.White,
-                      checkedTrackColor = Color(0xFF38BDF8),
+                      checkedTrackColor = Color(0xFF06B6D4),
                       uncheckedThumbColor = Color(0xFF94A3B8),
-                      uncheckedTrackColor = Color(0xFF1E293B)
+                      uncheckedTrackColor = Color(0xFF1E2C45)
                     )
                   )
                 }
@@ -1686,10 +1532,11 @@ fun TaskModalBottomSheet(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                  text = "Task Alerts",
-                  color = Color(0xFFF8FAFC),
+                  text = "TASK ALERTS",
+                  color = Color(0xFFE2E8F0),
                   fontWeight = FontWeight.Bold,
-                  fontSize = 13.sp
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 11.sp
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -1706,12 +1553,13 @@ fun TaskModalBottomSheet(
                       }
                       ringtonePickerLauncher.launch(intent)
                     },
-                  color = Color(0xFF0F141E)
+                  color = Color(0xFF0F172A)
                 ) {
                   Text(
                     text = customRingtoneTitle.take(18),
-                    color = Color(0xFF60A5FA),
+                    color = Color(0xFF06B6D4),
                     fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                   )
@@ -1723,30 +1571,38 @@ fun TaskModalBottomSheet(
             Surface(
               modifier = Modifier
                 .weight(1f)
-                .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(18.dp)),
-              color = Color(0xFF121620)
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+              color = Color(0xFF0A0F1D)
             ) {
-              Column(modifier = Modifier.padding(14.dp)) {
+              Column(modifier = Modifier.padding(12.dp)) {
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Icon(
-                    imageVector = Icons.Default.Bedtime,
-                    contentDescription = null,
-                    tint = Color(0xFF8B5CF6),
-                    modifier = Modifier.size(20.dp)
-                  )
+                  Box(
+                    modifier = Modifier
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFFA855F7).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Bedtime,
+                      contentDescription = null,
+                      tint = Color(0xFFA855F7),
+                      modifier = Modifier.size(16.dp)
+                    )
+                  }
                   Switch(
                     checked = enableDnd,
                     onCheckedChange = { enableDnd = it },
                     colors = SwitchDefaults.colors(
                       checkedThumbColor = Color.White,
-                      checkedTrackColor = Color(0xFF8B5CF6),
+                      checkedTrackColor = Color(0xFFA855F7),
                       uncheckedThumbColor = Color(0xFF94A3B8),
-                      uncheckedTrackColor = Color(0xFF1E293B)
+                      uncheckedTrackColor = Color(0xFF1E2C45)
                     )
                   )
                 }
@@ -1754,10 +1610,11 @@ fun TaskModalBottomSheet(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                  text = "Auto DND",
-                  color = Color(0xFFF8FAFC),
+                  text = "AUTO DND",
+                  color = Color(0xFFE2E8F0),
                   fontWeight = FontWeight.Bold,
-                  fontSize = 13.sp
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 11.sp
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -1766,7 +1623,7 @@ fun TaskModalBottomSheet(
                   verticalAlignment = Alignment.CenterVertically,
                   modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF0F141E))
+                    .background(Color(0xFF0F172A))
                     .padding(horizontal = 8.dp, vertical = 6.dp)
                 ) {
                   Box(
@@ -1780,6 +1637,7 @@ fun TaskModalBottomSheet(
                     text = if (enableDnd) "Engaged" else "Disabled",
                     color = if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B),
                     fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold
                   )
                 }
@@ -1787,7 +1645,7 @@ fun TaskModalBottomSheet(
             }
           }
 
-          Spacer(modifier = Modifier.height(16.dp))
+          Spacer(modifier = Modifier.height(14.dp))
 
           // ==============================================================
           // 5. RECURRENCE SCHEDULE CARD
@@ -1795,9 +1653,9 @@ fun TaskModalBottomSheet(
           Surface(
             modifier = Modifier
               .fillMaxWidth()
-              .clip(RoundedCornerShape(18.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(18.dp)),
-            color = Color(0xFF121620)
+              .clip(RoundedCornerShape(16.dp))
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+            color = Color(0xFF0A0F1D)
           ) {
             Column(modifier = Modifier.padding(14.dp)) {
               Row(
@@ -1806,45 +1664,53 @@ fun TaskModalBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
               ) {
                 Text(
-                  text = "Recurrence Schedule",
-                  color = Color(0xFFF8FAFC),
+                  text = "RECURRENCE SCHEDULE",
+                  color = Color(0xFF94A3B8),
                   fontWeight = FontWeight.Bold,
-                  fontSize = 13.sp
+                  fontFamily = FontFamily.Monospace,
+                  letterSpacing = 0.5.sp,
+                  fontSize = 11.sp
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Capsule Selector
+                Row(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF0F172A))
+                    .padding(2.dp)
+                ) {
                   Surface(
                     modifier = Modifier
-                      .clip(RoundedCornerShape(8.dp))
+                      .clip(RoundedCornerShape(16.dp))
                       .clickable {
                         isDailyRecurrence = true
                         selectedDays = RoutineDay.allDays()
                       },
-                    color = if (isDailyRecurrence) Color(0xFF3B82F6) else Color(0xFF0F141E)
+                    color = if (isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
                   ) {
                     Text(
                       text = "Daily",
                       fontSize = 11.sp,
                       fontWeight = FontWeight.Bold,
-                      color = if (isDailyRecurrence) Color.White else Color(0xFF94A3B8),
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                      color = if (isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
                   }
 
                   Surface(
                     modifier = Modifier
-                      .clip(RoundedCornerShape(8.dp))
+                      .clip(RoundedCornerShape(16.dp))
                       .clickable {
                         isDailyRecurrence = false
                       },
-                    color = if (!isDailyRecurrence) Color(0xFF3B82F6) else Color(0xFF0F141E)
+                    color = if (!isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
                   ) {
                     Text(
-                      text = "Specific Days",
+                      text = "Custom",
                       fontSize = 11.sp,
                       fontWeight = FontWeight.Bold,
-                      color = if (!isDailyRecurrence) Color.White else Color(0xFF94A3B8),
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                      color = if (!isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
                   }
                 }
@@ -1857,13 +1723,13 @@ fun TaskModalBottomSheet(
                   horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                   listOf(
+                    RoutineDay.SATURDAY to "S",
+                    RoutineDay.SUNDAY to "S",
                     RoutineDay.MONDAY to "M",
                     RoutineDay.TUESDAY to "T",
                     RoutineDay.WEDNESDAY to "W",
                     RoutineDay.THURSDAY to "T",
-                    RoutineDay.FRIDAY to "F",
-                    RoutineDay.SATURDAY to "S",
-                    RoutineDay.SUNDAY to "S"
+                    RoutineDay.FRIDAY to "F"
                   ).forEach { (day, label) ->
                     val isDaySelected = selectedDays.contains(day)
                     Box(
@@ -1871,13 +1737,13 @@ fun TaskModalBottomSheet(
                         .size(36.dp)
                         .clip(CircleShape)
                         .background(
-                          if (isDaySelected) Color(0xFF3B82F6)
-                          else Color(0xFF0F141E)
+                          if (isDaySelected) Color(0xFF06B6D4)
+                          else Color(0xFF0F172A)
                         )
                         .border(
                           BorderStroke(
                             1.dp,
-                            if (isDaySelected) Color(0xFF60A5FA) else Color(0xFF1F2637)
+                            if (isDaySelected) Color(0xFF22D3EE) else Color(0xFF1E2C45)
                           ),
                           CircleShape
                         )
@@ -1894,7 +1760,7 @@ fun TaskModalBottomSheet(
                         text = label,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isDaySelected) Color.White else Color(0xFF94A3B8)
+                        color = if (isDaySelected) Color.Black else Color(0xFF94A3B8)
                       )
                     }
                   }
@@ -1914,7 +1780,7 @@ fun TaskModalBottomSheet(
           .align(Alignment.BottomCenter)
           .fillMaxWidth(),
         color = Color(0xFF080A0F).copy(alpha = 0.95f),
-        border = BorderStroke(1.dp, Color(0xFF1F2637))
+        border = BorderStroke(1.dp, Color(0xFF1E2C45))
       ) {
         Row(
           modifier = Modifier
@@ -1922,7 +1788,7 @@ fun TaskModalBottomSheet(
             .padding(horizontal = 16.dp, vertical = 14.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          // Luxury Gradient Save CTA Button
+          // Luxury Gradient Save CTA Button (Cyan to Blue)
           Button(
             onClick = { triggerSave() },
             modifier = Modifier
@@ -1936,8 +1802,8 @@ fun TaskModalBottomSheet(
               modifier = Modifier
                 .fillMaxSize()
                 .background(
-                  if (isFluidTwinMode) Brush.horizontalGradient(listOf(Color(0xFF38BDF8), Color(0xFF8B5CF6)))
-                  else Brush.horizontalGradient(listOf(Color(0xFF3B82F6), Color(0xFF06B6D4))),
+                  if (isFluidTwinMode) Brush.horizontalGradient(listOf(Color(0xFF06B6D4), Color(0xFF8B5CF6)))
+                  else Brush.horizontalGradient(listOf(Color(0xFF06B6D4), Color(0xFF2563EB))),
                   shape = RoundedCornerShape(16.dp)
                 ),
               contentAlignment = Alignment.Center

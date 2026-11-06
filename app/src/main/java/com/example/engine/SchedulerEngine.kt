@@ -17,8 +17,6 @@ data class ScheduleResult(
 
 object SchedulerEngine {
 
-  const val MIN_SPLIT_MINUTES = 15
-  const val SPLIT_THRESHOLD_MINUTES = 60
   const val MIN_FLUID_TWIN_MINUTES = 45
   const val MIN_ELASTIC_BUFFER_MINUTES = 15
 
@@ -553,7 +551,7 @@ object SchedulerEngine {
 
         // Try tolerance / custom flexibility within fencedGaps
         if (effectiveTolerance > 0) {
-          val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(MIN_SPLIT_MINUTES)
+          val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(15)
           var flexGap: ScheduleGap? = null
           var flexStart = -1
           var flexDuration = -1
@@ -587,63 +585,6 @@ object SchedulerEngine {
               )
             )
             continue
-          }
-        }
-
-        // Try splitting strictly within fencedGaps
-        if (dynamicTask.allowSplitting && requiredDuration > SPLIT_THRESHOLD_MINUTES) {
-          val viableGaps = fencedGaps.filter { it.durationMinutes >= MIN_SPLIT_MINUTES }
-          val totalCapacity = viableGaps.sumOf { it.durationMinutes }
-
-          if (totalCapacity >= requiredDuration) {
-            var remaining = requiredDuration
-            val splitParts = mutableListOf<RoutineTask>()
-            var partIndex = 1
-
-            val sortedGaps = viableGaps.sortedBy { gap ->
-              val center = (gap.startMinute + gap.endMinute) / 2
-              Math.abs(center - prefStart)
-            }
-
-            for (gap in sortedGaps) {
-              if (remaining <= 0) break
-
-              val availableInGap = gap.durationMinutes
-              val chunkDuration = when {
-                remaining <= availableInGap -> remaining
-                else -> availableInGap
-              }
-
-              if (chunkDuration < MIN_SPLIT_MINUTES) continue
-
-              val actualChunk = if (remaining - chunkDuration in 1 until MIN_SPLIT_MINUTES) {
-                val adjusted = chunkDuration - (MIN_SPLIT_MINUTES - (remaining - chunkDuration))
-                if (adjusted >= MIN_SPLIT_MINUTES) adjusted else chunkDuration
-              } else {
-                chunkDuration
-              }
-
-              if (actualChunk < MIN_SPLIT_MINUTES) continue
-
-              val part = dynamicTask.copy(
-                id = "${dynamicTask.id}_part_${partIndex}",
-                title = "${dynamicTask.title} (Part $partIndex)",
-                startTimeMinute = gap.startMinute,
-                durationMinutes = actualChunk,
-                isSplitPart = true,
-                splitPartLabel = "Part $partIndex (${actualChunk}m)",
-                parentTaskId = dynamicTask.id,
-                isOverflow = false
-              )
-              splitParts.add(part)
-              remaining -= actualChunk
-              partIndex++
-            }
-
-            if (remaining == 0) {
-              scheduledTasks.addAll(splitParts)
-              continue
-            }
           }
         }
 
@@ -692,7 +633,7 @@ object SchedulerEngine {
 
       // Schedule Float / Tolerance Margin / Custom Flexibility (±5m to ±30m flexibility)
       if (effectiveTolerance > 0) {
-        val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(MIN_SPLIT_MINUTES)
+        val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(15)
         var flexGap: ScheduleGap? = null
         var flexStart = -1
         var flexDuration = -1
@@ -728,71 +669,8 @@ object SchedulerEngine {
         }
       }
 
-      // If continuous placement failed, check if task splitting is allowed and duration > 60m
-      if (dynamicTask.allowSplitting && requiredDuration > SPLIT_THRESHOLD_MINUTES) {
-        // Only consider viable gaps that meet the minimum 15-minute threshold
-        val viableGaps = gaps.filter { it.durationMinutes >= MIN_SPLIT_MINUTES }
-        val totalCapacity = viableGaps.sumOf { it.durationMinutes }
-
-        if (totalCapacity >= requiredDuration) {
-          var remaining = requiredDuration
-          val splitParts = mutableListOf<RoutineTask>()
-          var partIndex = 1
-
-          val sortedGaps = viableGaps.sortedBy { gap ->
-            val center = (gap.startMinute + gap.endMinute) / 2
-            Math.abs(center - prefStart)
-          }
-
-          for (gap in sortedGaps) {
-            if (remaining <= 0) break
-
-            val availableInGap = gap.durationMinutes
-            val chunkDuration = when {
-              remaining <= availableInGap -> remaining
-              else -> availableInGap
-            }
-
-            if (chunkDuration < MIN_SPLIT_MINUTES) continue
-
-            // Guard against leaving an illegal < 15m remainder
-            val actualChunk = if (remaining - chunkDuration in 1 until MIN_SPLIT_MINUTES) {
-              val adjusted = chunkDuration - (MIN_SPLIT_MINUTES - (remaining - chunkDuration))
-              if (adjusted >= MIN_SPLIT_MINUTES) adjusted else chunkDuration
-            } else {
-              chunkDuration
-            }
-
-            if (actualChunk < MIN_SPLIT_MINUTES) continue
-
-            val part = dynamicTask.copy(
-              id = "${dynamicTask.id}_part_${partIndex}",
-              title = "${dynamicTask.title} (Part $partIndex)",
-              startTimeMinute = gap.startMinute,
-              durationMinutes = actualChunk,
-              isSplitPart = true,
-              splitPartLabel = "Part $partIndex (${actualChunk}m)",
-              parentTaskId = dynamicTask.id,
-              isOverflow = false
-            )
-            splitParts.add(part)
-            remaining -= actualChunk
-            partIndex++
-          }
-
-          if (remaining == 0) {
-            scheduledTasks.addAll(splitParts)
-            continue
-          }
-        }
-      }
-
-      // If we reach here, it could not be scheduled continuously or split
-      val reason = if (!dynamicTask.allowSplitting && requiredDuration > 60) {
-        "Needs ${requiredDuration}m continuous gap (Splitting disabled)"
-      } else {
-        "No available open slot can accommodate ${requiredDuration}m without violating anchors"
-      }
+      // If we reach here, it could not be scheduled continuously
+      val reason = "No available open slot can accommodate ${requiredDuration}m without violating anchors"
       overflowTasks.add(
         dynamicTask.copy(
           isOverflow = true,
