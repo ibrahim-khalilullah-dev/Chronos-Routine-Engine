@@ -71,8 +71,8 @@
 |    └── TrashBinScreen.kt        (Soft-delete bin & 30-day purge)       |
 |                                                                        |
 |  Sheets & Components:                                                  |
-|    ├── TaskModalBottomSheet.kt  (Visual task creator / editor)         |
-|    ├── AnchorEditBottomSheet.kt (Anchor parameter fine-tuner)          |
+|    ├── TaskModalBottomSheet.kt  (Header Priority/Split pills, unified voice) |
+|    ├── AnchorEditBottomSheet.kt (Circadian fine-tuner, voice toggle switch)  |
 |    ├── ChronosArchitectureGuideSheet.kt (In-app broadsheet doc)        |
 |    └── OneUiCards.kt            (Anchor/Dynamic/Overflow cards)        |
 +-----------------------------------+------------------------------------+
@@ -89,7 +89,7 @@
 |    - High Priority Anchor Wall Fence (restricts to enclosing gap)      |
 |    - Fluid Twin Tasks (Communicating vessels hydraulic duration pool)  |
 |    - Custom Schedule Flexibility (0..30m) & Rest Buffer (0..30m)       |
-|    - Task Auto-Splitting (>= 15m chunks for tasks > 60m)               |
+|    - Unfragmented Placement & Overflow Pool Routing (zero auto-split)  |
 |                                                                        |
 |  [ ConsoleParser.kt ]                                                  |
 |    - Grammatical pipe parser for ANCHOR, TWIN, and DYNAMIC directives  |
@@ -130,6 +130,7 @@
 
 #### `/chronos.apk`
 - **Purpose:** Production-ready debug/release APK placed directly at the repository root for zero-click downloads.
+- **Key Specifications:** Directly accessible via raw GitHub CDN (`https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk`) and exempted from gitignore (`!chronos.apk`), enabling direct browser downloads and 1-tap installation without 404 errors.
 
 #### `/build.gradle.kts`
 - **Purpose:** Top-level project Gradle build script.
@@ -235,17 +236,16 @@
 
 #### `SchedulerEngine.kt`
 - **Purpose:** Pure mathematical scheduling engine calculating gaps, placing dynamic tasks, managing fluid twins, and enforcing circadian anchor invariants.
-- **Key Constants:**
-  - `MIN_SPLIT_MINUTES = 15`: Minimum allowable chunk size for split tasks.
-  - `SPLIT_THRESHOLD_MINUTES = 60`: Minimum task duration required to trigger splitting.
+- **Key Invariants:**
   - `MIN_FLUID_TWIN_MINUTES = 45`: Strict safety floor for any fluid twin session.
   - `MIN_ELASTIC_BUFFER_MINUTES = 15`: Safety floor for the Slot 5 elastic buffer.
+  - **Zero Auto-Splitting Architecture:** Tasks are never fragmented or split automatically into chunks. If a dynamic task cannot fit into available circadian gaps (taking into account user flexibility tolerance), it is routed intact to the Overflow Pool for user inspection and manual rearrangement.
 - **Key Functions:**
   - `createDefaultAnchors(sleepDurationMinutes)`: Factory creating the 7 default circadian anchors.
   - `calculateAnchors(anchors, sleepDurationMinutes)`: Evaluates dynamic dependencies. Automatically updates Slot 1 bedtime when Slot 2 wake-up moves (with full modulo 1440 midnight-crossing safety), and recalibrates Slot 5 duration when Slot 4 or Slot 6 moves.
   - `adjustAnchor(anchors, slotNumber, deltaMinutes, sleepDurationMinutes)`: Quick-adjusts any anchor by ±5m increments and cascades recalculation.
   - `findAvailableGaps(committedTasks, interTaskBufferMinutes)`: Computes unallocated 24-hour time slots taking into account individual inter-task rest buffers.
-  - `scheduleDay(anchors, dynamicTasks, activeDay, interTaskBufferMinutes)`: Primary scheduling pipeline handling Friday Jumu'ah swapping, fluid twin balancing, high-priority anchor wall fencing, schedule flexibility, and auto-splitting.
+  - `scheduleDay(anchors, dynamicTasks, activeDay, interTaskBufferMinutes)`: Primary scheduling pipeline handling Friday Jumu'ah swapping, fluid twin balancing, high-priority anchor wall fencing, schedule flexibility tolerance, and unfragmented overflow handling.
 
 #### `ConsoleParser.kt`
 - **Purpose:** Grammatical bulk CLI interpreter converting plaintext monospace pipe scripts into strongly typed `RoutineTask` collections.
@@ -308,6 +308,18 @@
 #### `OneUiCards.kt` (`ui/components/`)
 - **Purpose:** Visual timeline card components conforming to Samsung One UI 8.5 guidelines.
 - **Stability Enhancement:** Completely removed `Modifier.animateContentSize()` from `AnchorSlotCard`, `DynamicTaskCard`, and `OverflowTaskCard` container roots, eliminating infinite remeasure loops and layout freezes during fast scrolls.
+
+#### `TaskModalBottomSheet.kt` (`ui/components/`)
+- **Purpose:** Full-featured creation and editing bottom sheet for Dynamic Tasks, Fluid Twin pairs, and Circadian Anchors.
+- **Streamlined Header Studio:** Features quick-toggle interactive pill controls (`Priority` and `Split`) directly in the modal header, eliminating redundant middle splitting cards.
+- **Unified Voice Announcement Controls:** Integrated dedicated ON/OFF switches with visual collapse:
+  * When Voice Announcement is toggled OFF (`isVoiceEnabled == false`), the speech text input and test button are collapsed, displaying a scannable notice ("Spoken reminders disabled for this task/anchor").
+  * Supports independent voice controls for standard anchors and Friday Jumu'ah dual mode.
+
+#### `AnchorEditBottomSheet.kt` (`ui/components/`)
+- **Purpose:** Dedicated modal editor for fine-tuning circadian anchor properties and hardware automations.
+- **Slot Invariants & Luxury Layout:** Preserves reverse sleep arithmetic for Slot 1, Friday Jumu'ah overrides for Slot 3, and elasticity bounds for Slot 5.
+- **Voice Announcement Architecture:** Houses dedicated ON/OFF switches (`anchor_voice_switch` and `friday_voice_switch`), collapsing voice inputs when disabled and ensuring complete parity with `TaskModalBottomSheet`.
 
 #### `TimelineScreen.kt` (`ui/screens/`)
 - **Purpose:** Primary application screen displaying the circadian timeline for any selected day.

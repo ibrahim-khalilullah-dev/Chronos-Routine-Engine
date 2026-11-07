@@ -804,6 +804,8 @@ fun TaskModalBottomSheet(
             },
             isPlayingTonePreview = isPlayingTonePreview,
             onToggleTonePreview = toggleTonePreview,
+            isVoiceEnabled = isVoiceEnabled,
+            onIsVoiceEnabledChange = { isVoiceEnabled = it },
             selectedDays = selectedDays,
             onSelectedDaysChange = { selectedDays = it }
           )
@@ -2088,7 +2090,7 @@ fun TaskModalBottomSheet(
 }
 
 /**
- * Preserved Phase 2 Anchor Edit Form.
+ * Luxury Obsidian Studio Anchor Edit Form (Zero Functionality Loss).
  */
 @Composable
 private fun AnchorEditSection(
@@ -2134,6 +2136,8 @@ private fun AnchorEditSection(
   onPickRingtone: () -> Unit,
   isPlayingTonePreview: Boolean,
   onToggleTonePreview: () -> Unit,
+  isVoiceEnabled: Boolean = true,
+  onIsVoiceEnabledChange: (Boolean) -> Unit = {},
   selectedDays: Set<RoutineDay>,
   onSelectedDaysChange: (Set<RoutineDay>) -> Unit
 ) {
@@ -2142,17 +2146,30 @@ private fun AnchorEditSection(
   var friHoursInput by remember(fridayDurationHours) { mutableStateOf(fridayDurationHours.toString()) }
   var friMinsInput by remember(fridayDurationMins) { mutableStateOf(fridayDurationMins.toString()) }
 
+  val accentColor = when (slotNum) {
+    1 -> Color(0xFF6366F1) // Deep Indigo
+    3 -> Color(0xFF10B981) // Emerald
+    5 -> Color(0xFFF59E0B) // Amber
+    else -> Color(0xFF06B6D4) // Cyan
+  }
+  val accentLight = when (slotNum) {
+    1 -> Color(0xFFA5B4FC) // Lavender
+    3 -> Color(0xFF6EE7B7) // Mint
+    5 -> Color(0xFFFEF3C7) // Warm Gold
+    else -> Color(0xFF38BDF8) // Sky Blue
+  }
+
   Column {
     // ==============================================================
-    // 1. ANCHOR SLOT 3 FRIDAY-SPECIFIC DUAL MODE (TAB SWITCHER)
+    // 1. ANCHOR SLOT 3 FRIDAY-SPECIFIC DUAL MODE (CAPSULE SWITCHER)
     // ==============================================================
     if (isSlot3) {
       Surface(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF0F141E)
+          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF0A0F1D)
       ) {
         Row(
           modifier = Modifier
@@ -2165,9 +2182,9 @@ private fun AnchorEditSection(
             modifier = Modifier
               .weight(1f)
               .clip(RoundedCornerShape(12.dp))
-              .background(if (activeSlot3Tab == 0) Color(0xFF3B82F6).copy(alpha = 0.25f) else Color.Transparent)
+              .background(if (activeSlot3Tab == 0) Color(0xFF06B6D4).copy(alpha = 0.2f) else Color.Transparent)
               .border(
-                BorderStroke(1.dp, if (activeSlot3Tab == 0) Color(0xFF3B82F6) else Color.Transparent),
+                BorderStroke(1.dp, if (activeSlot3Tab == 0) Color(0xFF06B6D4) else Color.Transparent),
                 RoundedCornerShape(12.dp)
               )
               .clickable { onActiveSlot3TabChange(0) }
@@ -2178,7 +2195,8 @@ private fun AnchorEditSection(
               text = "Regular Days (Sat-Thu)",
               fontSize = 11.sp,
               fontWeight = if (activeSlot3Tab == 0) FontWeight.Bold else FontWeight.Medium,
-              color = if (activeSlot3Tab == 0) Color(0xFF93C5FD) else Color(0xFF94A3B8)
+              fontFamily = FontFamily.Monospace,
+              color = if (activeSlot3Tab == 0) Color(0xFF38BDF8) else Color(0xFF94A3B8)
             )
           }
 
@@ -2187,7 +2205,7 @@ private fun AnchorEditSection(
             modifier = Modifier
               .weight(1f)
               .clip(RoundedCornerShape(12.dp))
-              .background(if (activeSlot3Tab == 1) Color(0xFF10B981).copy(alpha = 0.25f) else Color.Transparent)
+              .background(if (activeSlot3Tab == 1) Color(0xFF10B981).copy(alpha = 0.2f) else Color.Transparent)
               .border(
                 BorderStroke(1.dp, if (activeSlot3Tab == 1) Color(0xFF10B981) else Color.Transparent),
                 RoundedCornerShape(12.dp)
@@ -2200,6 +2218,7 @@ private fun AnchorEditSection(
               text = "Friday Mode 🕌",
               fontSize = 11.sp,
               fontWeight = if (activeSlot3Tab == 1) FontWeight.Bold else FontWeight.Medium,
+              fontFamily = FontFamily.Monospace,
               color = if (activeSlot3Tab == 1) Color(0xFF6EE7B7) else Color(0xFF94A3B8)
             )
           }
@@ -2216,23 +2235,48 @@ private fun AnchorEditSection(
       // -----------------------------------------------------------
       // FRIDAY MODE FORM
       // -----------------------------------------------------------
-      Text(
-        text = "Friday Anchor Title",
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Color(0xFF6EE7B7)
-      )
-      Spacer(modifier = Modifier.height(6.dp))
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "FRIDAY ANCHOR TITLE",
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          letterSpacing = 1.sp,
+          color = Color(0xFF94A3B8)
+        )
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF10B981).copy(alpha = 0.15f))
+            .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)), RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+          Text(
+            text = "FRIDAY JUMU'AH",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = Color(0xFF6EE7B7)
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
       OutlinedTextField(
         value = fridayTitle,
         onValueChange = onFridayTitleChange,
-        placeholder = { Text("e.g., Friday Jumu'ah & Reflection", color = TextTertiary) },
+        placeholder = { Text("e.g., Friday Jumu'ah & Reflection", color = Color(0xFF475569)) },
         modifier = Modifier.fillMaxWidth().testTag("friday_task_title_input"),
         colors = OutlinedTextFieldDefaults.colors(
-          focusedContainerColor = Color(0xFF121620),
-          unfocusedContainerColor = Color(0xFF121620),
+          focusedContainerColor = Color(0xFF0A0F1D),
+          unfocusedContainerColor = Color(0xFF0A0F1D),
           focusedBorderColor = Color(0xFF10B981),
-          unfocusedBorderColor = Color(0xFF1F2637),
+          unfocusedBorderColor = Color(0xFF1E2C45),
           focusedTextColor = Color(0xFFF8FAFC),
           unfocusedTextColor = Color(0xFFF8FAFC)
         ),
@@ -2241,93 +2285,77 @@ private fun AnchorEditSection(
       )
 
       Spacer(modifier = Modifier.height(14.dp))
-      Text(
-        text = "Friday Start Time",
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Color(0xFF6EE7B7)
-      )
-      Spacer(modifier = Modifier.height(6.dp))
 
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)), RoundedCornerShape(16.dp))
-          .clickable { onOpenFridayClock() }
-          .testTag("open_friday_time_picker_button"),
-        color = Color(0xFF121620)
+      // Friday 3-Box Start Time & Duration Matrix
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        Row(
+        // Start Time Box
+        Surface(
           modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
+            .weight(1.3f)
+            .clip(RoundedCornerShape(14.dp))
+            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+            .clickable { onOpenFridayClock() }
+            .testTag("open_friday_time_picker_button"),
+          color = Color(0xFF0A0F1D)
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
+          Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
               Text(
-                text = RoutineTask.formatTime(fridayStartHour * 60 + fridayStartMinute),
-                fontSize = 18.sp,
+                text = "FRIDAY START",
+                fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.5.sp,
+                color = Color(0xFF94A3B8)
               )
-              Text(
-                text = "Friday Dial: ${String.format(Locale.US, "%02d:%02d", fridayStartHour, fridayStartMinute)} • Tap to change",
-                fontSize = 11.sp,
-                color = TextSecondary
+              Icon(
+                imageVector = Icons.Default.Schedule,
+                contentDescription = null,
+                tint = Color(0xFF10B981),
+                modifier = Modifier.size(14.dp)
               )
             }
-          }
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(8.dp))
-              .background(Color(0xFF10B981).copy(alpha = 0.2f))
-              .padding(horizontal = 8.dp, vertical = 5.dp)
-          ) {
-            Text(text = "Change 🕒", color = Color(0xFF6EE7B7), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-          }
-        }
-      }
-
-      Spacer(modifier = Modifier.height(14.dp))
-      Text(
-        text = "Friday Duration",
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Color(0xFF6EE7B7)
-      )
-      Spacer(modifier = Modifier.height(6.dp))
-
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF121620)
-      ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-          val totalMins = fridayDurationHours * 60 + fridayDurationMins
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.AccessTime, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
-              text = "${fridayDurationHours}h ${fridayDurationMins}m ($totalMins mins)",
-              fontSize = 16.sp,
+              text = RoutineTask.formatTime(fridayStartHour * 60 + fridayStartMinute),
+              fontSize = 17.sp,
               fontWeight = FontWeight.Bold,
-              color = TextPrimary
+              color = Color(0xFFF8FAFC)
+            )
+            Text(
+              text = "24h: ${String.format(Locale.US, "%02d:%02d", fridayStartHour, fridayStartMinute)} • Tap to dial",
+              fontSize = 9.sp,
+              fontFamily = FontFamily.Monospace,
+              color = Color(0xFF64748B)
             )
           }
+        }
 
-          Spacer(modifier = Modifier.height(12.dp))
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-          ) {
+        // Hours Box
+        Surface(
+          modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(14.dp))
+            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+          color = Color(0xFF0A0F1D)
+        ) {
+          Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+              text = "HOURS",
+              fontSize = 9.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace,
+              letterSpacing = 0.5.sp,
+              color = Color(0xFF94A3B8)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
             OutlinedTextField(
               value = friHoursInput,
               onValueChange = { raw ->
@@ -2335,21 +2363,41 @@ private fun AnchorEditSection(
                 friHoursInput = clean
                 onFridayDurationHoursChange(parsed.coerceIn(0, 12))
               },
-              label = { Text("Hours") },
+              suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              modifier = Modifier.weight(1f).testTag("friday_duration_hours_input"),
+              modifier = Modifier.fillMaxWidth().testTag("friday_duration_hours_input"),
               colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF0F141E),
-                unfocusedContainerColor = Color(0xFF0F141E),
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
                 focusedBorderColor = Color(0xFF10B981),
-                unfocusedBorderColor = Color(0xFF1F2637),
+                unfocusedBorderColor = Color.Transparent,
                 focusedTextColor = Color(0xFFF8FAFC),
                 unfocusedTextColor = Color(0xFFF8FAFC)
               ),
-              shape = RoundedCornerShape(12.dp),
+              shape = RoundedCornerShape(8.dp),
               singleLine = true
             )
+          }
+        }
 
+        // Minutes Box
+        Surface(
+          modifier = Modifier
+            .weight(1f)
+            .clip(RoundedCornerShape(14.dp))
+            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+          color = Color(0xFF0A0F1D)
+        ) {
+          Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+              text = "MINS",
+              fontSize = 9.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace,
+              letterSpacing = 0.5.sp,
+              color = Color(0xFF94A3B8)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
             OutlinedTextField(
               value = friMinsInput,
               onValueChange = { raw ->
@@ -2357,21 +2405,54 @@ private fun AnchorEditSection(
                 friMinsInput = clean
                 onFridayDurationMinsChange(parsed.coerceIn(0, 59))
               },
-              label = { Text("Minutes") },
+              suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              modifier = Modifier.weight(1f).testTag("friday_duration_mins_input"),
+              modifier = Modifier.fillMaxWidth().testTag("friday_duration_mins_input"),
               colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF0F141E),
-                unfocusedContainerColor = Color(0xFF0F141E),
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
                 focusedBorderColor = Color(0xFF10B981),
-                unfocusedBorderColor = Color(0xFF1F2637),
+                unfocusedBorderColor = Color.Transparent,
                 focusedTextColor = Color(0xFFF8FAFC),
                 unfocusedTextColor = Color(0xFFF8FAFC)
               ),
-              shape = RoundedCornerShape(12.dp),
+              shape = RoundedCornerShape(8.dp),
               singleLine = true
             )
           }
+        }
+      }
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      // Friday Live Duration Preview Pill
+      val totalFriMins = fridayDurationHours * 60 + fridayDurationMins
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "FRIDAY DURATION PREVIEW",
+          fontSize = 10.sp,
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          color = Color(0xFF64748B)
+        )
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF10B981).copy(alpha = 0.12f))
+            .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f)), RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+          Text(
+            text = "${fridayDurationHours}h ${fridayDurationMins}m ($totalFriMins mins total)",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = Color(0xFF6EE7B7)
+          )
         }
       }
 
@@ -2382,8 +2463,8 @@ private fun AnchorEditSection(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF121620)
+          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF0A0F1D)
       ) {
         Column(modifier = Modifier.padding(14.dp)) {
           Row(
@@ -2392,56 +2473,166 @@ private fun AnchorEditSection(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
-              Spacer(modifier = Modifier.width(8.dp))
-              Text(text = "Friday Voice Announcement", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+              Box(
+                modifier = Modifier
+                  .size(28.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                  contentDescription = null,
+                  tint = Color(0xFF10B981),
+                  modifier = Modifier.size(15.dp)
+                )
+              }
+              Spacer(modifier = Modifier.width(10.dp))
+              Text(
+                text = "FRIDAY VOICE ANNOUNCEMENT",
+                color = Color(0xFFE2E8F0),
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp
+              )
             }
+
+            Switch(
+              checked = isVoiceEnabled,
+              onCheckedChange = onIsVoiceEnabledChange,
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF10B981),
+                uncheckedThumbColor = Color(0xFF94A3B8),
+                uncheckedTrackColor = Color(0xFF1E2C45)
+              ),
+              modifier = Modifier.testTag("friday_voice_switch")
+            )
           }
 
-          Spacer(modifier = Modifier.height(10.dp))
+          if (isVoiceEnabled) {
+            Spacer(modifier = Modifier.height(10.dp))
 
-          OutlinedTextField(
-            value = fridayVoiceMessage,
-            onValueChange = onFridayVoiceMessageChange,
-            placeholder = { Text("কাস্টম ভয়েস মেসেজ লিখুন...", color = TextTertiary) },
-            trailingIcon = {
-              IconButton(onClick = onTestFridayVoice, modifier = Modifier.testTag("test_friday_voice_button")) {
-                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Friday Voice", tint = Color(0xFF6EE7B7))
-              }
-            },
-            modifier = Modifier.fillMaxWidth().testTag("friday_voice_message_input"),
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedContainerColor = Color(0xFF0F141E),
-              unfocusedContainerColor = Color(0xFF0F141E),
-              focusedBorderColor = Color(0xFF10B981),
-              unfocusedBorderColor = Color(0xFF1F2637),
-              focusedTextColor = Color(0xFFF8FAFC),
-              unfocusedTextColor = Color(0xFFF8FAFC)
-            ),
-            shape = RoundedCornerShape(12.dp)
-          )
+            OutlinedTextField(
+              value = fridayVoiceMessage,
+              onValueChange = onFridayVoiceMessageChange,
+              placeholder = { Text("কাস্টম ভয়েস মেসেজ লিখুন...", color = Color(0xFF475569)) },
+              trailingIcon = {
+                IconButton(onClick = onTestFridayVoice, modifier = Modifier.testTag("test_friday_voice_button")) {
+                  Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Test Friday Voice",
+                    tint = Color(0xFF6EE7B7)
+                  )
+                }
+              },
+              modifier = Modifier.fillMaxWidth().testTag("friday_voice_message_input"),
+              colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color(0xFF0F172A),
+                unfocusedContainerColor = Color(0xFF0F172A),
+                focusedBorderColor = Color(0xFF10B981),
+                unfocusedBorderColor = Color(0xFF1E2C45),
+                focusedTextColor = Color(0xFFF8FAFC),
+                unfocusedTextColor = Color(0xFFF8FAFC)
+              ),
+              shape = RoundedCornerShape(12.dp)
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Volume Slider
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.VolumeMute,
+                contentDescription = null,
+                tint = Color(0xFF64748B),
+                modifier = Modifier.size(16.dp)
+              )
+              Slider(
+                value = voiceVolume,
+                onValueChange = onVoiceVolumeChange,
+                valueRange = 0f..1f,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                colors = SliderDefaults.colors(
+                  thumbColor = Color(0xFF10B981),
+                  activeTrackColor = Color(0xFF10B981),
+                  inactiveTrackColor = Color(0xFF1E2C45)
+                )
+              )
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = null,
+                tint = Color(0xFF10B981),
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "${(voiceVolume * 100).roundToInt()}%",
+                color = Color(0xFF94A3B8),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+              )
+            }
+          } else {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = "Spoken reminders disabled for this anchor",
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace,
+              color = Color(0xFF64748B)
+            )
+          }
         }
       }
     } else {
       // -----------------------------------------------------------
       // REGULAR DAYS / STANDARD ANCHOR FORM
       // -----------------------------------------------------------
-      Text(
-        text = "Anchor Title",
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Color(0xFF94A3B8)
-      )
-      Spacer(modifier = Modifier.height(6.dp))
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "ANCHOR TITLE",
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          letterSpacing = 1.sp,
+          color = Color(0xFF94A3B8)
+        )
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(accentColor.copy(alpha = 0.15f))
+            .border(BorderStroke(1.dp, accentColor.copy(alpha = 0.4f)), RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+          Text(
+            text = "SLOT $slotNum",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = accentLight
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(8.dp))
+
       OutlinedTextField(
         value = title,
         onValueChange = onTitleChange,
+        placeholder = { Text("e.g. Core Anchor Slot $slotNum", color = Color(0xFF475569)) },
         modifier = Modifier.fillMaxWidth().testTag("task_title_input"),
         colors = OutlinedTextFieldDefaults.colors(
-          focusedContainerColor = Color(0xFF121620),
-          unfocusedContainerColor = Color(0xFF121620),
-          focusedBorderColor = AnchorGradientStart,
-          unfocusedBorderColor = Color(0xFF1F2637),
+          focusedContainerColor = Color(0xFF0A0F1D),
+          unfocusedContainerColor = Color(0xFF0A0F1D),
+          focusedBorderColor = accentColor,
+          unfocusedBorderColor = Color(0xFF1E2C45),
           focusedTextColor = Color(0xFFF8FAFC),
           unfocusedTextColor = Color(0xFFF8FAFC)
         ),
@@ -2452,142 +2643,77 @@ private fun AnchorEditSection(
       // Slot 1 & Slot 5: Start time is COMPLETELY HIDDEN
       if (!isSlot1 && !isSlot5) {
         Spacer(modifier = Modifier.height(14.dp))
-        Text(
-          text = if (isSlot3) "Regular Start Time (Sat-Thu)" else "Anchor Start Time",
-          fontSize = 12.sp,
-          fontWeight = FontWeight.SemiBold,
-          color = Color(0xFF94A3B8)
-        )
-        Spacer(modifier = Modifier.height(6.dp))
 
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp))
-          .clickable { onOpenClock() }
-          .testTag("open_time_picker_button"),
-          color = Color(0xFF121620)
+        // Standard 3-Box Start Time & Duration Matrix
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          Row(
+          // Start Time Box
+          Surface(
             modifier = Modifier
-              .fillMaxWidth()
-              .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+              .weight(1.3f)
+              .clip(RoundedCornerShape(14.dp))
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+              .clickable { onOpenClock() }
+              .testTag("open_time_picker_button"),
+            color = Color(0xFF0A0F1D)
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(20.dp))
-              Spacer(modifier = Modifier.width(10.dp))
-              Column {
+            Column(modifier = Modifier.padding(10.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
                 Text(
-                  text = RoutineTask.formatTime(startHour * 60 + startMinute),
-                  fontSize = 18.sp,
+                  text = "START TIME",
+                  fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
-                  color = TextPrimary
+                  fontFamily = FontFamily.Monospace,
+                  letterSpacing = 0.5.sp,
+                  color = Color(0xFF94A3B8)
                 )
-                Text(
-                  text = "24h: ${String.format(Locale.US, "%02d:%02d", startHour, startMinute)} • Tap to open watch dial",
-                  fontSize = 11.sp,
-                  color = TextSecondary
+                Icon(
+                  imageVector = Icons.Default.Schedule,
+                  contentDescription = null,
+                  tint = accentColor,
+                  modifier = Modifier.size(14.dp)
                 )
               }
-            }
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(AnchorGradientStart.copy(alpha = 0.2f))
-                .padding(horizontal = 8.dp, vertical = 5.dp)
-            ) {
-              Text(text = "Change 🕒", color = Color(0xFFA5B4FC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-          }
-        }
-      }
-
-      if (isSlot1) {
-        Spacer(modifier = Modifier.height(14.dp))
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF1E1B4B).copy(alpha = 0.4f))
-            .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.3f)), RoundedCornerShape(14.dp)),
-          color = Color.Transparent
-        ) {
-          Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.Bedtime, contentDescription = null, tint = Color(0xFFA5B4FC), modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-              text = "Bedtime is mathematically computed backwards from Slot 2 wake time minus your Sleep Duration.",
-              fontSize = 11.sp,
-              color = Color(0xFFE0E7FF),
-              lineHeight = 16.sp
-            )
-          }
-        }
-      }
-
-      if (isSlot5) {
-        Spacer(modifier = Modifier.height(14.dp))
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(WarningAmber.copy(alpha = 0.1f))
-            .border(BorderStroke(1.dp, WarningAmber.copy(alpha = 0.3f)), RoundedCornerShape(14.dp)),
-          color = Color.Transparent
-        ) {
-          Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.Shield, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-              text = "Slot 5 Start Time and Duration are locked. The engine automatically spans 100% of the duration between Slot 4 completion and Slot 6 commencement on active days.",
-              fontSize = 11.sp,
-              color = Color(0xFFFEF3C7),
-              lineHeight = 16.sp
-            )
-          }
-        }
-      }
-
-      // Duration Section: Completely hidden for Slot 5; Only numeric [H] & [M] inputs for all other anchors
-      if (!isSlot5) {
-        Spacer(modifier = Modifier.height(14.dp))
-        Text(
-          text = if (isSlot1) "Sleep Duration" else if (isSlot3) "Regular Duration (Sat-Thu)" else "Duration",
-          fontSize = 12.sp,
-          fontWeight = FontWeight.SemiBold,
-          color = Color(0xFF94A3B8)
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-          color = Color(0xFF121620)
-        ) {
-          Column(modifier = Modifier.padding(14.dp)) {
-            val totalMins = durationHours * 60 + durationMins
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(imageVector = Icons.Default.AccessTime, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(18.dp))
-              Spacer(modifier = Modifier.width(8.dp))
+              Spacer(modifier = Modifier.height(6.dp))
               Text(
-                text = "${durationHours}h ${durationMins}m ($totalMins mins)",
-                fontSize = 16.sp,
+                text = RoutineTask.formatTime(startHour * 60 + startMinute),
+                fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                color = Color(0xFFF8FAFC)
+              )
+              Text(
+                text = "24h: ${String.format(Locale.US, "%02d:%02d", startHour, startMinute)} • Tap to dial",
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFF64748B)
               )
             }
+          }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+          // Duration Hours Box
+          Surface(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(14.dp))
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+            color = Color(0xFF0A0F1D)
+          ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+              Text(
+                text = "HOURS",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.5.sp,
+                color = Color(0xFF94A3B8)
+              )
+              Spacer(modifier = Modifier.height(4.dp))
               OutlinedTextField(
                 value = hoursInput,
                 onValueChange = { raw ->
@@ -2595,21 +2721,41 @@ private fun AnchorEditSection(
                   hoursInput = clean
                   onDurationHoursChange(parsed.coerceIn(0, 12))
                 },
-                label = { Text("Hours") },
+                suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f).testTag("duration_hours_input"),
+                modifier = Modifier.fillMaxWidth().testTag("duration_hours_input"),
                 colors = OutlinedTextFieldDefaults.colors(
-                  focusedContainerColor = Color(0xFF0F141E),
-                  unfocusedContainerColor = Color(0xFF0F141E),
-                  focusedBorderColor = AnchorGradientStart,
-                  unfocusedBorderColor = Color(0xFF1F2637),
+                  focusedContainerColor = Color.Transparent,
+                  unfocusedContainerColor = Color.Transparent,
+                  focusedBorderColor = accentColor,
+                  unfocusedBorderColor = Color.Transparent,
                   focusedTextColor = Color(0xFFF8FAFC),
                   unfocusedTextColor = Color(0xFFF8FAFC)
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(8.dp),
                 singleLine = true
               )
+            }
+          }
 
+          // Duration Minutes Box
+          Surface(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(14.dp))
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+            color = Color(0xFF0A0F1D)
+          ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+              Text(
+                text = "MINS",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.5.sp,
+                color = Color(0xFF94A3B8)
+              )
+              Spacer(modifier = Modifier.height(4.dp))
               OutlinedTextField(
                 value = minsInput,
                 onValueChange = { raw ->
@@ -2617,19 +2763,274 @@ private fun AnchorEditSection(
                   minsInput = clean
                   onDurationMinsChange(parsed.coerceIn(0, 59))
                 },
-                label = { Text("Minutes") },
+                suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f).testTag("duration_mins_input"),
+                modifier = Modifier.fillMaxWidth().testTag("duration_mins_input"),
                 colors = OutlinedTextFieldDefaults.colors(
-                  focusedContainerColor = Color(0xFF0F141E),
-                  unfocusedContainerColor = Color(0xFF0F141E),
-                  focusedBorderColor = AnchorGradientStart,
-                  unfocusedBorderColor = Color(0xFF1F2637),
+                  focusedContainerColor = Color.Transparent,
+                  unfocusedContainerColor = Color.Transparent,
+                  focusedBorderColor = accentColor,
+                  unfocusedBorderColor = Color.Transparent,
                   focusedTextColor = Color(0xFFF8FAFC),
                   unfocusedTextColor = Color(0xFFF8FAFC)
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(8.dp),
                 singleLine = true
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Dynamic Duration Preview Pill
+        val currentTotalMins = durationHours * 60 + durationMins
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = "DURATION PREVIEW",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = Color(0xFF64748B)
+          )
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(8.dp))
+              .background(accentColor.copy(alpha = 0.12f))
+              .border(BorderStroke(1.dp, accentColor.copy(alpha = 0.3f)), RoundedCornerShape(8.dp))
+              .padding(horizontal = 8.dp, vertical = 3.dp)
+          ) {
+            Text(
+              text = "${durationHours}h ${durationMins}m ($currentTotalMins mins total)",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace,
+              color = accentLight
+            )
+          }
+        }
+      }
+
+      // Slot 1 Informational Note Regarding Bedtime Calculation & Sleep Duration Numeric Box
+      if (isSlot1) {
+        Spacer(modifier = Modifier.height(14.dp))
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0A0F1D))
+            .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.35f)), RoundedCornerShape(16.dp)),
+          color = Color.Transparent
+        ) {
+          Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Box(
+              modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF6366F1).copy(alpha = 0.15f)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.Default.Bedtime,
+                contentDescription = null,
+                tint = Color(0xFFA5B4FC),
+                modifier = Modifier.size(20.dp)
+              )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+              Text(
+                text = "REVERSE BEDTIME CALCULATION",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFFA5B4FC)
+              )
+              Spacer(modifier = Modifier.height(2.dp))
+              Text(
+                text = "Bedtime is mathematically computed backwards from Slot 2 wake time minus your Sleep Duration.",
+                fontSize = 11.sp,
+                color = Color(0xFFE0E7FF),
+                lineHeight = 16.sp
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Side-by-Side Numeric Inputs for Sleep Duration
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          Surface(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(14.dp))
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+            color = Color(0xFF0A0F1D)
+          ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+              Text(
+                text = "SLEEP HOURS",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.5.sp,
+                color = Color(0xFF94A3B8)
+              )
+              Spacer(modifier = Modifier.height(4.dp))
+              OutlinedTextField(
+                value = hoursInput,
+                onValueChange = { raw ->
+                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                  hoursInput = clean
+                  onDurationHoursChange(parsed.coerceIn(0, 12))
+                },
+                suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth().testTag("duration_hours_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = Color.Transparent,
+                  unfocusedContainerColor = Color.Transparent,
+                  focusedBorderColor = Color(0xFF6366F1),
+                  unfocusedBorderColor = Color.Transparent,
+                  focusedTextColor = Color(0xFFF8FAFC),
+                  unfocusedTextColor = Color(0xFFF8FAFC)
+                ),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true
+              )
+            }
+          }
+
+          Surface(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(14.dp))
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+            color = Color(0xFF0A0F1D)
+          ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+              Text(
+                text = "SLEEP MINS",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 0.5.sp,
+                color = Color(0xFF94A3B8)
+              )
+              Spacer(modifier = Modifier.height(4.dp))
+              OutlinedTextField(
+                value = minsInput,
+                onValueChange = { raw ->
+                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                  minsInput = clean
+                  onDurationMinsChange(parsed.coerceIn(0, 59))
+                },
+                suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth().testTag("duration_mins_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = Color.Transparent,
+                  unfocusedContainerColor = Color.Transparent,
+                  focusedBorderColor = Color(0xFF6366F1),
+                  unfocusedBorderColor = Color.Transparent,
+                  focusedTextColor = Color(0xFFF8FAFC),
+                  unfocusedTextColor = Color(0xFFF8FAFC)
+                ),
+                shape = RoundedCornerShape(8.dp),
+                singleLine = true
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        val totalSleepMins = durationHours * 60 + durationMins
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = "TARGET SLEEP QUOTA",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = Color(0xFF64748B)
+          )
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(8.dp))
+              .background(Color(0xFF6366F1).copy(alpha = 0.15f))
+              .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.35f)), RoundedCornerShape(8.dp))
+              .padding(horizontal = 8.dp, vertical = 3.dp)
+          ) {
+            Text(
+              text = "${durationHours}h ${durationMins}m ($totalSleepMins mins)",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace,
+              color = Color(0xFFA5B4FC)
+            )
+          }
+        }
+      }
+
+      // Slot 5 Informational Note Regarding 100% Elastic Spanning
+      if (isSlot5) {
+        Spacer(modifier = Modifier.height(14.dp))
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0A0F1D))
+            .border(BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.35f)), RoundedCornerShape(16.dp)),
+          color = Color.Transparent
+        ) {
+          Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Box(
+              modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.Default.Shield,
+                contentDescription = null,
+                tint = Color(0xFFF59E0B),
+                modifier = Modifier.size(20.dp)
+              )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+              Text(
+                text = "ACCORDION BUFFER GUARANTEE",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFFF59E0B)
+              )
+              Spacer(modifier = Modifier.height(2.dp))
+              Text(
+                text = "Slot 5 Start Time and Duration are locked. The engine automatically spans 100% of the duration between Slot 4 completion and Slot 6 commencement on active days.",
+                fontSize = 11.sp,
+                color = Color(0xFFFEF3C7),
+                lineHeight = 16.sp
               )
             }
           }
@@ -2643,8 +3044,8 @@ private fun AnchorEditSection(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF121620)
+          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF0A0F1D)
       ) {
         Column(modifier = Modifier.padding(14.dp)) {
           Row(
@@ -2653,258 +3054,183 @@ private fun AnchorEditSection(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(18.dp))
-              Spacer(modifier = Modifier.width(8.dp))
-              Text(text = "Voice Announcement", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-          }
-
-          Spacer(modifier = Modifier.height(10.dp))
-
-          OutlinedTextField(
-            value = voiceMessage,
-            onValueChange = onVoiceMessageChange,
-            placeholder = { Text("কাস্টম ভয়েস মেসেজ লিখুন...", color = TextTertiary) },
-            trailingIcon = {
-              IconButton(onClick = onTestVoice, modifier = Modifier.testTag("test_voice_button")) {
-                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Voice", tint = Color(0xFFA5B4FC))
-              }
-            },
-            modifier = Modifier.fillMaxWidth().testTag("voice_message_input"),
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedContainerColor = Color(0xFF0F141E),
-              unfocusedContainerColor = Color(0xFF0F141E),
-              focusedBorderColor = AnchorGradientStart,
-              unfocusedBorderColor = Color(0xFF1F2637),
-              focusedTextColor = Color(0xFFF8FAFC),
-              unfocusedTextColor = Color(0xFFF8FAFC)
-            ),
-            shape = RoundedCornerShape(12.dp)
-          )
-        }
-      }
-    }
-
-    // ==============================================================
-    // 2. HARDWARE TTS VOLUME SLIDER BINDING (ALL ANCHORS)
-    // ==============================================================
-    Spacer(modifier = Modifier.height(14.dp))
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(16.dp))
-        .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-      color = Color(0xFF121620)
-    ) {
-      Column(modifier = Modifier.padding(14.dp)) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-              contentDescription = null,
-              tint = Color(0xFF38BDF8),
-              modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-              text = "Speech Volume Output",
-              color = Color(0xFFF8FAFC),
-              fontWeight = FontWeight.Bold,
-              fontSize = 13.sp
-            )
-          }
-          Text(
-            text = "${(voiceVolume * 100).roundToInt()}%",
-            color = Color(0xFF38BDF8),
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace
-          )
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.VolumeMute,
-            contentDescription = null,
-            tint = Color(0xFF64748B),
-            modifier = Modifier.size(16.dp)
-          )
-          Slider(
-            value = voiceVolume,
-            onValueChange = onVoiceVolumeChange,
-            valueRange = 0f..1f,
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-            colors = SliderDefaults.colors(
-              thumbColor = Color(0xFF38BDF8),
-              activeTrackColor = Color(0xFF38BDF8),
-              inactiveTrackColor = Color(0xFF1E293B)
-            )
-          )
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-            contentDescription = null,
-            tint = Color(0xFF38BDF8),
-            modifier = Modifier.size(16.dp)
-          )
-        }
-      }
-    }
-
-    // ==============================================================
-    // 3. SYSTEM NOTIFICATION TONE PICKER & DND (ALL ANCHORS)
-    // ==============================================================
-    Spacer(modifier = Modifier.height(14.dp))
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(16.dp))
-        .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-      color = Color(0xFF121620)
-    ) {
-      Column(modifier = Modifier.padding(14.dp)) {
-        // DND Row
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.DoNotDisturbOn, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-              Text(text = "Do Not Disturb (DND)", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-              Text(text = if (enableDnd) "Engaged during this anchor" else "System alerts allowed", color = TextSecondary, fontSize = 10.sp)
-            }
-          }
-          Switch(
-            checked = enableDnd,
-            onCheckedChange = onEnableDndChange,
-            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF8B5CF6))
-          )
-        }
-
-        // Delayed DND for Anchor Slots 2, 3, 4, 6, 7
-        if (enableDnd && !isSlot1 && !isSlot5) {
-          Spacer(modifier = Modifier.height(10.dp))
-          Surface(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(12.dp))
-              .background(Color(0xFF0F141E))
-              .border(BorderStroke(1.dp, Color(0xFF2E1065)), RoundedCornerShape(12.dp)),
-            color = Color.Transparent
-          ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+              Box(
+                modifier = Modifier
+                  .size(28.dp)
+                  .clip(CircleShape)
+                  .background(accentColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
               ) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier.weight(1f)
-                ) {
-                  Icon(
-                    imageVector = Icons.Default.Schedule,
-                    contentDescription = null,
-                    tint = Color(0xFFC4B5FD),
-                    modifier = Modifier.size(16.dp)
-                  )
-                  Spacer(modifier = Modifier.width(8.dp))
-                  Text(
-                    text = "Auto-engage DND after:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFFE2E8F0)
-                  )
-                }
-
-                var delayInputText by remember(dndDelayMinutes) { mutableStateOf(dndDelayMinutes.toString()) }
-                OutlinedTextField(
-                  value = delayInputText,
-                  onValueChange = { raw ->
-                    val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                    delayInputText = clean
-                    onDndDelayMinutesChange(parsed.coerceIn(0, 25))
-                  },
-                  modifier = Modifier
-                    .width(88.dp)
-                    .testTag("anchor_dnd_delay_input"),
-                  trailingIcon = {
-                    Text(
-                      text = "min",
-                      fontSize = 10.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFF8B5CF6)
-                    )
-                  },
-                  singleLine = true,
-                  textStyle = androidx.compose.ui.text.TextStyle(
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFF8FAFC),
-                    textAlign = TextAlign.Center
-                  ),
-                  colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFF161B26),
-                    unfocusedContainerColor = Color(0xFF161B26),
-                    focusedBorderColor = Color(0xFF8B5CF6),
-                    unfocusedBorderColor = Color(0xFF1F2637),
-                    focusedTextColor = Color(0xFFF8FAFC),
-                    unfocusedTextColor = Color(0xFFF8FAFC)
-                  ),
-                  shape = RoundedCornerShape(10.dp)
+                Icon(
+                  imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                  contentDescription = null,
+                  tint = accentColor,
+                  modifier = Modifier.size(15.dp)
                 )
               }
-
-              Spacer(modifier = Modifier.height(6.dp))
+              Spacer(modifier = Modifier.width(10.dp))
               Text(
-                text = "0 = Immediate start • Max 25 mins delay after task begins",
-                fontSize = 10.sp,
-                color = Color(0xFF94A3B8),
-                lineHeight = 14.sp
+                text = "VOICE ANNOUNCEMENT",
+                color = Color(0xFFE2E8F0),
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp
               )
             }
+
+            Switch(
+              checked = isVoiceEnabled,
+              onCheckedChange = onIsVoiceEnabledChange,
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = accentColor,
+                uncheckedThumbColor = Color(0xFF94A3B8),
+                uncheckedTrackColor = Color(0xFF1E2C45)
+              ),
+              modifier = Modifier.testTag("anchor_voice_switch")
+            )
           }
-        }
 
-        Spacer(modifier = Modifier.height(12.dp))
-        HorizontalDivider(color = Color(0xFF1F2637))
-        Spacer(modifier = Modifier.height(12.dp))
+          if (isVoiceEnabled) {
+            Spacer(modifier = Modifier.height(10.dp))
 
-        // Sound Alert Row
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(imageVector = Icons.Default.MusicNote, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-              Text(text = "Notification Sound Alert", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-              Text(text = if (isSoundAlertEnabled) "Plays selected ringtone at initiation" else "Muted / Silent alert", color = TextSecondary, fontSize = 10.sp)
+            OutlinedTextField(
+              value = voiceMessage,
+              onValueChange = onVoiceMessageChange,
+              placeholder = { Text("কাস্টম ভয়েস মেসেজ লিখুন...", color = Color(0xFF475569)) },
+              trailingIcon = {
+                IconButton(onClick = onTestVoice, modifier = Modifier.testTag("test_voice_button")) {
+                  Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Test Voice",
+                    tint = accentLight
+                  )
+                }
+              },
+              modifier = Modifier.fillMaxWidth().testTag("voice_message_input"),
+              colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color(0xFF0F172A),
+                unfocusedContainerColor = Color(0xFF0F172A),
+                focusedBorderColor = accentColor,
+                unfocusedBorderColor = Color(0xFF1E2C45),
+                focusedTextColor = Color(0xFFF8FAFC),
+                unfocusedTextColor = Color(0xFFF8FAFC)
+              ),
+              shape = RoundedCornerShape(12.dp)
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Volume Slider
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.VolumeMute,
+                contentDescription = null,
+                tint = Color(0xFF64748B),
+                modifier = Modifier.size(16.dp)
+              )
+              Slider(
+                value = voiceVolume,
+                onValueChange = onVoiceVolumeChange,
+                valueRange = 0f..1f,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                colors = SliderDefaults.colors(
+                  thumbColor = accentColor,
+                  activeTrackColor = accentColor,
+                  inactiveTrackColor = Color(0xFF1E2C45)
+                )
+              )
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = null,
+                tint = accentColor,
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "${(voiceVolume * 100).roundToInt()}%",
+                color = Color(0xFF94A3B8),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+              )
             }
+          } else {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = "Spoken reminders disabled for this anchor",
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace,
+              color = Color(0xFF64748B)
+            )
           }
-          Switch(
-            checked = isSoundAlertEnabled,
-            onCheckedChange = onIsSoundAlertEnabledChange,
-            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF38BDF8))
-          )
         }
+      }
+    }
 
-        // Revealed Tone Selector & Play/Stop Preview Button
-        if (isSoundAlertEnabled) {
-          Spacer(modifier = Modifier.height(10.dp))
+    // ==============================================================
+    // 2. 2-COLUMN HARDWARE QUICK ACTION GRID (ALL ANCHORS)
+    // ==============================================================
+    Spacer(modifier = Modifier.height(14.dp))
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+      // Column 1: Task Alerts Card
+      Surface(
+        modifier = Modifier
+          .weight(1f)
+          .clip(RoundedCornerShape(16.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF0A0F1D)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Box(
+              modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.Default.MusicNote,
+                contentDescription = null,
+                tint = Color(0xFF06B6D4),
+                modifier = Modifier.size(16.dp)
+              )
+            }
+            Switch(
+              checked = isSoundAlertEnabled,
+              onCheckedChange = onIsSoundAlertEnabledChange,
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF06B6D4),
+                uncheckedThumbColor = Color(0xFF94A3B8),
+                uncheckedTrackColor = Color(0xFF1E2C45)
+              ),
+              modifier = Modifier.testTag("anchor_sound_switch")
+            )
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          Text(
+            text = "TASK ALERTS",
+            color = Color(0xFFE2E8F0),
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp
+          )
+
+          Spacer(modifier = Modifier.height(6.dp))
+
           Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -2912,59 +3238,176 @@ private fun AnchorEditSection(
             Surface(
               modifier = Modifier
                 .weight(1f)
-                .clip(RoundedCornerShape(10.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .clickable { onPickRingtone() }
                 .testTag("anchor_pick_ringtone_button"),
-              color = Color(0xFF0F141E)
+              color = Color(0xFF0F172A)
             ) {
-              Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Icon(
-                  imageVector = Icons.Default.MusicNote,
-                  contentDescription = null,
-                  tint = Color(0xFF60A5FA),
-                  modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                  text = customRingtoneTitle.take(24),
-                  color = Color(0xFFF8FAFC),
-                  fontSize = 12.sp,
-                  maxLines = 1,
-                  fontWeight = FontWeight.Medium
-                )
-              }
+              Text(
+                text = customRingtoneTitle.take(16),
+                color = Color(0xFF06B6D4),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+              )
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
 
-            // Play / Stop Tone Audio Preview
             IconButton(
               onClick = onToggleTonePreview,
               modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (isPlayingTonePreview) Color(0xFFEF4444).copy(alpha = 0.2f) else Color(0xFF38BDF8).copy(alpha = 0.2f))
-                .border(BorderStroke(1.dp, if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF38BDF8)), RoundedCornerShape(10.dp))
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                  if (isPlayingTonePreview) Color(0xFFEF4444).copy(alpha = 0.2f)
+                  else Color(0xFF06B6D4).copy(alpha = 0.15f)
+                )
+                .border(
+                  BorderStroke(
+                    1.dp,
+                    if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF06B6D4)
+                  ),
+                  RoundedCornerShape(8.dp)
+                )
                 .testTag("anchor_preview_tone_button")
             ) {
               Icon(
                 imageVector = if (isPlayingTonePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
-                contentDescription = if (isPlayingTonePreview) "Stop Tone Preview" else "Play Tone Preview",
-                tint = if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF38BDF8),
-                modifier = Modifier.size(20.dp)
+                contentDescription = if (isPlayingTonePreview) "Stop Preview" else "Play Preview",
+                tint = if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF06B6D4),
+                modifier = Modifier.size(16.dp)
               )
             }
+          }
+        }
+      }
+
+      // Column 2: Auto DND Card
+      Surface(
+        modifier = Modifier
+          .weight(1f)
+          .clip(RoundedCornerShape(16.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF0A0F1D)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Box(
+              modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF8B5CF6).copy(alpha = 0.15f)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.Default.DoNotDisturbOn,
+                contentDescription = null,
+                tint = Color(0xFF8B5CF6),
+                modifier = Modifier.size(16.dp)
+              )
+            }
+            Switch(
+              checked = enableDnd,
+              onCheckedChange = onEnableDndChange,
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF8B5CF6),
+                uncheckedThumbColor = Color(0xFF94A3B8),
+                uncheckedTrackColor = Color(0xFF1E2C45)
+              ),
+              modifier = Modifier.testTag("anchor_dnd_switch")
+            )
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          Text(
+            text = "AUTO DND",
+            color = Color(0xFFE2E8F0),
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp
+          )
+
+          Spacer(modifier = Modifier.height(4.dp))
+
+          if (isSlot1 || isSlot5) {
+            Text(
+              text = "Locked: 0m (Immediate)",
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace,
+              color = Color(0xFF94A3B8)
+            )
+          } else if (enableDnd) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text(
+                text = "DELAY",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFFC4B5FD)
+              )
+
+              var delayInputText by remember(dndDelayMinutes) { mutableStateOf(dndDelayMinutes.toString()) }
+              OutlinedTextField(
+                value = delayInputText,
+                onValueChange = { raw ->
+                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                  delayInputText = clean
+                  onDndDelayMinutesChange(parsed.coerceIn(0, 25))
+                },
+                modifier = Modifier
+                  .width(68.dp)
+                  .testTag("anchor_dnd_delay_input"),
+                suffix = {
+                  Text(
+                    text = "m",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF8B5CF6)
+                  )
+                },
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFFF8FAFC),
+                  textAlign = TextAlign.Center
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = Color(0xFF0F172A),
+                  unfocusedContainerColor = Color(0xFF0F172A),
+                  focusedBorderColor = Color(0xFF8B5CF6),
+                  unfocusedBorderColor = Color(0xFF1E2C45),
+                  focusedTextColor = Color(0xFFF8FAFC),
+                  unfocusedTextColor = Color(0xFFF8FAFC)
+                ),
+                shape = RoundedCornerShape(8.dp)
+              )
+            }
+          } else {
+            Text(
+              text = "Alerts allowed",
+              fontSize = 10.sp,
+              color = Color(0xFF64748B)
+            )
           }
         }
       }
     }
 
     // ==============================================================
-    // 4. SLOT 5 (ELASTIC BUFFER) WEEKLY RECURRENCE SELECTOR
+    // 3. SLOT 5 (ELASTIC BUFFER) WEEKLY RECURRENCE SELECTOR
     // ==============================================================
     if (isSlot5) {
       Spacer(modifier = Modifier.height(14.dp))
@@ -2974,8 +3417,8 @@ private fun AnchorEditSection(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF121620)
+          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+        color = Color(0xFF0A0F1D)
       ) {
         Column(modifier = Modifier.padding(14.dp)) {
           Row(
@@ -2985,10 +3428,11 @@ private fun AnchorEditSection(
           ) {
             Column {
               Text(
-                text = "Recurrence Schedule",
+                text = "RECURRENCE SCHEDULE",
                 color = Color(0xFFF8FAFC),
                 fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp
               )
               Text(
                 text = if (isAllDaysSelected) "Buffer active all 7 days" else "Active on ${selectedDays.size} days",
@@ -3004,13 +3448,13 @@ private fun AnchorEditSection(
                   .clickable {
                     onSelectedDaysChange(RoutineDay.allDays())
                   },
-                color = if (isAllDaysSelected) Color(0xFF3B82F6) else Color(0xFF0F141E)
+                color = if (isAllDaysSelected) Color(0xFF06B6D4) else Color(0xFF0F172A)
               ) {
                 Text(
                   text = "Everyday",
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
-                  color = if (isAllDaysSelected) Color.White else Color(0xFF94A3B8),
+                  color = if (isAllDaysSelected) Color.Black else Color(0xFF94A3B8),
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
               }
@@ -3023,13 +3467,13 @@ private fun AnchorEditSection(
                       onSelectedDaysChange(setOf(RoutineDay.SATURDAY, RoutineDay.SUNDAY, RoutineDay.MONDAY, RoutineDay.TUESDAY, RoutineDay.WEDNESDAY, RoutineDay.THURSDAY))
                     }
                   },
-                color = if (!isAllDaysSelected) Color(0xFF3B82F6) else Color(0xFF0F141E)
+                color = if (!isAllDaysSelected) Color(0xFF06B6D4) else Color(0xFF0F172A)
               ) {
                 Text(
                   text = "Specific Days",
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
-                  color = if (!isAllDaysSelected) Color.White else Color(0xFF94A3B8),
+                  color = if (!isAllDaysSelected) Color.Black else Color(0xFF94A3B8),
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
               }
@@ -3056,9 +3500,9 @@ private fun AnchorEditSection(
                   modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(if (isDaySelected) Color(0xFF3B82F6) else Color(0xFF0F141E))
+                    .background(if (isDaySelected) Color(0xFF06B6D4) else Color(0xFF0F172A))
                     .border(
-                      BorderStroke(1.dp, if (isDaySelected) Color(0xFF60A5FA) else Color(0xFF1F2637)),
+                      BorderStroke(1.dp, if (isDaySelected) Color(0xFF22D3EE) else Color(0xFF1E2C45)),
                       CircleShape
                     )
                     .clickable {
@@ -3075,7 +3519,7 @@ private fun AnchorEditSection(
                     text = label,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isDaySelected) Color.White else Color(0xFF94A3B8)
+                    color = if (isDaySelected) Color.Black else Color(0xFF94A3B8)
                   )
                 }
               }

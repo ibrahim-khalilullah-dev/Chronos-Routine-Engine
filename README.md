@@ -123,6 +123,13 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 
 ---
 
+### 12. Streamlined Task Studio & Unified Voice Controls 🎙️
+- **Header Quick-Pill Ergonomics:** Direct header-integrated `Priority` and `Split` interactive toggle pills eliminate redundant cards and maximize screen real estate for thumb-friendly one-handed editing.
+- **Unified Voice Announcement Architecture:** Both `TaskModalBottomSheet` and `AnchorEditBottomSheet` feature dedicated ON/OFF switches with visual collapse across all 7 circadian anchors and Friday Jumu'ah mode. When toggled OFF, speech inputs and preview triggers collapse into a clean, scannable indicator (*"Spoken reminders disabled"*).
+- **Zero Auto-Splitting Architecture:** Tasks fit intact within available circadian gaps or cleanly route to the Overflow Pool without unexpected fragmentation.
+
+---
+
 ## 🛠️ Technology Stack
 
 | Layer | Technology | Rationale & Responsibility |
