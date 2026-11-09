@@ -832,23 +832,6 @@ fun DynamicTaskCard(
               modifier = Modifier.size(18.dp)
             )
           }
-
-          if (onDeleteClick != null) {
-            IconButton(
-              onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onDeleteClick(task)
-              },
-              modifier = Modifier.size(36.dp).testTag("delete_task_${task.id}")
-            ) {
-              Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Delete Task",
-                tint = DangerRed.copy(alpha = 0.8f),
-                modifier = Modifier.size(18.dp)
-              )
-            }
-          }
         }
       }
 

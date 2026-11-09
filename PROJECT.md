@@ -69,7 +69,7 @@
 |    ├── TimelineScreen.kt        (Stable task.id recycling, 60/120 FPS) |
 |    ├── AutomationCenterScreen.kt(Hardware telemetry & diagnostics)     |
 |    ├── SettingsScreen.kt        (24h Donut dial, 90d ratings, pause)   |
-|    ├── ConsoleTerminalScreen.kt (520dp Obsidian Studio, metrics, debounced)|
+|    ├── ConsoleTerminalScreen.kt (540dp Obsidian Studio, 1-click Copy, metrics)|
 |    └── TrashBinScreen.kt        (Soft-delete bin & 30-day purge)       |
 |                                                                        |
 |  Sheets & Components:                                                  |

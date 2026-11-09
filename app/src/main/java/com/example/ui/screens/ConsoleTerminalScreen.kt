@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
@@ -56,8 +57,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -92,6 +95,7 @@ fun ConsoleTerminalScreen(
   modifier: Modifier = Modifier
 ) {
   val haptic = LocalHapticFeedback.current
+  val clipboardManager = LocalClipboardManager.current
   BackHandler { onBack() }
 
   // Starts clean and empty with no preloaded dummy tasks
@@ -100,12 +104,13 @@ fun ConsoleTerminalScreen(
   }
   val consoleText = consoleTextFieldValue.text
 
-  // Real-time active typing line & syntax prediction
-  val currentCursor = consoleTextFieldValue.selection.end.coerceIn(0, consoleText.length)
-  val textBeforeCursor = consoleText.take(currentCursor)
-  val activeLine = textBeforeCursor.substringAfterLast('\n')
-  val ghostPrediction = remember(activeLine) {
-    ConsoleParser.getSyntaxPrediction(activeLine)
+  // 1-Click Copy feedback state
+  var showCopiedFeedback by remember { mutableStateOf(false) }
+  LaunchedEffect(showCopiedFeedback) {
+    if (showCopiedFeedback) {
+      delay(2000)
+      showCopiedFeedback = false
+    }
   }
 
   // Debounced parsing (250ms) offloaded to Dispatchers.Default to eliminate typing latency
@@ -353,12 +358,43 @@ fun ConsoleTerminalScreen(
 
     Spacer(modifier = Modifier.height(10.dp))
 
-    // Compact Clear Button (Shown only when editor has text)
+    // Action Bar: 1-Click Copy & Clear Buttons (Shown only when editor has text)
     if (consoleText.isNotBlank()) {
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        verticalAlignment = Alignment.CenterVertically
       ) {
+        // 1-Click Copy Button
+        OutlinedButton(
+          onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            clipboardManager.setText(AnnotatedString(consoleText))
+            showCopiedFeedback = true
+          },
+          modifier = Modifier.testTag("copy_console_button"),
+          shape = RoundedCornerShape(12.dp),
+          border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
+          colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = Color(0xFF06B6D4).copy(alpha = 0.08f)
+          )
+        ) {
+          Icon(
+            imageVector = Icons.Default.ContentCopy,
+            contentDescription = "Copy Script",
+            modifier = Modifier.size(14.dp),
+            tint = Color(0xFF06B6D4)
+          )
+          Spacer(modifier = Modifier.width(5.dp))
+          Text(
+            text = if (showCopiedFeedback) "Copied! ✓" else "Copy",
+            color = Color(0xFF06B6D4),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+          )
+        }
+
+        // Clear Button
         OutlinedButton(
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -370,7 +406,7 @@ fun ConsoleTerminalScreen(
         ) {
           Icon(
             imageVector = Icons.Default.Clear,
-            contentDescription = null,
+            contentDescription = "Clear Console",
             modifier = Modifier.size(14.dp),
             tint = TextSecondary
           )
@@ -382,7 +418,7 @@ fun ConsoleTerminalScreen(
     }
 
     // ==============================================================
-    // 3. ULTRA-SPACIOUS OBSIDIAN CODE STUDIO (Min 540dp Height)
+    // 3. ULTRA-SPACIOUS OBSIDIAN CODE STUDIO (Clean Monospace Text)
     // ==============================================================
     Surface(
       modifier = Modifier
@@ -465,65 +501,6 @@ fun ConsoleTerminalScreen(
             ),
             shape = RoundedCornerShape(12.dp)
           )
-        }
-
-        // Intelligent Inline Ghost Text (Context-Aware Syntax Autocomplete Prediction)
-        if (!ghostPrediction.isNullOrBlank()) {
-          Spacer(modifier = Modifier.height(8.dp))
-          Surface(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(10.dp))
-              .border(BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.45f)), RoundedCornerShape(10.dp))
-              .clickable {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                val newText = textBeforeCursor + ghostPrediction + consoleText.drop(currentCursor)
-                val newCursor = currentCursor + ghostPrediction.length
-                consoleTextFieldValue = TextFieldValue(newText, TextRange(newCursor))
-              }
-              .testTag("ghost_syntax_prediction_bar"),
-            color = Color(0xFF0F172A)
-          ) {
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-              Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = "Ghost: ",
-                  color = Color(0xFF06B6D4),
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace
-                )
-                Text(
-                  text = activeLine,
-                  color = Color(0xFFF8FAFC),
-                  fontSize = 11.sp,
-                  fontFamily = FontFamily.Monospace
-                )
-                Text(
-                  text = ghostPrediction,
-                  color = Color(0xFF64748B),
-                  fontSize = 11.sp,
-                  fontFamily = FontFamily.Monospace
-                )
-              }
-              Spacer(modifier = Modifier.width(8.dp))
-              Text(
-                text = "Tap to Complete ⇥",
-                color = Color(0xFF38BDF8),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
-              )
-            }
-          }
         }
       }
     }
