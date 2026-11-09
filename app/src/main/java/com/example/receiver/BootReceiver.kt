@@ -12,6 +12,7 @@ class BootReceiver : BroadcastReceiver() {
       action == Intent.ACTION_MY_PACKAGE_REPLACED ||
       action == "android.intent.action.QUICKBOOT_POWERON" ||
       action == Intent.ACTION_TIME_CHANGED ||
+      action == "android.intent.action.TIME_SET" ||
       action == Intent.ACTION_TIMEZONE_CHANGED
     ) {
       AutomationManager.rescheduleAllAlarms(context)

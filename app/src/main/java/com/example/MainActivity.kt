@@ -289,6 +289,9 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
         NavigationTab.CONSOLE -> {
           ConsoleTerminalScreen(
             anchors = anchors,
+            dynamicTasks = dynamicTasks,
+            sleepDurationMinutes = sleepDurationMinutes,
+            bufferMinutes = bufferMinutes,
             onApplyTasks = { newTasks, replaceAll, parsedAnchors ->
               viewModel.applyBulkConsoleTasks(newTasks, replaceAll, parsedAnchors)
               viewModel.selectTab(NavigationTab.TIMELINE)

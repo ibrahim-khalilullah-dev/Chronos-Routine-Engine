@@ -250,4 +250,26 @@ class ExampleUnitTest {
     assertTrue(slot7.enableDnd)
     assertEquals(10, slot7.dndDelayMinutes)
   }
+
+  @Test
+  fun testDynamicParsingWithPriorityToken() {
+    val script = """
+      High Priority Task | 45 | 10:00 | Y | ALL | Y | High focus session | 15 | 5 | Y
+      Standard Task | 30 | 11:00 | N | ALL | Y | Normal task | 0 | 5 | N
+      Legacy Backward Compatible Task | 20 | 12:00 | N | ALL | Y | Legacy task | 0 | 5
+    """.trimIndent()
+
+    val result = ConsoleParser.parse(script)
+    assertEquals(0, result.errorCount)
+    assertEquals(3, result.validTasks.size)
+
+    val t1 = result.validTasks[0]
+    assertTrue(t1.isHighPriority)
+
+    val t2 = result.validTasks[1]
+    assertFalse(t2.isHighPriority)
+
+    val t3 = result.validTasks[2]
+    assertFalse(t3.isHighPriority)
+  }
 }

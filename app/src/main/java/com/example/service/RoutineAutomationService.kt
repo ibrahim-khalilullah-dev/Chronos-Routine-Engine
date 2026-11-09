@@ -160,12 +160,11 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     }
 
     if (intent.action == AutomationManager.ACTION_APPLY_DND) {
-      val targetTaskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
-      if (activeTaskId == targetTaskId && AutomationManager.isDndPermissionGranted(this)) {
+      if (AutomationManager.isDndPermissionGranted(this)) {
         currentDndApplied = AutomationManager.setDndMode(this, true)
         _serviceState.value = _serviceState.value.copy(isDndActive = currentDndApplied)
       }
-      return START_STICKY
+      return START_NOT_STICKY
     }
 
     val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID) ?: "task_${System.currentTimeMillis()}"

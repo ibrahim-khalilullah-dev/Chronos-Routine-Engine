@@ -291,7 +291,7 @@ fun TimelineScreen(
       // Scheduled items: 7 Anchors and fitted Dynamic Tasks
       itemsIndexed(
         items = scheduleResult.scheduledTasks,
-        key = { index, task -> "${task.id}_${task.slotNumber ?: ""}_${task.startTimeMinute}_$index" }
+        key = { _, task -> task.id }
       ) { _, task ->
         when (task.type) {
           TaskType.ANCHOR_SLEEP,
@@ -675,7 +675,6 @@ fun OneUiHeader(
     modifier = Modifier
       .fillMaxWidth()
       .padding(top = 8.dp, bottom = 8.dp)
-      .animateContentSize()
   ) {
     // Top Row: App Title & Subtitle (Clean One UI 6/7)
     Column(

@@ -58,16 +58,18 @@
 |                                                                        |
 |  [ RoutineViewModel.kt ]                                              |
 |    - Holds reactive UI state (StateFlow)                               |
+|    - Decoupled rawScheduleResult on Dispatchers.Default from 15s clock |
+|    - Lightweight sorting StateFlow derived without re-scheduling       |
 |    - Enforces thread-safe mutations via Mutex (scheduleMutex)          |
 |    - Coordinates SchedulerEngine and RoutineRepository                |
 |    - Midnight date rollover auto-shift monitor                         |
 |    - Fluid Twin Absorption engine (Delete Both / Absorb Time)         |
 |                                                                        |
 |  Screens:                                                              |
-|    ├── TimelineScreen.kt        (Interactive schedule, crash-proof key)|
+|    ├── TimelineScreen.kt        (Stable task.id recycling, 60/120 FPS) |
 |    ├── AutomationCenterScreen.kt(Hardware telemetry & diagnostics)     |
 |    ├── SettingsScreen.kt        (24h Donut dial, 90d ratings, pause)   |
-|    ├── ConsoleTerminalScreen.kt (Monospace CLI with flex-safe counters)|
+|    ├── ConsoleTerminalScreen.kt (520dp Obsidian Studio, metrics, debounced)|
 |    └── TrashBinScreen.kt        (Soft-delete bin & 30-day purge)       |
 |                                                                        |
 |  Sheets & Components:                                                  |

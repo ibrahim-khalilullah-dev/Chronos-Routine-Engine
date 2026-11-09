@@ -441,15 +441,30 @@ object SchedulerEngine {
           if (available < MIN_FLUID_TWIN_MINUTES * 2) {
             overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor gap too small to host two 45m fluid twin sessions."))
             overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor gap too small to host two 45m fluid twin sessions."))
-          } else {
             var d1 = part1.durationMinutes.coerceIn(MIN_FLUID_TWIN_MINUTES, available - MIN_FLUID_TWIN_MINUTES)
             var d2 = (pool - d1).coerceIn(MIN_FLUID_TWIN_MINUTES, available - d1)
             if (d1 + d2 > available) {
               d1 = available / 2
               d2 = available - d1
             }
-            val start1 = gap1.startMinute
-            val start2 = start1 + d1 + interTaskBufferMinutes
+            val minStart1 = gap1.startMinute
+            val maxStart1 = gap1.endMinute - (d1 + interTaskBufferMinutes + d2)
+            val start1 = if (maxStart1 >= minStart1) {
+              part1.startTimeMinute.coerceIn(minStart1, maxStart1)
+            } else {
+              minStart1
+            }
+            val minStart2 = start1 + d1 + interTaskBufferMinutes
+            val maxStart2 = gap1.endMinute - d2
+            val start2 = if (maxStart2 >= minStart2) {
+              if (part2.startTimeMinute >= minStart2) {
+                part2.startTimeMinute.coerceIn(minStart2, maxStart2)
+              } else {
+                minStart2
+              }
+            } else {
+              minStart2
+            }
             scheduledTasks.add(part1.copy(startTimeMinute = start1, durationMinutes = d1, isSplitPart = false, isOverflow = false))
             scheduledTasks.add(part2.copy(startTimeMinute = start2, durationMinutes = d2, isSplitPart = false, isOverflow = false))
           }
@@ -491,9 +506,13 @@ object SchedulerEngine {
     }
 
     // 3. Schedule Standard Dynamic Tasks
+    val sortedStandardTasks = standardTasks.sortedWith(
+      compareByDescending<RoutineTask> { it.isHighPriority }
+        .thenBy { it.startTimeMinute }
+    )
     val anchorGaps = findAvailableGaps(dayAnchors, interTaskBufferMinutes)
 
-    for (dynamicTask in standardTasks) {
+    for (dynamicTask in sortedStandardTasks) {
       val gaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
       val requiredDuration = dynamicTask.durationMinutes
       val prefStart = dynamicTask.startTimeMinute
@@ -502,6 +521,8 @@ object SchedulerEngine {
       // High Priority Anchor Wall Fence: strictly confine to inter-anchor gap enclosing prefStart
       if (dynamicTask.isHighPriority) {
         val enclosingAnchorGap = anchorGaps.find { prefStart in it.startMinute until it.endMinute }
+          ?: anchorGaps.find { prefStart in it.startMinute..it.endMinute }
+          ?: anchorGaps.minByOrNull { Math.abs(prefStart - (it.startMinute + it.endMinute) / 2) }
         if (enclosingAnchorGap == null) {
           overflowTasks.add(
             dynamicTask.copy(

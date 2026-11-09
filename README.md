@@ -105,25 +105,33 @@ Manage temporary routine suspensions without deleting configured tasks:
 
 ---
 
-### 10. Quantified Self, 90-Day History & Circadian Visualizer 📊
-- **Two-Step Completion Evaluation:** Grade task execution quality from [0%] to [100%] in 25% increments (Poor, Fair, Good, Great, Masterful) with permanent 5-Star badges (★☆☆☆☆ through ★★★★★).
-- **90-Day Rating History:** Task ratings persist across app restarts and task updates with rolling decay auto-purge.
-- **24-Hour Circadian Donut Dial:** Interactive custom canvas dial rendering the full 1,440-minute day cycle with touch-to-inspect segment readouts.
-- **Interactive Progress Accordion:** Expand any category in Settings Analytics to inspect individual task ratings, durations, and timestamps.
+### 10. Deep-Sleep 2–3 Day Perpetual Alarm Chaining Engine 🛡️
+- **Perpetual Next-Cycle Chaining:** Upon task completion (`ACTION_END_TASK`), Chronos automatically calculates and queues the subsequent cycle for recurring dynamic tasks (7 days ahead) and anchors, maintaining a perpetual 2–3+ day horizon of exact hardware wakeups.
+- **Deep Doze Immunity:** Alarms survive aggressive OEM battery cleaners and multi-day deep Doze without requiring the user to open or foreground the app.
+- **Universal Clock & Boot Resynchronization:** Registers pending alarms using `setExactAndAllowWhileIdle` and `setAlarmClock` immediately upon reboot (`BOOT_COMPLETED`), application update (`MY_PACKAGE_REPLACED`), time change (`ACTION_TIME_SET`), and timezone change (`ACTION_TIMEZONE_CHANGED`).
 
 ---
 
-### 11. Monospace Obsidian Bulk Terminal CLI Engine 💻
-A developer-first, high-throughput monospace Obsidian terminal console with real-time syntax checking, non-wrapping flex-safe diagnostic counters, and inline context-aware ghost auto-prediction:
+### 11. 60/120 FPS Fluid Engine & Performance Architecture ⚡
+- **Decoupled Clock Ticker:** The 15-second clock ticker (`_currentMinute`) is completely decoupled from `SchedulerEngine.scheduleDay()`. Timeline computation executes strictly when routine data mutates and runs on `Dispatchers.Default`, eliminating unnecessary layout remeasurement and main-thread lag.
+- **Stable Item Keys:** LazyColumn recycling uses stable domain keys (`task.id`), completely eliminating element recreation and scroll stutter.
+- **Zero Stutter Layout:** Redundant layout passes and nested animation loops have been pruned for pristine 60/120 FPS fluid interaction.
+
+---
+
+### 12. Monospace Obsidian Terminal Studio CLI Engine (v2) 💻
+A developer-first, high-throughput monospace Obsidian terminal console with real-time debounced syntax parsing (250ms), active metrics diagnostic card, collapsible error accordion, and inline context-aware ghost auto-prediction:
 - **`ANCHOR` Directive:** `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Message` (plus Friday overrides for Slot 3).
 - **`TWIN` Directive:** `TWIN | TotalPool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND(Y/N) | Days | Flex | Rest`.
-- **`DYNAMIC` Directive:** `Task Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0/15/30) | Rest(0-30)`.
-- **Built-in Precision Islamic & Focus Routine:** 1-tap "Template" loads the complete Bengali circadian schedule with 7 fixed prayer/sleep anchors, Saturday–Thursday focus routines, and Friday special routines.
+- **`DYNAMIC` Directive (v2 with Priority):** `Task Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0-30) | Rest(0-30) | Priority(Y/N)`.
+- **Spacious 520dp Studio Layout:** High-contrast AMOLED obsidian dark styling (`#0B0E14`), hairline border (`#1E293B`), line-numbered gutter, and one-tap **"Load Live Backup"** empty-state card.
+- **One UI Active Metrics Row:** Real-time diagnostic cards tracking `Total Tasks`, `Anchors`, `Priority`, and `Syntax Status (Valid/Errors)`.
+- **Collapsible Error Accordion:** Clean chip-style error reporting preventing layout explosion during active typing.
 - **Dual Schedule Actions:** Gradient Cyan-to-Indigo `[ Append Tasks ]` and Gradient Amber-to-Red `[ Replace All ]`.
 
 ---
 
-### 12. Streamlined Task Studio & Unified Voice Controls 🎙️
+### 13. Streamlined Task Studio & Unified Voice Controls 🎙️
 - **Header Quick-Pill Ergonomics:** Direct header-integrated `Priority` and `Split` interactive toggle pills eliminate redundant cards and maximize screen real estate for thumb-friendly one-handed editing.
 - **Unified Voice Announcement Architecture:** Both `TaskModalBottomSheet` and `AnchorEditBottomSheet` feature dedicated ON/OFF switches with visual collapse across all 7 circadian anchors and Friday Jumu'ah mode. When toggled OFF, speech inputs and preview triggers collapse into a clean, scannable indicator (*"Spoken reminders disabled"*).
 - **Zero Auto-Splitting Architecture:** Tasks fit intact within available circadian gaps or cleanly route to the Overflow Pool without unexpected fragmentation.

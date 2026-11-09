@@ -13,17 +13,20 @@ import com.example.model.TaskType
 import com.example.service.ActiveAutomationState
 import com.example.service.AutomationManager
 import com.example.service.RoutineAutomationService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 import java.util.UUID
 
@@ -108,6 +111,25 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           lastKnownDay = currentDay
           _activeDay.value = currentDay
           repository.setActiveDay(currentDay)
+
+          // Reset any expired isPausedTodayOnly tasks
+          val updatedDynamics = _dynamicTasks.value.map {
+            if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
+          }
+          if (updatedDynamics != _dynamicTasks.value) {
+            _dynamicTasks.value = updatedDynamics
+            repository.saveDynamicTasks(updatedDynamics)
+          }
+
+          val updatedAnchors = _anchors.value.map {
+            if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
+          }
+          if (updatedAnchors != _anchors.value) {
+            _anchors.value = updatedAnchors
+            repository.saveAnchors(updatedAnchors)
+          }
+
+          AutomationManager.rescheduleAllAlarms(getApplication())
         }
         delay(15000L) // Refresh every 15 seconds
       }
@@ -141,60 +163,22 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     return cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
   }
 
-  val scheduleResult: StateFlow<ScheduleResult> = combine(
+  val rawScheduleResult: StateFlow<ScheduleResult> = combine(
     _anchors,
     _dynamicTasks,
     _activeDay,
-    _bufferMinutes,
-    _sortMode,
-    _currentMinute
-  ) { args: Array<Any?> ->
-    @Suppress("UNCHECKED_CAST")
-    val currentAnchors = args[0] as List<RoutineTask>
-    @Suppress("UNCHECKED_CAST")
-    val currentDynamics = args[1] as List<RoutineTask>
-    val day = args[2] as RoutineDay
-    val buffer = args[3] as Int
-    val sort = args[4] as TimelineSortMode
-    val currMin = args[5] as Int
-
+    _bufferMinutes
+  ) { currentAnchors, currentDynamics, day, buffer ->
     val activeDynamics = currentDynamics.filter { !it.isDeleted }
-    val rawResult = SchedulerEngine.scheduleDay(
-      anchors = currentAnchors,
-      dynamicTasks = activeDynamics,
-      activeDay = day,
-      interTaskBufferMinutes = buffer
-    )
-
-    val sortedScheduled = when (sort) {
-      TimelineSortMode.EARLIEST_START -> rawResult.scheduledTasks.sortedBy { it.startTimeMinute }
-      TimelineSortMode.LATEST_START -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute }
-      TimelineSortMode.LONGEST_DURATION -> rawResult.scheduledTasks.sortedByDescending { it.durationMinutes }
-      TimelineSortMode.SHORTEST_DURATION -> rawResult.scheduledTasks.sortedBy { it.durationMinutes }
-      TimelineSortMode.ACTIVE_FIRST -> {
-        val isToday = day == RoutineDay.today()
-        val active = rawResult.scheduledTasks.filter { com.example.ui.components.isTaskActiveAt(it, currMin, isToday) }
-        val upcoming = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute >= currMin }.sortedBy { it.startTimeMinute }
-        val completed = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute < currMin }.sortedBy { it.startTimeMinute }
-        active + upcoming + completed
-      }
-      TimelineSortMode.HORIZON_REVERSE -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute + it.durationMinutes }
-      TimelineSortMode.ANCHORS_TOP -> {
-        val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
-          it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
-        }
-        anchorsList.sortedBy { it.slotNumber ?: 0 } + dynamicsList.sortedBy { it.startTimeMinute }
-      }
-      TimelineSortMode.ANCHORS_BOTTOM -> {
-        val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
-          it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
-        }
-        dynamicsList.sortedBy { it.startTimeMinute } + anchorsList.sortedBy { it.slotNumber ?: 0 }
-      }
+    withContext(Dispatchers.Default) {
+      SchedulerEngine.scheduleDay(
+        anchors = currentAnchors,
+        dynamicTasks = activeDynamics,
+        activeDay = day,
+        interTaskBufferMinutes = buffer
+      )
     }
-
-    rawResult.copy(scheduledTasks = sortedScheduled)
-  }.stateIn(
+  }.flowOn(Dispatchers.Default).stateIn(
     scope = viewModelScope,
     started = SharingStarted.Eagerly,
     initialValue = SchedulerEngine.scheduleDay(
@@ -203,6 +187,47 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       _activeDay.value,
       _bufferMinutes.value
     )
+  )
+
+  val scheduleResult: StateFlow<ScheduleResult> = combine(
+    rawScheduleResult,
+    _sortMode,
+    _currentMinute,
+    _activeDay
+  ) { rawResult, sort, currMin, day ->
+    withContext(Dispatchers.Default) {
+      val sortedScheduled = when (sort) {
+        TimelineSortMode.EARLIEST_START -> rawResult.scheduledTasks.sortedBy { it.startTimeMinute }
+        TimelineSortMode.LATEST_START -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute }
+        TimelineSortMode.LONGEST_DURATION -> rawResult.scheduledTasks.sortedByDescending { it.durationMinutes }
+        TimelineSortMode.SHORTEST_DURATION -> rawResult.scheduledTasks.sortedBy { it.durationMinutes }
+        TimelineSortMode.ACTIVE_FIRST -> {
+          val isToday = day == RoutineDay.today()
+          val active = rawResult.scheduledTasks.filter { com.example.ui.components.isTaskActiveAt(it, currMin, isToday) }
+          val upcoming = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute >= currMin }.sortedBy { it.startTimeMinute }
+          val completed = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute < currMin }.sortedBy { it.startTimeMinute }
+          active + upcoming + completed
+        }
+        TimelineSortMode.HORIZON_REVERSE -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute + it.durationMinutes }
+        TimelineSortMode.ANCHORS_TOP -> {
+          val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
+            it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
+          }
+          anchorsList.sortedBy { it.slotNumber ?: 0 } + dynamicsList.sortedBy { it.startTimeMinute }
+        }
+        TimelineSortMode.ANCHORS_BOTTOM -> {
+          val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
+            it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
+          }
+          dynamicsList.sortedBy { it.startTimeMinute } + anchorsList.sortedBy { it.slotNumber ?: 0 }
+        }
+      }
+      rawResult.copy(scheduledTasks = sortedScheduled)
+    }
+  }.flowOn(Dispatchers.Default).stateIn(
+    scope = viewModelScope,
+    started = SharingStarted.Eagerly,
+    initialValue = rawScheduleResult.value
   )
 
   fun selectTab(tab: NavigationTab) {
@@ -721,6 +746,9 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         }
 
         val list = if (replaceExisting) {
+          _dynamicTasks.value.forEach {
+            AutomationManager.cancelTaskAlarms(getApplication(), it.id)
+          }
           newTasks
         } else {
           _dynamicTasks.value.filter { !it.isDeleted } + newTasks

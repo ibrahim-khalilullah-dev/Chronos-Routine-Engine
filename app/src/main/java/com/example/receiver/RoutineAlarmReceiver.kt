@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import com.example.service.AutomationManager
 import com.example.service.RoutineAutomationService
+import kotlinx.coroutines.launch
 
 class RoutineAlarmReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
@@ -22,15 +23,7 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
         }
       }
       AutomationManager.ACTION_APPLY_DND -> {
-        val serviceIntent = Intent(context, RoutineAutomationService::class.java).apply {
-          this.action = AutomationManager.ACTION_APPLY_DND
-          putExtras(intent)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-          context.startForegroundService(serviceIntent)
-        } else {
-          context.startService(serviceIntent)
-        }
+        AutomationManager.setDndMode(context, true)
       }
       AutomationManager.ACTION_END_TASK -> {
         val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
@@ -39,6 +32,12 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
           putExtra(AutomationManager.EXTRA_TASK_ID, taskId)
         }
         context.startService(stopIntent)
+
+        if (!taskId.isNullOrBlank()) {
+          kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            AutomationManager.rescheduleCompletedTaskNextCycle(context, taskId)
+          }
+        }
       }
     }
   }

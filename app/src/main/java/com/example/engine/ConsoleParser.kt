@@ -542,6 +542,12 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         }
       }
 
+      var isHighPriority = false
+      if (!isFluidTwin && tokens.size > 9) {
+        val prioToken = tokens[9].uppercase()
+        isHighPriority = prioToken in setOf("Y", "YES", "TRUE", "1")
+      }
+
       val task = RoutineTask(
         id = "dynamic_${UUID.randomUUID().toString().take(8)}",
         title = name,
@@ -552,6 +558,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         enableDnd = enableDnd,
         enableHaptic = true,
         allowSplitting = !isFluidTwin,
+        isHighPriority = isHighPriority,
         selectedDays = parsedDays,
         isVoiceEnabled = isVoiceEnabled,
         customNotificationTitle = name,
@@ -670,30 +677,99 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
     // Standard DYNAMIC branch
     val endsWithSpace = currentLine.endsWith(" ")
     return when (pipeCount) {
-      0 -> " | 45 | 10:00 | N | ALL | Y | Focus session | 15 | 5"
-      1 -> if (endsWithPipe) " 45 | 10:00 | N | ALL | Y | Focus session | 15 | 5"
-           else if (endsWithSpace) "| 10:00 | N | ALL | Y | Focus session | 15 | 5"
-           else " | 10:00 | N | ALL | Y | Focus session | 15 | 5"
-      2 -> if (endsWithPipe) " 10:00 | N | ALL | Y | Focus session | 15 | 5"
-           else if (endsWithSpace) "| N | ALL | Y | Focus session | 15 | 5"
-           else " | N | ALL | Y | Focus session | 15 | 5"
-      3 -> if (endsWithPipe) " N | ALL | Y | Focus session | 15 | 5"
-           else if (endsWithSpace) "| ALL | Y | Focus session | 15 | 5"
-           else " | ALL | Y | Focus session | 15 | 5"
-      4 -> if (endsWithPipe) " ALL | Y | Focus session | 15 | 5"
-           else if (endsWithSpace) "| Y | Focus session | 15 | 5"
-           else " | Y | Focus session | 15 | 5"
-      5 -> if (endsWithPipe) " Y | Focus session | 15 | 5"
-           else if (endsWithSpace) "| Focus session | 15 | 5"
-           else " | Focus session | 15 | 5"
-      6 -> if (endsWithPipe) " Focus session | 15 | 5"
-           else if (endsWithSpace) "| 15 | 5"
-           else " | 15 | 5"
-      7 -> if (endsWithPipe) " 15 | 5"
-           else if (endsWithSpace) "| 5"
-           else " | 5"
-      8 -> if (endsWithPipe) " 5" else null
+      0 -> " | 45 | 10:00 | N | ALL | Y | Focus session | 15 | 5 | N"
+      1 -> if (endsWithPipe) " 45 | 10:00 | N | ALL | Y | Focus session | 15 | 5 | N"
+           else if (endsWithSpace) "| 10:00 | N | ALL | Y | Focus session | 15 | 5 | N"
+           else " | 10:00 | N | ALL | Y | Focus session | 15 | 5 | N"
+      2 -> if (endsWithPipe) " 10:00 | N | ALL | Y | Focus session | 15 | 5 | N"
+           else if (endsWithSpace) "| N | ALL | Y | Focus session | 15 | 5 | N"
+           else " | N | ALL | Y | Focus session | 15 | 5 | N"
+      3 -> if (endsWithPipe) " N | ALL | Y | Focus session | 15 | 5 | N"
+           else if (endsWithSpace) "| ALL | Y | Focus session | 15 | 5 | N"
+           else " | ALL | Y | Focus session | 15 | 5 | N"
+      4 -> if (endsWithPipe) " ALL | Y | Focus session | 15 | 5 | N"
+           else if (endsWithSpace) "| Y | Focus session | 15 | 5 | N"
+           else " | Y | Focus session | 15 | 5 | N"
+      5 -> if (endsWithPipe) " Y | Focus session | 15 | 5 | N"
+           else if (endsWithSpace) "| Focus session | 15 | 5 | N"
+           else " | Focus session | 15 | 5 | N"
+      6 -> if (endsWithPipe) " Focus session | 15 | 5 | N"
+           else if (endsWithSpace) "| 15 | 5 | N"
+           else " | 15 | 5 | N"
+      7 -> if (endsWithPipe) " 15 | 5 | N"
+           else if (endsWithSpace) "| 5 | N"
+           else " | 5 | N"
+      8 -> if (endsWithPipe) " 5 | N"
+           else if (endsWithSpace) "| N"
+           else " | N"
+      9 -> if (endsWithPipe) " N" else null
       else -> null
     }
+  }
+
+  fun generateRoutineScript(
+    anchors: List<RoutineTask>,
+    dynamicTasks: List<RoutineTask>,
+    sleepMinutes: Int,
+    bufferMinutes: Int
+  ): String {
+    val sb = StringBuilder()
+    sb.appendLine("# ==============================================================")
+    sb.appendLine("# CHRONOS LIVE BACKUP ROUTINE SCRIPT")
+    sb.appendLine("# ==============================================================")
+    sb.appendLine("# SLEEP_MINUTES=$sleepMinutes")
+    sb.appendLine("# BUFFER_MINUTES=$bufferMinutes")
+    sb.appendLine()
+    sb.appendLine("# 1. THE 7 CIRCADIAN ANCHORS (Daily Fixed Boundaries)")
+
+    val sortedAnchors = anchors.sortedBy { it.slotNumber ?: 0 }
+    for (anchor in sortedAnchors) {
+      val slot = anchor.slotNumber ?: continue
+      val title = anchor.title
+      val timeStr = RoutineTask.formatTime24(anchor.startTimeMinute)
+      val duration = anchor.durationMinutes
+      val dndStr = if (anchor.enableDnd) "Y" else "N"
+      val delay = anchor.dndDelayMinutes
+      val voiceStr = if (anchor.isVoiceEnabled) "Y" else "N"
+      val voiceMsg = anchor.voiceMessage.ifBlank { "$title starting now." }
+
+      var line = "ANCHOR | $slot | $title | $timeStr | $duration | $dndStr | $delay | $voiceStr | $voiceMsg"
+
+      if (slot == 3 && (anchor.fridayTitle != null || anchor.fridayStartTimeMinute != null || anchor.fridayDurationMinutes != null || anchor.fridayVoiceMessage != null)) {
+        val friTitle = anchor.fridayTitle?.ifBlank { null } ?: "Jumu'ah"
+        val friStart = RoutineTask.formatTime24(anchor.fridayStartTimeMinute ?: 750)
+        val friDur = anchor.fridayDurationMinutes ?: 120
+        val friVoice = anchor.fridayVoiceMessage?.ifBlank { null } ?: "জুমার সময় হয়েছে।"
+        line += " | $friTitle | $friStart | $friDur | $friVoice"
+      }
+      sb.appendLine(line)
+    }
+
+    val activeDynamics = dynamicTasks.filter { !it.isDeleted }
+    if (activeDynamics.isNotEmpty()) {
+      sb.appendLine()
+      sb.appendLine("# 2. DYNAMIC ROUTINE TASKS")
+
+      for (task in activeDynamics) {
+        val title = task.title
+        val duration = task.durationMinutes
+        val timeStr = RoutineTask.formatTime24(task.startTimeMinute)
+        val dndStr = if (task.enableDnd) "Y" else "N"
+        val daysStr = if (task.selectedDays.size == 7) {
+          "All"
+        } else {
+          task.selectedDays.sortedBy { it.ordinal }.joinToString(",") { it.shortName }
+        }
+        val voiceStr = if (task.isVoiceEnabled) "Y" else "N"
+        val voiceMsg = task.voiceMessage.ifBlank { "$title starting now." }
+        val flex = task.toleranceMinutes.coerceAtLeast(task.customFlexibilityMinutes)
+        val rest = task.interTaskBufferMinutes
+        val prioStr = if (task.isHighPriority) "Y" else "N"
+
+        sb.appendLine("$title | $duration | $timeStr | $dndStr | $daysStr | $voiceStr | $voiceMsg | $flex | $rest | $prioStr")
+      }
+    }
+
+    return sb.toString().trimEnd()
   }
 }

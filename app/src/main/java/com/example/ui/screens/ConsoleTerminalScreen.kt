@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Code
@@ -34,15 +34,9 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.HelpOutline
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -51,6 +45,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,26 +65,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.engine.ConsoleParseResult
 import com.example.engine.ConsoleParser
 import com.example.model.RoutineTask
-import com.example.model.TaskType
-import com.example.ui.theme.AnchorGradientStart
 import com.example.ui.theme.DangerRed
-import com.example.ui.theme.DynamicGradientEnd
-import com.example.ui.theme.ElasticGradientStart
 import com.example.ui.theme.OneUiBorder
 import com.example.ui.theme.OneUiSurfaceElevated
 import com.example.ui.theme.OneUiSurfaceHigh
-import com.example.ui.theme.SleepGradientStart
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.TextTertiary
 import com.example.ui.theme.WarningAmber
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ConsoleTerminalScreen(
   anchors: List<RoutineTask>,
+  dynamicTasks: List<RoutineTask> = emptyList(),
+  sleepDurationMinutes: Int = 360,
+  bufferMinutes: Int = 5,
   onApplyTasks: (tasks: List<RoutineTask>, replaceAll: Boolean, parsedAnchors: List<RoutineTask>) -> Unit,
   onBack: () -> Unit = {},
   modifier: Modifier = Modifier
@@ -111,15 +108,32 @@ fun ConsoleTerminalScreen(
     ConsoleParser.getSyntaxPrediction(activeLine)
   }
 
-  // Real-time parsed syntax analysis
-  val parseResult = remember(consoleText) {
-    ConsoleParser.parse(consoleText)
+  // Debounced parsing (250ms) offloaded to Dispatchers.Default to eliminate typing latency
+  var parseResult by remember {
+    mutableStateOf(ConsoleParser.parse(consoleText))
   }
+  LaunchedEffect(consoleText) {
+    delay(250)
+    val parsed = withContext(Dispatchers.Default) {
+      ConsoleParser.parse(consoleText)
+    }
+    parseResult = parsed
+  }
+
+  // Error accordion collapsed/expanded state
+  var isErrorAccordionExpanded by remember { mutableStateOf(true) }
+
+  // Metrics derivation
+  val totalTasksCount = parseResult.validTasks.size + parseResult.parsedAnchors.size
+  val anchorsCount = parseResult.parsedAnchors.size
+  val priorityCount = parseResult.validTasks.count { it.isHighPriority }
+  val syntaxErrors = parseResult.errorCount
+  val isSyntaxValid = syntaxErrors == 0 && totalTasksCount > 0
 
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(Color(0xFF0A0D14)) // Deep AMOLED obsidian background
+      .background(Color(0xFF0B0E14)) // Deep AMOLED obsidian background
       .statusBarsPadding()
       .verticalScroll(rememberScrollState())
       .padding(20.dp)
@@ -180,7 +194,99 @@ fun ConsoleTerminalScreen(
     Spacer(modifier = Modifier.height(14.dp))
 
     // ==============================================================
-    // 3. COMPACT SYNTAX FORMAT BANNER (ANCHOR • TWIN • DYNAMIC)
+    // 1. ACTIVE METRICS ROW: ONE UI DIAGNOSTICS CARD
+    // ==============================================================
+    Surface(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(16.dp))
+        .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(16.dp))
+        .testTag("terminal_active_metrics_card"),
+      color = OneUiSurfaceElevated
+    ) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // Metric 1: Total Tasks
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+          Text(
+            text = "$totalTasksCount",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Color(0xFF38BDF8)
+          )
+          Text(
+            text = "Total Tasks",
+            fontSize = 10.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium
+          )
+        }
+
+        Box(modifier = Modifier.width(1.dp).height(24.dp).background(OneUiBorder))
+
+        // Metric 2: Anchors
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+          Text(
+            text = "$anchorsCount",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Color(0xFFA78BFA)
+          )
+          Text(
+            text = "Anchors",
+            fontSize = 10.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium
+          )
+        }
+
+        Box(modifier = Modifier.width(1.dp).height(24.dp).background(OneUiBorder))
+
+        // Metric 3: Priority
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+          Text(
+            text = "$priorityCount",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Color(0xFFF59E0B)
+          )
+          Text(
+            text = "Priority",
+            fontSize = 10.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium
+          )
+        }
+
+        Box(modifier = Modifier.width(1.dp).height(24.dp).background(OneUiBorder))
+
+        // Metric 4: Syntax Status
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+          Text(
+            text = if (syntaxErrors > 0) "$syntaxErrors Err" else if (totalTasksCount > 0) "Valid" else "Empty",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = if (syntaxErrors > 0) DangerRed else if (totalTasksCount > 0) Color(0xFF10B981) else TextTertiary
+          )
+          Text(
+            text = "Syntax",
+            fontSize = 10.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium
+          )
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // ==============================================================
+    // 2. COMPACT CLI GRAMMAR BANNER (ANCHOR • TWIN • DYNAMIC)
     // ==============================================================
     Surface(
       modifier = Modifier
@@ -202,7 +308,7 @@ fun ConsoleTerminalScreen(
           )
           Spacer(modifier = Modifier.width(8.dp))
           Text(
-            text = "CLI GRAMMAR: ANCHOR | TWIN | DYNAMIC",
+            text = "CLI GRAMMAR: ANCHOR | TWIN | DYNAMIC (v2)",
             color = Color(0xFF67E8F9),
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -211,7 +317,7 @@ fun ConsoleTerminalScreen(
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-          text = "• ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Msg\n• TWIN | Pool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days\n• DYNAMIC: Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Msg | Flex(0-30) | Rest(0-30)",
+          text = "• ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Msg\n• TWIN | Pool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days\n• DYNAMIC: Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Msg | Flex(0-30) | Rest(0-30) | Priority(Y/N)",
           color = Color(0xFF94A3B8),
           fontFamily = FontFamily.Monospace,
           fontSize = 10.sp,
@@ -222,7 +328,7 @@ fun ConsoleTerminalScreen(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // Quick Action Bar: "Template" & "Clear"
+    // Quick Action Bar: "Load Live Backup", "Sample Snippet" & "Clear"
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -230,7 +336,12 @@ fun ConsoleTerminalScreen(
       OutlinedButton(
         onClick = {
           haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          val template = ConsoleParser.SAMPLE_SNIPPET
+          val template = ConsoleParser.generateRoutineScript(
+            anchors = anchors,
+            dynamicTasks = dynamicTasks,
+            sleepMinutes = sleepDurationMinutes,
+            bufferMinutes = bufferMinutes
+          )
           consoleTextFieldValue = TextFieldValue(template, TextRange(template.length))
         },
         modifier = Modifier
@@ -250,7 +361,7 @@ fun ConsoleTerminalScreen(
         )
         Spacer(modifier = Modifier.width(6.dp))
         Text(
-          "Template",
+          "Load Live Backup",
           color = Color(0xFF06B6D4),
           fontSize = 12.sp,
           fontWeight = FontWeight.Bold
@@ -282,8 +393,81 @@ fun ConsoleTerminalScreen(
     Spacer(modifier = Modifier.height(12.dp))
 
     // ==============================================================
-    // 4. ULTRA-CLEAN OBSIDIAN CODE EDITOR (#121620 with Gutter Numbers)
-    // Maximize height to full vertical prominence (min 450dp)
+    // 3. EMPTY STATE PLACEHOLDER CARD (When console text is blank)
+    // ==============================================================
+    if (consoleText.isBlank()) {
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(16.dp))
+          .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(16.dp))
+          .padding(vertical = 4.dp),
+        color = OneUiSurfaceElevated
+      ) {
+        Column(
+          modifier = Modifier.padding(18.dp),
+          horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+          Icon(
+            imageVector = Icons.Default.AutoAwesome,
+            contentDescription = null,
+            tint = Color(0xFF38BDF8),
+            modifier = Modifier.size(32.dp)
+          )
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = "Terminal Editor is Empty",
+            color = TextPrimary,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold
+          )
+          Spacer(modifier = Modifier.height(4.dp))
+          Text(
+            text = "Type your dynamic routine lines below or tap 'Load Live Backup' to instantly populate with your 7 active anchors and scheduled tasks.",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+          )
+          Spacer(modifier = Modifier.height(12.dp))
+          OutlinedButton(
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              val template = ConsoleParser.generateRoutineScript(
+                anchors = anchors,
+                dynamicTasks = dynamicTasks,
+                sleepMinutes = sleepDurationMinutes,
+                bufferMinutes = bufferMinutes
+              )
+              consoleTextFieldValue = TextFieldValue(template, TextRange(template.length))
+            },
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF06B6D4)),
+            colors = ButtonDefaults.outlinedButtonColors(
+              containerColor = Color(0xFF06B6D4).copy(alpha = 0.12f)
+            )
+          ) {
+            Icon(
+              imageVector = Icons.Default.ContentPaste,
+              contentDescription = null,
+              tint = Color(0xFF06B6D4),
+              modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = "Load Live Backup Script",
+              color = Color(0xFF06B6D4),
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold
+            )
+          }
+        }
+      }
+      Spacer(modifier = Modifier.height(12.dp))
+    }
+
+    // ==============================================================
+    // 4. ULTRA-SPACIOUS OBSIDIAN CODE STUDIO (Min 520dp Height)
     // ==============================================================
     Surface(
       modifier = Modifier
@@ -299,7 +483,7 @@ fun ConsoleTerminalScreen(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Text(
-            text = "Obsidian Terminal Editor",
+            text = "Obsidian Terminal Studio",
             color = Color(0xFF67E8F9),
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
@@ -320,10 +504,10 @@ fun ConsoleTerminalScreen(
           Column(
             modifier = Modifier
               .padding(top = 16.dp, end = 10.dp)
-              .width(24.dp),
+              .width(28.dp),
             horizontalAlignment = Alignment.End
           ) {
-            for (i in 1..lineCount.coerceAtMost(60)) {
+            for (i in 1..lineCount.coerceAtMost(80)) {
               Text(
                 text = "$i",
                 color = Color(0xFF475569),
@@ -339,7 +523,7 @@ fun ConsoleTerminalScreen(
             onValueChange = { consoleTextFieldValue = it },
             modifier = Modifier
               .weight(1f)
-              .height(460.dp)
+              .height(520.dp) // Spacious 520dp studio height
               .testTag("console_text_input"),
             textStyle = TextStyle(
               fontFamily = FontFamily.Monospace,
@@ -349,7 +533,7 @@ fun ConsoleTerminalScreen(
             ),
             placeholder = {
               Text(
-                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration | Start | DND | Days | Voice | Custom Message\n# Tap 'Template' above to load a ready-to-edit template.",
+                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration | Start | DND | Days | Voice | Message | Flex | Rest | Priority\n# Tap 'Load Live Backup' above to load a snapshot of your schedule.",
                 color = TextTertiary,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp
@@ -428,106 +612,97 @@ fun ConsoleTerminalScreen(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    // Real-Time Syntax Validation Card
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(16.dp))
-        .border(
-          BorderStroke(
-            1.dp,
-            if (parseResult.errorCount > 0) DangerRed.copy(alpha = 0.4f) else OneUiBorder
-          ),
-          RoundedCornerShape(16.dp)
-        ),
-      color = OneUiSurfaceElevated
-    ) {
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Row(
-          modifier = Modifier.weight(1f, fill = false),
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Icon(
-            imageVector = if (parseResult.errorCount == 0) Icons.Default.CheckCircle else Icons.Default.Error,
-            contentDescription = null,
-            tint = if (parseResult.errorCount == 0) Color(0xFF10B981) else DangerRed,
-            modifier = Modifier.size(20.dp)
-          )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            text = if (parseResult.errorCount == 0 && parseResult.successCount > 0) {
-              "Syntax Valid (${parseResult.successCount} dynamic tasks ready to schedule)"
-            } else if (parseResult.errorCount > 0) {
-              "${parseResult.errorCount} syntax error(s) detected"
-            } else {
-              "Awaiting task entries..."
-            },
-            color = if (parseResult.errorCount == 0) TextPrimary else DangerRed,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp,
-            maxLines = 1
-          )
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Text(
-          text = "${parseResult.diagnostics.size} total lines",
-          color = TextSecondary,
-          fontSize = 11.sp,
-          maxLines = 1,
-          softWrap = false
-        )
-      }
-    }
-
-    // Line-by-Line Syntax Error Suggestions
-    if (parseResult.errorCount > 0) {
-      Spacer(modifier = Modifier.height(10.dp))
-      Column(
+    // ==============================================================
+    // 5. ERROR ACCORDION (Collapsible Diagnostic Panel)
+    // ==============================================================
+    if (syntaxErrors > 0) {
+      Surface(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(14.dp))
-          .border(BorderStroke(1.dp, DangerRed.copy(alpha = 0.4f)), RoundedCornerShape(14.dp))
-          .background(Color.Black.copy(alpha = 0.25f))
-          .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+          .border(BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f)), RoundedCornerShape(14.dp))
+          .testTag("syntax_error_accordion"),
+        color = Color(0xFF1C1318)
       ) {
-        parseResult.diagnostics.filter { !it.isValid }.forEach { diag ->
-          Row(verticalAlignment = Alignment.Top) {
-            Text(
-              text = "Line ${diag.lineNumber}: ",
-              color = DangerRed,
-              fontWeight = FontWeight.Bold,
-              fontSize = 11.sp,
-              fontFamily = FontFamily.Monospace
+        Column(modifier = Modifier.padding(12.dp)) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clickable { isErrorAccordionExpanded = !isErrorAccordionExpanded },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(
+                imageVector = Icons.Default.Error,
+                contentDescription = null,
+                tint = DangerRed,
+                modifier = Modifier.size(18.dp)
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = "$syntaxErrors Syntax Error(s) Detected",
+                color = DangerRed,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+              )
+            }
+            Icon(
+              imageVector = if (isErrorAccordionExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+              contentDescription = if (isErrorAccordionExpanded) "Collapse" else "Expand",
+              tint = DangerRed,
+              modifier = Modifier.size(20.dp)
             )
-            Text(
-              text = diag.errorMessage ?: "Syntax error",
-              color = TextSecondary,
-              fontSize = 11.sp
-            )
+          }
+
+          AnimatedVisibility(visible = isErrorAccordionExpanded) {
+            Column(
+              modifier = Modifier.padding(top = 10.dp),
+              verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              parseResult.diagnostics.filter { !it.isValid }.forEach { diag ->
+                Surface(
+                  modifier = Modifier.fillMaxWidth(),
+                  shape = RoundedCornerShape(8.dp),
+                  color = Color.Black.copy(alpha = 0.3f),
+                  border = BorderStroke(1.dp, DangerRed.copy(alpha = 0.25f))
+                ) {
+                  Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.Top
+                  ) {
+                    Text(
+                      text = "Line ${diag.lineNumber}: ",
+                      color = DangerRed,
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 11.sp,
+                      fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                      text = diag.errorMessage ?: "Invalid syntax format",
+                      color = Color(0xFFE2E8F0),
+                      fontSize = 11.sp
+                    )
+                  }
+                }
+              }
+            }
           }
         }
       }
+      Spacer(modifier = Modifier.height(12.dp))
     }
 
-    Spacer(modifier = Modifier.height(18.dp))
-
-    // Dual Schedule Action Buttons
-    val isProcessEnabled = (parseResult.validTasks.isNotEmpty() || parseResult.parsedAnchors.isNotEmpty()) && parseResult.errorCount == 0
+    // ==============================================================
+    // 6. DUAL SCHEDULE ACTION BUTTONS (Append & Replace)
+    // ==============================================================
+    val isProcessEnabled = isSyntaxValid
 
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      // 1. [ Append to Schedule ] (Cyan/Indigo theme) -> Appends new valid tasks to schedule
+      // 1. [ Append to Schedule ] (Cyan/Indigo theme)
       Surface(
         modifier = Modifier
           .weight(1f)
@@ -573,7 +748,7 @@ fun ConsoleTerminalScreen(
         }
       }
 
-      // 2. [ Replace Dynamic Tasks ] (Warning Amber/Destructive tone) -> Clears and replaces
+      // 2. [ Replace Dynamic Tasks ] (Warning Amber/Destructive tone)
       Surface(
         modifier = Modifier
           .weight(1f)
