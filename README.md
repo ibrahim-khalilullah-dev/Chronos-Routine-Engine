@@ -124,7 +124,7 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 - **`ANCHOR` Directive:** `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Message` (plus Friday overrides for Slot 3).
 - **`TWIN` Directive:** `TWIN | TotalPool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND(Y/N) | Days | Flex | Rest`.
 - **`DYNAMIC` Directive (v2 with Priority):** `Task Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0-30) | Rest(0-30) | Priority(Y/N)`.
-- **Spacious 520dp Studio Layout:** High-contrast AMOLED obsidian dark styling (`#0B0E14`), hairline border (`#1E293B`), line-numbered gutter, and one-tap **"Load Live Backup"** empty-state card.
+- **Spacious 540dp Studio Layout:** High-contrast AMOLED obsidian dark styling (`#0B0E14`), hairline border (`#1E293B`), synchronized line-numbered gutter (24dp), and header-integrated **"Backup"** action button.
 - **One UI Active Metrics Row:** Real-time diagnostic cards tracking `Total Tasks`, `Anchors`, `Priority`, and `Syntax Status (Valid/Errors)`.
 - **Collapsible Error Accordion:** Clean chip-style error reporting preventing layout explosion during active typing.
 - **Dual Schedule Actions:** Gradient Cyan-to-Indigo `[ Append Tasks ]` and Gradient Amber-to-Red `[ Replace All ]`.

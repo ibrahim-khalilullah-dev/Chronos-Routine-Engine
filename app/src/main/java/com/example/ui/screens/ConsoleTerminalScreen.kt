@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -26,7 +27,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Code
@@ -138,7 +138,7 @@ fun ConsoleTerminalScreen(
       .verticalScroll(rememberScrollState())
       .padding(20.dp)
   ) {
-    // Header Bar with Back Button
+    // Header Bar with Back Button & Interactive Backup Button
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
@@ -174,20 +174,45 @@ fun ConsoleTerminalScreen(
         }
       }
 
-      Box(
+      // Interactive Header "Backup" Button
+      Surface(
+        onClick = {
+          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+          val template = ConsoleParser.generateRoutineScript(
+            anchors = anchors,
+            dynamicTasks = dynamicTasks,
+            sleepMinutes = sleepDurationMinutes,
+            bufferMinutes = bufferMinutes
+          )
+          consoleTextFieldValue = TextFieldValue(template, TextRange(template.length))
+        },
         modifier = Modifier
           .clip(RoundedCornerShape(12.dp))
-          .background(Color(0xFF080A0F))
-          .border(BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.4f)), RoundedCornerShape(12.dp))
-          .padding(horizontal = 10.dp, vertical = 6.dp)
+          .testTag("terminal_header_backup_button")
+          .testTag("quick_copy_template_button"),
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF080A0F),
+        border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.6f))
       ) {
-        Text(
-          text = ">_ TERMINAL",
-          fontFamily = FontFamily.Monospace,
-          color = Color(0xFF06B6D4),
-          fontSize = 11.sp,
-          fontWeight = FontWeight.Bold
-        )
+        Row(
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Icon(
+            imageVector = Icons.Default.ContentPaste,
+            contentDescription = "Load Backup",
+            tint = Color(0xFF06B6D4),
+            modifier = Modifier.size(13.dp)
+          )
+          Spacer(modifier = Modifier.width(5.dp))
+          Text(
+            text = "Backup",
+            fontFamily = FontFamily.Monospace,
+            color = Color(0xFF06B6D4),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+          )
+        }
       }
     }
 
@@ -326,49 +351,14 @@ fun ConsoleTerminalScreen(
       }
     }
 
-    Spacer(modifier = Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(10.dp))
 
-    // Quick Action Bar: "Load Live Backup", "Sample Snippet" & "Clear"
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-      OutlinedButton(
-        onClick = {
-          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-          val template = ConsoleParser.generateRoutineScript(
-            anchors = anchors,
-            dynamicTasks = dynamicTasks,
-            sleepMinutes = sleepDurationMinutes,
-            bufferMinutes = bufferMinutes
-          )
-          consoleTextFieldValue = TextFieldValue(template, TextRange(template.length))
-        },
-        modifier = Modifier
-          .weight(1f)
-          .testTag("quick_copy_template_button"),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.6f)),
-        colors = ButtonDefaults.outlinedButtonColors(
-          containerColor = Color(0xFF06B6D4).copy(alpha = 0.08f)
-        )
+    // Compact Clear Button (Shown only when editor has text)
+    if (consoleText.isNotBlank()) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
       ) {
-        Icon(
-          imageVector = Icons.Default.ContentPaste,
-          contentDescription = null,
-          modifier = Modifier.size(15.dp),
-          tint = Color(0xFF06B6D4)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-          "Load Live Backup",
-          color = Color(0xFF06B6D4),
-          fontSize = 12.sp,
-          fontWeight = FontWeight.Bold
-        )
-      }
-
-      if (consoleText.isNotBlank()) {
         OutlinedButton(
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -381,93 +371,18 @@ fun ConsoleTerminalScreen(
           Icon(
             imageVector = Icons.Default.Clear,
             contentDescription = null,
-            modifier = Modifier.size(15.dp),
+            modifier = Modifier.size(14.dp),
             tint = TextSecondary
           )
           Spacer(modifier = Modifier.width(4.dp))
           Text("Clear", color = TextSecondary, fontSize = 11.sp)
         }
       }
-    }
-
-    Spacer(modifier = Modifier.height(12.dp))
-
-    // ==============================================================
-    // 3. EMPTY STATE PLACEHOLDER CARD (When console text is blank)
-    // ==============================================================
-    if (consoleText.isBlank()) {
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(16.dp))
-          .padding(vertical = 4.dp),
-        color = OneUiSurfaceElevated
-      ) {
-        Column(
-          modifier = Modifier.padding(18.dp),
-          horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-          Icon(
-            imageVector = Icons.Default.AutoAwesome,
-            contentDescription = null,
-            tint = Color(0xFF38BDF8),
-            modifier = Modifier.size(32.dp)
-          )
-          Spacer(modifier = Modifier.height(8.dp))
-          Text(
-            text = "Terminal Editor is Empty",
-            color = TextPrimary,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold
-          )
-          Spacer(modifier = Modifier.height(4.dp))
-          Text(
-            text = "Type your dynamic routine lines below or tap 'Load Live Backup' to instantly populate with your 7 active anchors and scheduled tasks.",
-            color = TextSecondary,
-            fontSize = 12.sp,
-            lineHeight = 16.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-          )
-          Spacer(modifier = Modifier.height(12.dp))
-          OutlinedButton(
-            onClick = {
-              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-              val template = ConsoleParser.generateRoutineScript(
-                anchors = anchors,
-                dynamicTasks = dynamicTasks,
-                sleepMinutes = sleepDurationMinutes,
-                bufferMinutes = bufferMinutes
-              )
-              consoleTextFieldValue = TextFieldValue(template, TextRange(template.length))
-            },
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFF06B6D4)),
-            colors = ButtonDefaults.outlinedButtonColors(
-              containerColor = Color(0xFF06B6D4).copy(alpha = 0.12f)
-            )
-          ) {
-            Icon(
-              imageVector = Icons.Default.ContentPaste,
-              contentDescription = null,
-              tint = Color(0xFF06B6D4),
-              modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-              text = "Load Live Backup Script",
-              color = Color(0xFF06B6D4),
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Bold
-            )
-          }
-        }
-      }
-      Spacer(modifier = Modifier.height(12.dp))
+      Spacer(modifier = Modifier.height(10.dp))
     }
 
     // ==============================================================
-    // 4. ULTRA-SPACIOUS OBSIDIAN CODE STUDIO (Min 520dp Height)
+    // 3. ULTRA-SPACIOUS OBSIDIAN CODE STUDIO (Min 540dp Height)
     // ==============================================================
     Surface(
       modifier = Modifier
@@ -476,9 +391,11 @@ fun ConsoleTerminalScreen(
         .border(BorderStroke(1.dp, Color(0xFF1E293B)), RoundedCornerShape(18.dp)),
       color = Color(0xFF121620)
     ) {
-      Column(modifier = Modifier.padding(14.dp)) {
+      Column(modifier = Modifier.padding(10.dp)) {
         Row(
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
@@ -496,24 +413,24 @@ fun ConsoleTerminalScreen(
           )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Row(modifier = Modifier.fillMaxWidth()) {
-          // Gutter Line Numbers
+          // Compact Gutter (Line Numbers): snugly 24.dp width, 4.dp right margin, lineHeight = 20.sp
           val lineCount = consoleText.lines().size.coerceAtLeast(1)
           Column(
             modifier = Modifier
-              .padding(top = 16.dp, end = 10.dp)
-              .width(28.dp),
+              .padding(top = 16.dp, end = 4.dp)
+              .width(24.dp),
             horizontalAlignment = Alignment.End
           ) {
-            for (i in 1..lineCount.coerceAtMost(80)) {
+            for (i in 1..lineCount) {
               Text(
                 text = "$i",
                 color = Color(0xFF475569),
                 fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                lineHeight = 18.sp
+                fontSize = 11.sp,
+                lineHeight = 20.sp
               )
             }
           }
@@ -523,26 +440,27 @@ fun ConsoleTerminalScreen(
             onValueChange = { consoleTextFieldValue = it },
             modifier = Modifier
               .weight(1f)
-              .height(520.dp) // Spacious 520dp studio height
+              .heightIn(min = 540.dp)
               .testTag("console_text_input"),
             textStyle = TextStyle(
               fontFamily = FontFamily.Monospace,
               fontSize = 13.sp,
-              lineHeight = 18.sp,
+              lineHeight = 20.sp,
               color = Color(0xFFF8FAFC)
             ),
             placeholder = {
               Text(
-                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration | Start | DND | Days | Voice | Message | Flex | Rest | Priority\n# Tap 'Load Live Backup' above to load a snapshot of your schedule.",
+                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration | Start | DND | Days | Voice | Message | Flex | Rest | Priority\n# Tap 'Backup' in header to load routine script.",
                 color = TextTertiary,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp
+                fontSize = 12.sp,
+                lineHeight = 20.sp
               )
             },
             colors = OutlinedTextFieldDefaults.colors(
               focusedContainerColor = Color(0xFF121620),
               unfocusedContainerColor = Color(0xFF121620),
-              focusedBorderColor = Color(0xFF06B6D4),
+              focusedBorderColor = Color.Transparent,
               unfocusedBorderColor = Color.Transparent
             ),
             shape = RoundedCornerShape(12.dp)
@@ -551,7 +469,7 @@ fun ConsoleTerminalScreen(
 
         // Intelligent Inline Ghost Text (Context-Aware Syntax Autocomplete Prediction)
         if (!ghostPrediction.isNullOrBlank()) {
-          Spacer(modifier = Modifier.height(10.dp))
+          Spacer(modifier = Modifier.height(8.dp))
           Surface(
             modifier = Modifier
               .fillMaxWidth()
@@ -569,7 +487,7 @@ fun ConsoleTerminalScreen(
             Row(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -613,7 +531,7 @@ fun ConsoleTerminalScreen(
     Spacer(modifier = Modifier.height(12.dp))
 
     // ==============================================================
-    // 5. ERROR ACCORDION (Collapsible Diagnostic Panel)
+    // 4. ERROR ACCORDION (Collapsible Diagnostic Panel)
     // ==============================================================
     if (syntaxErrors > 0) {
       Surface(
@@ -694,7 +612,7 @@ fun ConsoleTerminalScreen(
     }
 
     // ==============================================================
-    // 6. DUAL SCHEDULE ACTION BUTTONS (Append & Replace)
+    // 5. DUAL SCHEDULE ACTION BUTTONS (Append & Replace)
     // ==============================================================
     val isProcessEnabled = isSyntaxValid
 
