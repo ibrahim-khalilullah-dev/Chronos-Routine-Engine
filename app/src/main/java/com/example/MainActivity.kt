@@ -10,10 +10,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +33,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,12 +41,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -62,6 +72,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -356,171 +367,175 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
         }
       }
 
-      // Unified "Add Task" Chooser Modal (Requirement 1: Single Unified Entry Point)
+      // Luxury Minimalist Floating Speed-Dial Menu (Anchored above Bottom Navigation Bar)
+      BackHandler(enabled = showAddChooserSheet) {
+        showAddChooserSheet = false
+      }
+
       if (showAddChooserSheet) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-          onDismissRequest = { showAddChooserSheet = false },
-          sheetState = sheetState,
-          containerColor = OneUiSurfaceElevated,
-          contentColor = TextPrimary,
-          shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        // Dimmed backdrop overlay
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(
+              interactionSource = remember { MutableInteractionSource() },
+              indication = null
+            ) {
+              showAddChooserSheet = false
+            }
+        )
+      }
+
+      AnimatedVisibility(
+        visible = showAddChooserSheet,
+        enter = fadeIn() + slideInVertically { it / 2 },
+        exit = fadeOut() + slideOutVertically { it / 2 },
+        modifier = Modifier
+          .align(Alignment.BottomCenter)
+          .padding(bottom = 12.dp, start = 20.dp, end = 20.dp)
+      ) {
+        Surface(
+          modifier = Modifier
+            .widthIn(max = 280.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .border(BorderStroke(1.dp, Color(0xFF1E293B)), RoundedCornerShape(20.dp)),
+          color = Color(0xFF0A0D14),
+          tonalElevation = 16.dp,
+          shadowElevation = 16.dp,
+          shape = RoundedCornerShape(20.dp)
         ) {
           Column(
             modifier = Modifier
               .fillMaxWidth()
-              .padding(horizontal = 24.dp, vertical = 12.dp)
-              .padding(bottom = 36.dp)
+              .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
           ) {
-            Text(
-              text = "Create Routine Task",
-              fontSize = 20.sp,
-              fontWeight = FontWeight.Bold,
-              color = TextPrimary
-            )
-            Text(
-              text = "Choose your preferred scheduling method",
-              fontSize = 12.sp,
-              color = TextSecondary
-            )
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Option 1: Manual Visual Form (GUI)
+            // 1. Manual Form Pill
             Surface(
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                showAddChooserSheet = false
+                editingTask = null
+                isModalOpen = true
+              },
+              shape = RoundedCornerShape(14.dp),
+              color = Color(0xFF121622),
+              border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.35f)),
               modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(18.dp))
-                .clickable {
-                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                  showAddChooserSheet = false
-                  editingTask = null
-                  isModalOpen = true
-                }
-                .testTag("choose_manual_form_option"),
-              color = OneUiSurfaceHigh
+                .testTag("choose_manual_form_option")
             ) {
               Row(
-                modifier = Modifier.padding(18.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
               ) {
                 Box(
                   modifier = Modifier
-                    .size(44.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
-                    .background(AnchorGradientStart),
+                    .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
                   contentAlignment = Alignment.Center
                 ) {
-                  Icon(imageVector = Icons.Default.EditNote, contentDescription = null, tint = Color.White)
-                }
-                Spacer(modifier = Modifier.width(14.dp))
-                Column {
-                  Text(
-                    text = "Manual Form (GUI)",
-                    color = TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                  )
-                  Text(
-                    text = "Visual creator with duration pickers, DND toggles, and recurrence chips",
-                    color = TextSecondary,
-                    fontSize = 12.sp
+                  Icon(
+                    imageVector = Icons.Default.EditNote,
+                    contentDescription = null,
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(18.dp)
                   )
                 }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                  text = "Manual Form",
+                  color = Color(0xFFF8FAFC),
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp
+                )
               }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Option 2: Bulk Terminal Console
+            // 2. Terminal Pill
             Surface(
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                showAddChooserSheet = false
+                viewModel.selectTab(NavigationTab.CONSOLE)
+              },
+              shape = RoundedCornerShape(14.dp),
+              color = Color(0xFF121622),
+              border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.35f)),
               modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, OneUiBorder), RoundedCornerShape(18.dp))
-                .clickable {
-                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                  showAddChooserSheet = false
-                  viewModel.selectTab(NavigationTab.CONSOLE)
-                }
-                .testTag("choose_terminal_console_option"),
-              color = OneUiSurfaceHigh
+                .testTag("choose_terminal_console_option")
             ) {
               Row(
-                modifier = Modifier.padding(18.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
               ) {
                 Box(
                   modifier = Modifier
-                    .size(44.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF080A0F))
-                    .border(BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)), CircleShape),
+                    .background(Color(0xFF8B5CF6).copy(alpha = 0.15f)),
                   contentAlignment = Alignment.Center
                 ) {
-                  Icon(imageVector = Icons.Default.Code, contentDescription = null, tint = Color(0xFF06B6D4))
-                }
-                Spacer(modifier = Modifier.width(14.dp))
-                Column {
-                  Text(
-                    text = "Bulk Terminal Console",
-                    color = TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                  )
-                  Text(
-                    text = "Power-user pipe syntax with 7 protected anchors overview and validator",
-                    color = TextSecondary,
-                    fontSize = 12.sp
+                  Icon(
+                    imageVector = Icons.Default.Code,
+                    contentDescription = null,
+                    tint = Color(0xFFC4B5FD),
+                    modifier = Modifier.size(18.dp)
                   )
                 }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                  text = "Terminal",
+                  color = Color(0xFFF8FAFC),
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp
+                )
               }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Card 3: In-App Architecture Guide Button (Requirement 9)
+            // 3. Documentation Pill
             Surface(
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                showAddChooserSheet = false
+                showArchitectureGuideSheet = true
+              },
+              shape = RoundedCornerShape(14.dp),
+              color = Color(0xFF121622),
+              border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.35f)),
               modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.4f)), RoundedCornerShape(18.dp))
-                .clickable {
-                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                  showAddChooserSheet = false
-                  showArchitectureGuideSheet = true
-                }
-                .testTag("choose_architecture_guide_option"),
-              color = OneUiSurfaceHigh
+                .testTag("choose_architecture_guide_option")
             ) {
               Row(
-                modifier = Modifier.padding(18.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
               ) {
                 Box(
                   modifier = Modifier
-                    .size(44.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF6366F1).copy(alpha = 0.2f)),
+                    .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
                   contentAlignment = Alignment.Center
                 ) {
-                  Icon(imageVector = Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = Color(0xFFA5B4FC))
-                }
-                Spacer(modifier = Modifier.width(14.dp))
-                Column {
-                  Text(
-                    text = "📖 App Guide",
-                    color = TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                  )
-                  Text(
-                    text = "How Chronos Works • 7 Anchors, Buffer & Fluid Twins",
-                    color = TextSecondary,
-                    fontSize = 12.sp
+                  Icon(
+                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                    contentDescription = null,
+                    tint = Color(0xFFFCD34D),
+                    modifier = Modifier.size(18.dp)
                   )
                 }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                  text = "Documentation",
+                  color = Color(0xFFF8FAFC),
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 14.sp
+                )
               }
             }
           }

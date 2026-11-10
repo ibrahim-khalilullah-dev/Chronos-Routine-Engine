@@ -62,6 +62,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   private var pendingSpeechText: String? = null
   private var activeTaskId: String? = null
   private var currentDndApplied = false
+  private var isDndConfiguredForTask = false
   private var dndHandler: Handler? = null
   private var dndRunnable: Runnable? = null
   private var isVoiceEnabled = true
@@ -160,10 +161,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     }
 
     if (intent.action == AutomationManager.ACTION_APPLY_DND) {
-      if (AutomationManager.isDndPermissionGranted(this)) {
-        currentDndApplied = AutomationManager.setDndMode(this, true)
-        _serviceState.value = _serviceState.value.copy(isDndActive = currentDndApplied)
-      }
+      currentDndApplied = true
+      _serviceState.value = _serviceState.value.copy(isDndActive = true)
       return START_NOT_STICKY
     }
 
@@ -171,6 +170,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     val title = intent.getStringExtra(AutomationManager.EXTRA_TASK_TITLE) ?: "Scheduled Task"
     val voiceMessage = intent.getStringExtra(AutomationManager.EXTRA_VOICE_MESSAGE) ?: "$title is starting now."
     val enableDnd = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_DND, false)
+    isDndConfiguredForTask = enableDnd
     val dndDelayMinutes = intent.getIntExtra(AutomationManager.EXTRA_DND_DELAY_MINUTES, 0).coerceIn(0, 25)
     val enableHaptic = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_HAPTIC, true)
     isVoiceEnabled = intent.getBooleanExtra(AutomationManager.EXTRA_IS_VOICE_ENABLED, true)
@@ -334,9 +334,10 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       dndRunnable?.let { dndHandler?.removeCallbacks(it) }
       dndRunnable = null
       dndHandler = null
-      if (currentDndApplied) {
+      if (currentDndApplied || isDndConfiguredForTask) {
         AutomationManager.setDndMode(this, false)
         currentDndApplied = false
+        isDndConfiguredForTask = false
       }
       tts?.stop()
     } catch (_: Exception) {
@@ -344,7 +345,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       activeTaskId = null
       abandonTransientAudioFocus()
       releaseWakeLock()
-      _serviceState.value = ActiveAutomationState(isRunning = false)
+      _serviceState.value = ActiveAutomationState(isRunning = false, isDndActive = false)
       try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
           stopForeground(STOP_FOREGROUND_REMOVE)

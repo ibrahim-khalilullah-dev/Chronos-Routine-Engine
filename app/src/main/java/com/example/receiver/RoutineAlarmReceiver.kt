@@ -24,8 +24,16 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
       }
       AutomationManager.ACTION_APPLY_DND -> {
         AutomationManager.setDndMode(context, true)
+        val serviceIntent = Intent(context, RoutineAutomationService::class.java).apply {
+          this.action = AutomationManager.ACTION_APPLY_DND
+          putExtras(intent)
+        }
+        context.startService(serviceIntent)
       }
       AutomationManager.ACTION_END_TASK -> {
+        // Bulletproof DND teardown: immediately restore prior interruption filter
+        AutomationManager.setDndMode(context, false)
+
         val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
         val stopIntent = Intent(context, RoutineAutomationService::class.java).apply {
           this.action = RoutineAutomationService.ACTION_STOP_AUTOMATION

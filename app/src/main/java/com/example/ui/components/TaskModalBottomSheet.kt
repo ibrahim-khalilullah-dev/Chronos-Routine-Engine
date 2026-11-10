@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -97,16 +98,21 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -3801,6 +3807,7 @@ private fun CustomAnalogClockModal(
   onConfirm: (hour24: Int, minute: Int) -> Unit,
   onDismiss: () -> Unit
 ) {
+  val haptic = LocalHapticFeedback.current
   var isSelectingHour by remember { mutableStateOf(true) }
   var isPm by remember { mutableStateOf(initialHour24 >= 12) }
   var selectedHour12 by remember {
@@ -3808,6 +3815,13 @@ private fun CustomAnalogClockModal(
     mutableIntStateOf(if (h == 0) 12 else h)
   }
   var selectedMinute by remember { mutableIntStateOf(initialMinute) }
+
+  var hourInput by remember {
+    mutableStateOf(String.format(Locale.US, "%02d", selectedHour12))
+  }
+  var minuteInput by remember {
+    mutableStateOf(String.format(Locale.US, "%02d", selectedMinute))
+  }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -3820,7 +3834,7 @@ private fun CustomAnalogClockModal(
           color = Color(0xFFF8FAFC)
         )
         Text(
-          text = if (isSelectingHour) "DRAG OR TAP TO SELECT HOUR" else "DRAG OR TAP TO SELECT MINUTE",
+          text = if (isSelectingHour) "TYPE DIGITS OR DRAG/TAP DIAL" else "TYPE MINUTES OR DRAG/TAP DIAL",
           fontSize = 10.sp,
           fontWeight = FontWeight.Bold,
           fontFamily = FontFamily.Monospace,
@@ -3839,7 +3853,7 @@ private fun CustomAnalogClockModal(
           horizontalArrangement = Arrangement.Center,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          // Hour Box
+          // Hour Editable Box
           Surface(
             modifier = Modifier
               .clip(RoundedCornerShape(12.dp))
@@ -3853,14 +3867,43 @@ private fun CustomAnalogClockModal(
               .clickable { isSelectingHour = true },
             color = if (isSelectingHour) Color(0xFF1E293B) else Color(0xFF121620)
           ) {
-            Text(
-              text = String.format(Locale.US, "%02d", selectedHour12),
-              fontSize = 32.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace,
-              color = if (isSelectingHour) Color(0xFF38BDF8) else Color(0xFFF8FAFC),
-              modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-            )
+            Box(
+              modifier = Modifier
+                .width(68.dp)
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+              contentAlignment = Alignment.Center
+            ) {
+              BasicTextField(
+                value = hourInput,
+                onValueChange = { raw ->
+                  isSelectingHour = true
+                  val digits = raw.filter { it.isDigit() }.take(2)
+                  hourInput = digits
+                  val parsed = digits.toIntOrNull()
+                  if (parsed != null && parsed > 0) {
+                    val validH = if (parsed > 12) 12 else parsed
+                    if (validH != selectedHour12) {
+                      selectedHour12 = validH
+                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
+                  }
+                },
+                textStyle = TextStyle(
+                  fontSize = 32.sp,
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  textAlign = TextAlign.Center,
+                  color = if (isSelectingHour) Color(0xFF38BDF8) else Color(0xFFF8FAFC)
+                ),
+                cursorBrush = SolidColor(Color(0xFF38BDF8)),
+                keyboardOptions = KeyboardOptions(
+                  keyboardType = KeyboardType.Number,
+                  imeAction = ImeAction.Next
+                ),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+              )
+            }
           }
 
           Text(
@@ -3871,7 +3914,7 @@ private fun CustomAnalogClockModal(
             modifier = Modifier.padding(horizontal = 6.dp)
           )
 
-          // Minute Box
+          // Minute Editable Box
           Surface(
             modifier = Modifier
               .clip(RoundedCornerShape(12.dp))
@@ -3885,14 +3928,43 @@ private fun CustomAnalogClockModal(
               .clickable { isSelectingHour = false },
             color = if (!isSelectingHour) Color(0xFF1E293B) else Color(0xFF121620)
           ) {
-            Text(
-              text = String.format(Locale.US, "%02d", selectedMinute),
-              fontSize = 32.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace,
-              color = if (!isSelectingHour) Color(0xFF38BDF8) else Color(0xFFF8FAFC),
-              modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-            )
+            Box(
+              modifier = Modifier
+                .width(68.dp)
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+              contentAlignment = Alignment.Center
+            ) {
+              BasicTextField(
+                value = minuteInput,
+                onValueChange = { raw ->
+                  isSelectingHour = false
+                  val digits = raw.filter { it.isDigit() }.take(2)
+                  minuteInput = digits
+                  val parsed = digits.toIntOrNull()
+                  if (parsed != null) {
+                    val validM = if (parsed > 59) 59 else parsed
+                    if (validM != selectedMinute) {
+                      selectedMinute = validM
+                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
+                  }
+                },
+                textStyle = TextStyle(
+                  fontSize = 32.sp,
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  textAlign = TextAlign.Center,
+                  color = if (!isSelectingHour) Color(0xFF38BDF8) else Color(0xFFF8FAFC)
+                ),
+                cursorBrush = SolidColor(Color(0xFF38BDF8)),
+                keyboardOptions = KeyboardOptions(
+                  keyboardType = KeyboardType.Number,
+                  imeAction = ImeAction.Done
+                ),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+              )
+            }
           }
 
           Spacer(modifier = Modifier.width(16.dp))
@@ -3902,7 +3974,10 @@ private fun CustomAnalogClockModal(
             Surface(
               modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { isPm = false },
+                .clickable {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  isPm = false
+                },
               color = if (!isPm) Color(0xFF3B82F6) else Color(0xFF1E293B)
             ) {
               Text(
@@ -3917,7 +3992,10 @@ private fun CustomAnalogClockModal(
             Surface(
               modifier = Modifier
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { isPm = true },
+                .clickable {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  isPm = true
+                },
               color = if (isPm) Color(0xFF3B82F6) else Color(0xFF1E293B)
             ) {
               Text(
@@ -3949,6 +4027,57 @@ private fun CustomAnalogClockModal(
             modifier = Modifier
               .fillMaxSize()
               .pointerInput(isSelectingHour) {
+                detectDragGestures(
+                  onDragStart = { offset ->
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    val angleRad = atan2((offset.y - cy).toDouble(), (offset.x - cx).toDouble())
+                    var deg = Math.toDegrees(angleRad).toFloat() + 90f
+                    if (deg < 0) deg += 360f
+
+                    if (isSelectingHour) {
+                      val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
+                      if (h != selectedHour12) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        selectedHour12 = h
+                        hourInput = String.format(Locale.US, "%02d", h)
+                      }
+                    } else {
+                      val m = ((deg / 6f).roundToInt() % 60)
+                      if (m != selectedMinute) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        selectedMinute = m
+                        minuteInput = String.format(Locale.US, "%02d", m)
+                      }
+                    }
+                  },
+                  onDrag = { change, _ ->
+                    change.consume()
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    val angleRad = atan2((change.position.y - cy).toDouble(), (change.position.x - cx).toDouble())
+                    var deg = Math.toDegrees(angleRad).toFloat() + 90f
+                    if (deg < 0) deg += 360f
+
+                    if (isSelectingHour) {
+                      val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
+                      if (h != selectedHour12) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        selectedHour12 = h
+                        hourInput = String.format(Locale.US, "%02d", h)
+                      }
+                    } else {
+                      val m = ((deg / 6f).roundToInt() % 60)
+                      if (m != selectedMinute) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        selectedMinute = m
+                        minuteInput = String.format(Locale.US, "%02d", m)
+                      }
+                    }
+                  }
+                )
+              }
+              .pointerInput(isSelectingHour) {
                 detectTapGestures { offset ->
                   val cx = size.width / 2f
                   val cy = size.height / 2f
@@ -3958,29 +4087,15 @@ private fun CustomAnalogClockModal(
 
                   if (isSelectingHour) {
                     val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     selectedHour12 = h
+                    hourInput = String.format(Locale.US, "%02d", h)
                     isSelectingHour = false // Automatically transition to minute
                   } else {
                     val m = ((deg / 6f).roundToInt() % 60)
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     selectedMinute = m
-                  }
-                }
-              }
-              .pointerInput(isSelectingHour) {
-                detectDragGestures { change, _ ->
-                  change.consume()
-                  val cx = size.width / 2f
-                  val cy = size.height / 2f
-                  val angleRad = atan2((change.position.y - cy).toDouble(), (change.position.x - cx).toDouble())
-                  var deg = Math.toDegrees(angleRad).toFloat() + 90f
-                  if (deg < 0) deg += 360f
-
-                  if (isSelectingHour) {
-                    val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
-                    selectedHour12 = h
-                  } else {
-                    val m = ((deg / 6f).roundToInt() % 60)
-                    selectedMinute = m
+                    minuteInput = String.format(Locale.US, "%02d", m)
                   }
                 }
               }
@@ -4048,11 +4163,15 @@ private fun CustomAnalogClockModal(
                 .offset(x = numX.dp, y = numY.dp)
                 .clip(CircleShape)
                 .clickable {
+                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                   if (isSelectingHour) {
                     selectedHour12 = i
+                    hourInput = String.format(Locale.US, "%02d", i)
                     isSelectingHour = false
                   } else {
-                    selectedMinute = (i * 5) % 60
+                    val m = (i * 5) % 60
+                    selectedMinute = m
+                    minuteInput = String.format(Locale.US, "%02d", m)
                   }
                 },
               contentAlignment = Alignment.Center
@@ -4072,12 +4191,14 @@ private fun CustomAnalogClockModal(
     confirmButton = {
       Button(
         onClick = {
+          val parsedH = hourInput.toIntOrNull()?.let { if (it in 1..12) it else selectedHour12 } ?: selectedHour12
+          val parsedM = minuteInput.toIntOrNull()?.let { if (it in 0..59) it else selectedMinute } ?: selectedMinute
           val finalH = if (isPm) {
-            if (selectedHour12 == 12) 12 else selectedHour12 + 12
+            if (parsedH == 12) 12 else parsedH + 12
           } else {
-            if (selectedHour12 == 12) 0 else selectedHour12
+            if (parsedH == 12) 0 else parsedH
           }
-          onConfirm(finalH, selectedMinute)
+          onConfirm(finalH, parsedM)
         },
         colors = ButtonDefaults.buttonColors(
           containerColor = Color(0xFF3B82F6),
