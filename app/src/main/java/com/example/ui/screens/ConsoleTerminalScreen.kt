@@ -89,7 +89,7 @@ fun ConsoleTerminalScreen(
   anchors: List<RoutineTask>,
   dynamicTasks: List<RoutineTask> = emptyList(),
   sleepDurationMinutes: Int = 360,
-  bufferMinutes: Int = 5,
+  bufferMinutes: Int = 0,
   onApplyTasks: (tasks: List<RoutineTask>, replaceAll: Boolean, parsedAnchors: List<RoutineTask>) -> Unit,
   onBack: () -> Unit = {},
   modifier: Modifier = Modifier

@@ -66,7 +66,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   private val _sleepDurationMinutes = MutableStateFlow(repository.getSleepDurationMinutes())
   val sleepDurationMinutes: StateFlow<Int> = _sleepDurationMinutes.asStateFlow()
 
-  private val _bufferMinutes = MutableStateFlow(repository.getBufferMinutes())
+  private val _bufferMinutes = MutableStateFlow(repository.getBufferMinutes().coerceAtLeast(0))
   val bufferMinutes: StateFlow<Int> = _bufferMinutes.asStateFlow()
 
   private val _anchors = MutableStateFlow(repository.getAnchors())

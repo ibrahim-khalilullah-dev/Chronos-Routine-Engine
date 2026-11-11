@@ -78,7 +78,7 @@ data class RoutineTask(
   val customRingtoneTitle: String? = null,
   val isSoundAlertEnabled: Boolean = true,
   val toleranceMinutes: Int = 0, // Schedule Flexibility (0 to 15m, default 0)
-  val interTaskBufferMinutes: Int = 5, // Inter-task Rest Buffer (0 to 30m, default 5)
+  val interTaskBufferMinutes: Int = 0, // Inter-task Rest Buffer (0 to 30m, default 0)
   val category: String? = null,
   val fridayTitle: String? = null,
   val fridayStartTimeMinute: Int? = null,

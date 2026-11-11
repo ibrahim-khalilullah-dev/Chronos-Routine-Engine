@@ -66,7 +66,7 @@ class RoutineRepository(context: Context) {
       val anchorsJson = vaultObj.optJSONArray("anchors")
       val dynamicTasksJson = vaultObj.optJSONArray("dynamicTasks")
       val sleepDuration = vaultObj.optInt("sleepDurationMinutes", 360)
-      val bufferMinutes = vaultObj.optInt("bufferMinutes", 5)
+      val bufferMinutes = vaultObj.optInt("bufferMinutes", 0)
 
       val editor = prefs.edit()
       if (!prefs.contains(KEY_SLEEP_DURATION)) {
@@ -241,7 +241,7 @@ class RoutineRepository(context: Context) {
   }
 
   fun getBufferMinutes(): Int {
-    return prefs.getInt(KEY_BUFFER_DURATION, 5)
+    return prefs.getInt(KEY_BUFFER_DURATION, 0)
   }
 
   fun setBufferMinutes(minutes: Int) {
@@ -557,7 +557,7 @@ class RoutineRepository(context: Context) {
         customRingtoneTitle = if (obj.has("customRingtoneTitle")) obj.getString("customRingtoneTitle") else null,
         isSoundAlertEnabled = obj.optBoolean("isSoundAlertEnabled", true),
         toleranceMinutes = obj.optInt("toleranceMinutes", 0),
-        interTaskBufferMinutes = obj.optInt("interTaskBufferMinutes", 5),
+        interTaskBufferMinutes = obj.optInt("interTaskBufferMinutes", 0),
         category = if (obj.has("category")) obj.getString("category") else null,
         fridayTitle = if (obj.has("fridayTitle")) obj.getString("fridayTitle") else null,
         fridayStartTimeMinute = if (obj.has("fridayStartTimeMinute")) obj.getInt("fridayStartTimeMinute") else null,

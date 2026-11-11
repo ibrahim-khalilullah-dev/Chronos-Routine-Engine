@@ -234,6 +234,7 @@ fun TaskModalBottomSheet(
   onMoveToTrash: (taskId: String) -> Unit = {}
 ) {
   val context = LocalContext.current
+  val haptic = LocalHapticFeedback.current
   val sheetState = rememberModalBottomSheetState(
     skipPartiallyExpanded = true
   )
@@ -294,8 +295,8 @@ fun TaskModalBottomSheet(
   var toleranceMinutes by remember { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
   var customFlexibilityMinutes by remember { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
   var customFlexInput by remember { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
-  var interTaskBufferMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.interTaskBufferMinutes ?: 5) }
-  var bufferInput by remember(initialTask) { mutableStateOf((initialTask?.interTaskBufferMinutes ?: 5).toString()) }
+  var interTaskBufferMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.interTaskBufferMinutes ?: 0) }
+  var bufferInput by remember(initialTask) { mutableStateOf((initialTask?.interTaskBufferMinutes ?: 0).toString()) }
   var isHighPriority by remember { mutableStateOf(initialTask?.isHighPriority ?: false) }
   var isVoiceEnabled by remember { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
   var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
@@ -1235,8 +1236,15 @@ fun TaskModalBottomSheet(
                   ) {
                     IconButton(
                       onClick = {
-                        interTaskBufferMinutes = (interTaskBufferMinutes - 5).coerceAtLeast(0)
-                        bufferInput = interTaskBufferMinutes.toString()
+                        val current = interTaskBufferMinutes
+                        val nextVal = when {
+                          current > 5 -> ((current - 1) / 5) * 5 // 30->25, 25->20, 20->15, 15->10, 10->5
+                          current in 1..5 -> current - 1          // 5->4, 4->3, 3->2, 2->1, 1->0
+                          else -> 0
+                        }.coerceIn(0, 30)
+                        interTaskBufferMinutes = nextVal
+                        bufferInput = nextVal.toString()
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                       },
                       modifier = Modifier.size(28.dp)
                     ) {
@@ -1272,8 +1280,15 @@ fun TaskModalBottomSheet(
                     )
                     IconButton(
                       onClick = {
-                        interTaskBufferMinutes = (interTaskBufferMinutes + 5).coerceAtMost(30)
-                        bufferInput = interTaskBufferMinutes.toString()
+                        val current = interTaskBufferMinutes
+                        val nextVal = when {
+                          current < 5 -> current + 1             // 0->1, 1->2, 2->3, 3->4, 4->5
+                          current in 5..25 -> (current / 5 + 1) * 5 // 5->10, 10->15, 15->20, 20->25, 25->30
+                          else -> 30
+                        }.coerceIn(0, 30)
+                        interTaskBufferMinutes = nextVal
+                        bufferInput = nextVal.toString()
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                       },
                       modifier = Modifier.size(28.dp)
                     ) {

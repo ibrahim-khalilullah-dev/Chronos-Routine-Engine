@@ -376,7 +376,7 @@ object SchedulerEngine {
     anchors: List<RoutineTask>,
     dynamicTasks: List<RoutineTask>,
     activeDay: RoutineDay,
-    interTaskBufferMinutes: Int = 5
+    interTaskBufferMinutes: Int = 0
   ): ScheduleResult {
     // 1. Anchors active on this day (excluding soft-deleted and paused)
     val dayAnchors = anchors

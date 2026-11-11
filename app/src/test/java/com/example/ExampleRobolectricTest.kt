@@ -502,13 +502,15 @@ class ExampleRobolectricTest {
     val slot2 = anchors.first { it.slotNumber == 2 }
     val slot2End = slot2.startTimeMinute + slot2.durationMinutes
 
+    val buffer = 10
     val dynamicTask1 = RoutineTask(
       id = "dyn_1",
       title = "Morning Deep Focus",
       type = TaskType.DYNAMIC,
       startTimeMinute = slot2End, // Requests to start immediately when Slot 2 ends
       durationMinutes = 60,
-      allowSplitting = false
+      allowSplitting = false,
+      interTaskBufferMinutes = buffer
     )
 
     val dynamicTask2 = RoutineTask(
@@ -519,8 +521,6 @@ class ExampleRobolectricTest {
       durationMinutes = 60,
       allowSplitting = false
     )
-
-    val buffer = 10
     val result = SchedulerEngine.scheduleDay(
       anchors = anchors,
       dynamicTasks = listOf(dynamicTask1, dynamicTask2),
