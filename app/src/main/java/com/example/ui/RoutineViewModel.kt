@@ -66,7 +66,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   private val _sleepDurationMinutes = MutableStateFlow(repository.getSleepDurationMinutes())
   val sleepDurationMinutes: StateFlow<Int> = _sleepDurationMinutes.asStateFlow()
 
-  private val _bufferMinutes = MutableStateFlow(repository.getBufferMinutes().coerceAtLeast(0))
+  private val _bufferMinutes = MutableStateFlow(0)
   val bufferMinutes: StateFlow<Int> = _bufferMinutes.asStateFlow()
 
   private val _anchors = MutableStateFlow(repository.getAnchors())
@@ -93,6 +93,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
 
   init {
     val restored = repository.checkAndAutoRestoreVault()
+    val rawTasks = repository.getDynamicTasks()
+    _dynamicTasks.value = rawTasks
     if (restored) {
       refreshFromRepository()
     }
@@ -146,7 +148,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
 
   fun refreshFromRepository() {
     _sleepDurationMinutes.value = repository.getSleepDurationMinutes()
-    _bufferMinutes.value = repository.getBufferMinutes()
+    _bufferMinutes.value = repository.getBufferMinutes().let { if (it == 5) 0 else it }
     _anchors.value = repository.getAnchors()
     _dynamicTasks.value = repository.getDynamicTasks()
     _deletedTasks.value = repository.getDeletedTasks()

@@ -295,8 +295,36 @@ fun TaskModalBottomSheet(
   var toleranceMinutes by remember { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
   var customFlexibilityMinutes by remember { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
   var customFlexInput by remember { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
-  var interTaskBufferMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.interTaskBufferMinutes ?: 0) }
-  var bufferInput by remember(initialTask) { mutableStateOf((initialTask?.interTaskBufferMinutes ?: 0).toString()) }
+  var interTaskBufferMinutes by remember(initialTask) {
+    mutableIntStateOf(initialTask?.interTaskBufferMinutes ?: 0)
+  }
+  var bufferInput by remember(initialTask) {
+    mutableStateOf((initialTask?.interTaskBufferMinutes ?: 0).toString())
+  }
+
+  val decrementBuffer = {
+    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    val current = interTaskBufferMinutes
+    val nextVal = when {
+      current > 5 -> ((current - 1) / 5) * 5 // 30->25, 25->20, 20->15, 15->10, 10->5
+      current in 1..5 -> current - 1          // 5->4, 4->3, 3->2, 2->1, 1->0
+      else -> 0
+    }.coerceIn(0, 30)
+    interTaskBufferMinutes = nextVal
+    bufferInput = nextVal.toString()
+  }
+
+  val incrementBuffer = {
+    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    val current = interTaskBufferMinutes
+    val nextVal = when {
+      current < 5 -> current + 1                // 0->1, 1->2, 2->3, 3->4, 4->5
+      current in 5..25 -> (current / 5 + 1) * 5 // 5->10, 10->15, 15->20, 20->25, 25->30
+      else -> 30
+    }.coerceIn(0, 30)
+    interTaskBufferMinutes = nextVal
+    bufferInput = nextVal.toString()
+  }
   var isHighPriority by remember { mutableStateOf(initialTask?.isHighPriority ?: false) }
   var isVoiceEnabled by remember { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
   var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
@@ -1234,33 +1262,36 @@ fun TaskModalBottomSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                   ) {
-                    IconButton(
-                      onClick = {
-                        val current = interTaskBufferMinutes
-                        val nextVal = when {
-                          current > 5 -> ((current - 1) / 5) * 5 // 30->25, 25->20, 20->15, 15->10, 10->5
-                          current in 1..5 -> current - 1          // 5->4, 4->3, 3->2, 2->1, 1->0
-                          else -> 0
-                        }.coerceIn(0, 30)
-                        interTaskBufferMinutes = nextVal
-                        bufferInput = nextVal.toString()
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                      },
-                      modifier = Modifier.size(28.dp)
+                    // Minus Stepper [-]
+                    Surface(
+                      onClick = { decrementBuffer() },
+                      shape = CircleShape,
+                      color = Color(0xFF1E293B),
+                      border = BorderStroke(1.dp, Color(0xFF334155)),
+                      modifier = Modifier
+                        .size(32.dp)
+                        .testTag("decrement_buffer_button")
                     ) {
-                      Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                      }
                     }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // Editable Numeric Display
                     OutlinedTextField(
                       value = bufferInput,
                       onValueChange = { raw ->
-                        val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                        bufferInput = clean
+                        val digits = raw.filter { it.isDigit() }.take(2)
+                        bufferInput = digits
+                        val parsed = digits.toIntOrNull() ?: 0
                         interTaskBufferMinutes = parsed.coerceIn(0, 30)
                       },
                       suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
                       keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                       modifier = Modifier
-                        .width(72.dp)
+                        .width(66.dp)
                         .testTag("custom_buffer_input"),
                       colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = Color(0xFF0F172A),
@@ -1278,21 +1309,22 @@ fun TaskModalBottomSheet(
                         textAlign = TextAlign.Center
                       )
                     )
-                    IconButton(
-                      onClick = {
-                        val current = interTaskBufferMinutes
-                        val nextVal = when {
-                          current < 5 -> current + 1             // 0->1, 1->2, 2->3, 3->4, 4->5
-                          current in 5..25 -> (current / 5 + 1) * 5 // 5->10, 10->15, 15->20, 20->25, 25->30
-                          else -> 30
-                        }.coerceIn(0, 30)
-                        interTaskBufferMinutes = nextVal
-                        bufferInput = nextVal.toString()
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                      },
-                      modifier = Modifier.size(28.dp)
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // Plus Stepper [+]
+                    Surface(
+                      onClick = { incrementBuffer() },
+                      shape = CircleShape,
+                      color = Color(0xFF1E293B),
+                      border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
+                      modifier = Modifier
+                        .size(32.dp)
+                        .testTag("increment_buffer_button")
                     ) {
-                      Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                      }
                     }
                   }
                 }
