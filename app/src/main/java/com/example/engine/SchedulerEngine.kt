@@ -325,7 +325,7 @@ object SchedulerEngine {
     for (task in committedTasks) {
       val start = ((task.startTimeMinute % 1440) + 1440) % 1440
       val taskBuffer = if (task.type == TaskType.DYNAMIC) {
-        task.interTaskBufferMinutes.coerceAtLeast(interTaskBufferMinutes)
+        task.interTaskBufferMinutes.coerceIn(0, 30)
       } else {
         0 // Anchors possess hard mathematical boundaries; do NOT bleed rest buffers across adjacent anchors
       }
@@ -437,7 +437,8 @@ object SchedulerEngine {
           overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor boundary prevents 45m minimum fluid twin duration."))
         } else if (gap1.startMinute == gap2.startMinute && gap1.endMinute == gap2.endMinute) {
           // Both twins in same inter-anchor gap
-          val available = gap1.durationMinutes - interTaskBufferMinutes
+          val twinBuffer = part1.interTaskBufferMinutes.coerceIn(0, 30)
+          val available = gap1.durationMinutes - twinBuffer
           if (available < MIN_FLUID_TWIN_MINUTES * 2) {
             overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor gap too small to host two 45m fluid twin sessions."))
             overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor gap too small to host two 45m fluid twin sessions."))
@@ -448,13 +449,13 @@ object SchedulerEngine {
               d2 = available - d1
             }
             val minStart1 = gap1.startMinute
-            val maxStart1 = gap1.endMinute - (d1 + interTaskBufferMinutes + d2)
+            val maxStart1 = gap1.endMinute - (d1 + twinBuffer + d2)
             val start1 = if (maxStart1 >= minStart1) {
               part1.startTimeMinute.coerceIn(minStart1, maxStart1)
             } else {
               minStart1
             }
-            val minStart2 = start1 + d1 + interTaskBufferMinutes
+            val minStart2 = start1 + d1 + twinBuffer
             val maxStart2 = gap1.endMinute - d2
             val start2 = if (maxStart2 >= minStart2) {
               if (part2.startTimeMinute >= minStart2) {

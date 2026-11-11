@@ -381,6 +381,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           fluidTwinPart = 1,
           fluidTotalPoolMinutes = totalPool,
           toleranceMinutes = flex,
+          customFlexibilityMinutes = flex,
           interTaskBufferMinutes = rest
         )
 
@@ -403,6 +404,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           fluidTwinPart = 2,
           fluidTotalPoolMinutes = totalPool,
           toleranceMinutes = flex,
+          customFlexibilityMinutes = flex,
           interTaskBufferMinutes = rest
         )
 
@@ -570,6 +572,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         customRingtoneUri = ringtoneUri,
         customRingtoneTitle = ringtoneTitle,
         toleranceMinutes = tolerance,
+        customFlexibilityMinutes = tolerance,
         interTaskBufferMinutes = restBuffer
       )
 

@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -97,6 +98,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -290,6 +294,8 @@ fun TaskModalBottomSheet(
   var toleranceMinutes by remember { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
   var customFlexibilityMinutes by remember { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
   var customFlexInput by remember { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
+  var interTaskBufferMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.interTaskBufferMinutes ?: 5) }
+  var bufferInput by remember(initialTask) { mutableStateOf((initialTask?.interTaskBufferMinutes ?: 5).toString()) }
   var isHighPriority by remember { mutableStateOf(initialTask?.isHighPriority ?: false) }
   var isVoiceEnabled by remember { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
   var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
@@ -434,6 +440,7 @@ fun TaskModalBottomSheet(
           voiceVolume != initialTask.voiceVolume ||
           isHighPriority != (initialTask.isHighPriority ?: false) ||
           customFlexibilityMinutes != (initialTask.customFlexibilityMinutes ?: 0) ||
+          interTaskBufferMinutes != initialTask.interTaskBufferMinutes ||
           (isSlot3 && (
             fridayTitle != (initialTask.fridayTitle ?: "Jumu'ah") ||
             (fridayDurationHours * 60 + fridayDurationMins) != (initialTask.fridayDurationMinutes ?: 120) ||
@@ -569,6 +576,7 @@ fun TaskModalBottomSheet(
         customRingtoneTitle = customRingtoneTitle,
         isSoundAlertEnabled = isSoundAlertEnabled,
         toleranceMinutes = toleranceMinutes,
+        interTaskBufferMinutes = interTaskBufferMinutes,
         category = selectedCategory.id
       )
       onSaveTask(task)
@@ -1065,93 +1073,212 @@ fun TaskModalBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Micro-Tile: Custom Flexibility Stepper
-            Surface(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
-              color = Color(0xFF0A0F1D)
+            // Side-by-Side Micro-Tiles: [FLEXIBLE] & [BUFFER TIME]
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              Row(
+              // Box 1 (Left - Flexible)
+              Surface(
                 modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(horizontal = 14.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                  .weight(1f)
+                  .clip(RoundedCornerShape(14.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+                color = Color(0xFF0A0F1D)
               ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Box(
-                    modifier = Modifier
-                      .size(28.dp)
-                      .clip(CircleShape)
-                      .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.AccessTime,
-                      contentDescription = null,
-                      tint = Color(0xFF06B6D4),
-                      modifier = Modifier.size(15.dp)
-                    )
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 10.dp)
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                      modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Icon(
+                        imageVector = Icons.Default.AccessTime,
+                        contentDescription = null,
+                        tint = Color(0xFF06B6D4),
+                        modifier = Modifier.size(13.dp)
+                      )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                      Text(
+                        text = "FLEXIBLE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFE2E8F0)
+                      )
+                      Text(
+                        text = "Compression tolerance",
+                        fontSize = 9.sp,
+                        color = Color(0xFF64748B)
+                      )
+                    }
                   }
-                  Spacer(modifier = Modifier.width(10.dp))
-                  Column {
-                    Text(
-                      text = "FLEXIBILITY",
-                      fontSize = 11.sp,
-                      fontWeight = FontWeight.Bold,
-                      fontFamily = FontFamily.Monospace,
-                      color = Color(0xFFE2E8F0)
+
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                  ) {
+                    IconButton(
+                      onClick = {
+                        customFlexibilityMinutes = (customFlexibilityMinutes - 5).coerceAtLeast(0)
+                        customFlexInput = customFlexibilityMinutes.toString()
+                      },
+                      modifier = Modifier.size(28.dp)
+                    ) {
+                      Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    }
+                    OutlinedTextField(
+                      value = customFlexInput,
+                      onValueChange = { raw ->
+                        val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                        customFlexInput = clean
+                        customFlexibilityMinutes = parsed.coerceIn(0, 30)
+                      },
+                      prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+                      suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                      modifier = Modifier
+                        .width(72.dp)
+                        .testTag("custom_flexibility_input"),
+                      colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF0F172A),
+                        unfocusedContainerColor = Color(0xFF0F172A),
+                        focusedBorderColor = Color(0xFF06B6D4),
+                        unfocusedBorderColor = Color(0xFF1E2C45),
+                        focusedTextColor = Color(0xFFF8FAFC),
+                        unfocusedTextColor = Color(0xFFF8FAFC)
+                      ),
+                      shape = RoundedCornerShape(10.dp),
+                      singleLine = true,
+                      textStyle = TextStyle(
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                      )
                     )
-                    Text(
-                      text = "Duration compression tolerance",
-                      fontSize = 10.sp,
-                      color = Color(0xFF64748B)
-                    )
+                    IconButton(
+                      onClick = {
+                        customFlexibilityMinutes = (customFlexibilityMinutes + 5).coerceAtMost(30)
+                        customFlexInput = customFlexibilityMinutes.toString()
+                      },
+                      modifier = Modifier.size(28.dp)
+                    ) {
+                      Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    }
                   }
                 }
+              }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  IconButton(
-                    onClick = {
-                      customFlexibilityMinutes = (customFlexibilityMinutes - 5).coerceAtLeast(0)
-                      customFlexInput = customFlexibilityMinutes.toString()
-                    },
-                    modifier = Modifier.size(30.dp)
-                  ) {
-                    Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+              // Box 2 (Right - Buffer Time)
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .clip(RoundedCornerShape(14.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+                color = Color(0xFF0A0F1D)
+              ) {
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 10.dp)
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                      modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Icon(
+                        imageVector = Icons.Default.Timelapse,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(13.dp)
+                      )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column {
+                      Text(
+                        text = "BUFFER TIME",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFE2E8F0)
+                      )
+                      Text(
+                        text = "Trailing rest gap",
+                        fontSize = 9.sp,
+                        color = Color(0xFF64748B)
+                      )
+                    }
                   }
-                  OutlinedTextField(
-                    value = customFlexInput,
-                    onValueChange = { raw ->
-                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                      customFlexInput = clean
-                      customFlexibilityMinutes = parsed.coerceIn(0, 30)
-                    },
-                    prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                    suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 11.sp) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.width(80.dp).testTag("custom_flexibility_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F172A),
-                      unfocusedContainerColor = Color(0xFF0F172A),
-                      focusedBorderColor = Color(0xFF06B6D4),
-                      unfocusedBorderColor = Color(0xFF1E2C45),
-                      focusedTextColor = Color(0xFFF8FAFC),
-                      unfocusedTextColor = Color(0xFFF8FAFC)
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    singleLine = true
-                  )
-                  IconButton(
-                    onClick = {
-                      customFlexibilityMinutes = (customFlexibilityMinutes + 5).coerceAtMost(30)
-                      customFlexInput = customFlexibilityMinutes.toString()
-                    },
-                    modifier = Modifier.size(30.dp)
+
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                   ) {
-                    Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    IconButton(
+                      onClick = {
+                        interTaskBufferMinutes = (interTaskBufferMinutes - 5).coerceAtLeast(0)
+                        bufferInput = interTaskBufferMinutes.toString()
+                      },
+                      modifier = Modifier.size(28.dp)
+                    ) {
+                      Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    }
+                    OutlinedTextField(
+                      value = bufferInput,
+                      onValueChange = { raw ->
+                        val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                        bufferInput = clean
+                        interTaskBufferMinutes = parsed.coerceIn(0, 30)
+                      },
+                      suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                      modifier = Modifier
+                        .width(72.dp)
+                        .testTag("custom_buffer_input"),
+                      colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF0F172A),
+                        unfocusedContainerColor = Color(0xFF0F172A),
+                        focusedBorderColor = Color(0xFF10B981),
+                        unfocusedBorderColor = Color(0xFF1E2C45),
+                        focusedTextColor = Color(0xFFF8FAFC),
+                        unfocusedTextColor = Color(0xFFF8FAFC)
+                      ),
+                      shape = RoundedCornerShape(10.dp),
+                      singleLine = true,
+                      textStyle = TextStyle(
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                      )
+                    )
+                    IconButton(
+                      onClick = {
+                        interTaskBufferMinutes = (interTaskBufferMinutes + 5).coerceAtMost(30)
+                        bufferInput = interTaskBufferMinutes.toString()
+                      },
+                      modifier = Modifier.size(28.dp)
+                    ) {
+                      Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    }
                   }
                 }
               }
@@ -3823,6 +3950,9 @@ private fun CustomAnalogClockModal(
     mutableStateOf(String.format(Locale.US, "%02d", selectedMinute))
   }
 
+  val hourFocusRequester = remember { FocusRequester() }
+  val minuteFocusRequester = remember { FocusRequester() }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = {
@@ -3864,12 +3994,15 @@ private fun CustomAnalogClockModal(
                 ),
                 RoundedCornerShape(12.dp)
               )
-              .clickable { isSelectingHour = true },
+              .clickable {
+                isSelectingHour = true
+                hourFocusRequester.requestFocus()
+              },
             color = if (isSelectingHour) Color(0xFF1E293B) else Color(0xFF121620)
           ) {
             Box(
               modifier = Modifier
-                .width(68.dp)
+                .width(66.dp)
                 .padding(vertical = 6.dp, horizontal = 4.dp),
               contentAlignment = Alignment.Center
             ) {
@@ -3889,7 +4022,7 @@ private fun CustomAnalogClockModal(
                   }
                 },
                 textStyle = TextStyle(
-                  fontSize = 32.sp,
+                  fontSize = 30.sp,
                   fontWeight = FontWeight.Bold,
                   fontFamily = FontFamily.Monospace,
                   textAlign = TextAlign.Center,
@@ -3901,14 +4034,22 @@ private fun CustomAnalogClockModal(
                   imeAction = ImeAction.Next
                 ),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .focusRequester(hourFocusRequester)
+                  .onFocusChanged { focusState ->
+                    if (focusState.isFocused && !isSelectingHour) {
+                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                      isSelectingHour = true
+                    }
+                  }
               )
             }
           }
 
           Text(
             text = ":",
-            fontSize = 32.sp,
+            fontSize = 30.sp,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF94A3B8),
             modifier = Modifier.padding(horizontal = 6.dp)
@@ -3925,12 +4066,15 @@ private fun CustomAnalogClockModal(
                 ),
                 RoundedCornerShape(12.dp)
               )
-              .clickable { isSelectingHour = false },
+              .clickable {
+                isSelectingHour = false
+                minuteFocusRequester.requestFocus()
+              },
             color = if (!isSelectingHour) Color(0xFF1E293B) else Color(0xFF121620)
           ) {
             Box(
               modifier = Modifier
-                .width(68.dp)
+                .width(66.dp)
                 .padding(vertical = 6.dp, horizontal = 4.dp),
               contentAlignment = Alignment.Center
             ) {
@@ -3950,7 +4094,7 @@ private fun CustomAnalogClockModal(
                   }
                 },
                 textStyle = TextStyle(
-                  fontSize = 32.sp,
+                  fontSize = 30.sp,
                   fontWeight = FontWeight.Bold,
                   fontFamily = FontFamily.Monospace,
                   textAlign = TextAlign.Center,
@@ -3962,7 +4106,15 @@ private fun CustomAnalogClockModal(
                   imeAction = ImeAction.Done
                 ),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .focusRequester(minuteFocusRequester)
+                  .onFocusChanged { focusState ->
+                    if (focusState.isFocused && isSelectingHour) {
+                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                      isSelectingHour = false
+                    }
+                  }
               )
             }
           }
@@ -4011,24 +4163,106 @@ private fun CustomAnalogClockModal(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Watch Dial (Custom Canvas with rotating hand & numerals)
-        Box(
-          modifier = Modifier
-            .size(230.dp)
-            .clip(CircleShape)
-            .background(Color(0xFF0F141E))
-            .border(BorderStroke(1.5.dp, Color(0xFF1F2637)), CircleShape),
-          contentAlignment = Alignment.Center
+        // Watch Dial Row: [ - ] (38dp) + Spacer(8dp) + Dial (200dp) + Spacer(8dp) + [ + ] (38dp) = 292dp
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.Center,
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          val dialRadius = 85.dp
+          // Left: Minus Button [-]
+          Surface(
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              if (isSelectingHour) {
+                val prevH = if (selectedHour12 <= 1) 12 else selectedHour12 - 1
+                selectedHour12 = prevH
+                hourInput = String.format(Locale.US, "%02d", prevH)
+              } else {
+                val prevM = if (selectedMinute <= 0) 59 else selectedMinute - 1
+                selectedMinute = prevM
+                minuteInput = String.format(Locale.US, "%02d", prevM)
+              }
+            },
+            shape = CircleShape,
+            color = Color(0xFF161E31),
+            border = BorderStroke(1.dp, Color(0xFF334155)),
+            modifier = Modifier.size(38.dp)
+          ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+              Text("-", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+            }
+          }
 
-          // Rotating Clock Hand Canvas with Pointer Drag/Tap
-          Canvas(
+          Spacer(modifier = Modifier.width(8.dp))
+
+          // Center: Circular Watch Dial Canvas (Box size 200.dp)
+          Box(
             modifier = Modifier
-              .fillMaxSize()
-              .pointerInput(isSelectingHour) {
-                detectDragGestures(
-                  onDragStart = { offset ->
+              .size(200.dp)
+              .clip(CircleShape)
+              .background(Color(0xFF0F141E))
+              .border(BorderStroke(1.5.dp, Color(0xFF1F2637)), CircleShape),
+            contentAlignment = Alignment.Center
+          ) {
+            val dialRadius = 74.dp
+
+            // Rotating Clock Hand Canvas with Pointer Drag/Tap
+            Canvas(
+              modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(isSelectingHour) {
+                  detectDragGestures(
+                    onDragStart = { offset ->
+                      val cx = size.width / 2f
+                      val cy = size.height / 2f
+                      val angleRad = atan2((offset.y - cy).toDouble(), (offset.x - cx).toDouble())
+                      var deg = Math.toDegrees(angleRad).toFloat() + 90f
+                      if (deg < 0) deg += 360f
+
+                      if (isSelectingHour) {
+                        val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
+                        if (h != selectedHour12) {
+                          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                          selectedHour12 = h
+                          hourInput = String.format(Locale.US, "%02d", h)
+                        }
+                      } else {
+                        val m = ((deg / 6f).roundToInt() % 60)
+                        if (m != selectedMinute) {
+                          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                          selectedMinute = m
+                          minuteInput = String.format(Locale.US, "%02d", m)
+                        }
+                      }
+                    },
+                    onDrag = { change, _ ->
+                      change.consume()
+                      val cx = size.width / 2f
+                      val cy = size.height / 2f
+                      val angleRad = atan2((change.position.y - cy).toDouble(), (change.position.x - cx).toDouble())
+                      var deg = Math.toDegrees(angleRad).toFloat() + 90f
+                      if (deg < 0) deg += 360f
+
+                      if (isSelectingHour) {
+                        val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
+                        if (h != selectedHour12) {
+                          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                          selectedHour12 = h
+                          hourInput = String.format(Locale.US, "%02d", h)
+                        }
+                      } else {
+                        val m = ((deg / 6f).roundToInt() % 60)
+                        if (m != selectedMinute) {
+                          haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                          selectedMinute = m
+                          minuteInput = String.format(Locale.US, "%02d", m)
+                        }
+                      }
+                    }
+                  )
+                }
+                .pointerInput(isSelectingHour) {
+                  detectTapGestures { offset ->
                     val cx = size.width / 2f
                     val cy = size.height / 2f
                     val angleRad = atan2((offset.y - cy).toDouble(), (offset.x - cx).toDouble())
@@ -4037,152 +4271,131 @@ private fun CustomAnalogClockModal(
 
                     if (isSelectingHour) {
                       val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
-                      if (h != selectedHour12) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        selectedHour12 = h
-                        hourInput = String.format(Locale.US, "%02d", h)
-                      }
+                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                      selectedHour12 = h
+                      hourInput = String.format(Locale.US, "%02d", h)
+                      isSelectingHour = false // Automatically transition to minute
+                      minuteFocusRequester.requestFocus()
                     } else {
                       val m = ((deg / 6f).roundToInt() % 60)
-                      if (m != selectedMinute) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        selectedMinute = m
-                        minuteInput = String.format(Locale.US, "%02d", m)
-                      }
+                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                      selectedMinute = m
+                      minuteInput = String.format(Locale.US, "%02d", m)
                     }
-                  },
-                  onDrag = { change, _ ->
-                    change.consume()
-                    val cx = size.width / 2f
-                    val cy = size.height / 2f
-                    val angleRad = atan2((change.position.y - cy).toDouble(), (change.position.x - cx).toDouble())
-                    var deg = Math.toDegrees(angleRad).toFloat() + 90f
-                    if (deg < 0) deg += 360f
-
-                    if (isSelectingHour) {
-                      val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
-                      if (h != selectedHour12) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        selectedHour12 = h
-                        hourInput = String.format(Locale.US, "%02d", h)
-                      }
-                    } else {
-                      val m = ((deg / 6f).roundToInt() % 60)
-                      if (m != selectedMinute) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        selectedMinute = m
-                        minuteInput = String.format(Locale.US, "%02d", m)
-                      }
-                    }
-                  }
-                )
-              }
-              .pointerInput(isSelectingHour) {
-                detectTapGestures { offset ->
-                  val cx = size.width / 2f
-                  val cy = size.height / 2f
-                  val angleRad = atan2((offset.y - cy).toDouble(), (offset.x - cx).toDouble())
-                  var deg = Math.toDegrees(angleRad).toFloat() + 90f
-                  if (deg < 0) deg += 360f
-
-                  if (isSelectingHour) {
-                    val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    selectedHour12 = h
-                    hourInput = String.format(Locale.US, "%02d", h)
-                    isSelectingHour = false // Automatically transition to minute
-                  } else {
-                    val m = ((deg / 6f).roundToInt() % 60)
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    selectedMinute = m
-                    minuteInput = String.format(Locale.US, "%02d", m)
                   }
                 }
-              }
-          ) {
-            val center = Offset(size.width / 2f, size.height / 2f)
-            val rPx = dialRadius.toPx()
+            ) {
+              val center = Offset(size.width / 2f, size.height / 2f)
+              val rPx = dialRadius.toPx()
 
-            val angleDeg = if (isSelectingHour) {
-              (selectedHour12 * 30f) - 90f
-            } else {
-              (selectedMinute * 6f) - 90f
+              val angleDeg = if (isSelectingHour) {
+                (selectedHour12 * 30f) - 90f
+              } else {
+                (selectedMinute * 6f) - 90f
+              }
+
+              val rad = Math.toRadians(angleDeg.toDouble())
+              val handX = center.x + rPx * cos(rad).toFloat()
+              val handY = center.y + rPx * sin(rad).toFloat()
+
+              // Draw line from center to selected position
+              drawLine(
+                color = Color(0xFF38BDF8),
+                start = center,
+                end = Offset(handX, handY),
+                strokeWidth = 3.dp.toPx(),
+                cap = StrokeCap.Round
+              )
+
+              // Draw selection knob
+              drawCircle(
+                color = Color(0xFF38BDF8),
+                radius = 14.dp.toPx(),
+                center = Offset(handX, handY)
+              )
+
+              // Center Pivot
+              drawCircle(
+                color = Color(0xFF38BDF8),
+                radius = 5.dp.toPx(),
+                center = center
+              )
             }
 
-            val rad = Math.toRadians(angleDeg.toDouble())
-            val handX = center.x + rPx * cos(rad).toFloat()
-            val handY = center.y + rPx * sin(rad).toFloat()
+            // 12 Dial Numerals
+            for (i in 1..12) {
+              val numeralAngle = Math.toRadians(((i * 30f) - 90f).toDouble())
+              val numX = dialRadius.value * cos(numeralAngle).toFloat()
+              val numY = dialRadius.value * sin(numeralAngle).toFloat()
 
-            // Draw line from center to selected position
-            drawLine(
-              color = Color(0xFF38BDF8),
-              start = center,
-              end = Offset(handX, handY),
-              strokeWidth = 3.dp.toPx(),
-              cap = StrokeCap.Round
-            )
+              val text = if (isSelectingHour) {
+                "$i"
+              } else {
+                val m = (i * 5) % 60
+                String.format(Locale.US, "%02d", m)
+              }
 
-            // Draw selection knob
-            drawCircle(
-              color = Color(0xFF38BDF8),
-              radius = 16.dp.toPx(),
-              center = Offset(handX, handY)
-            )
+              val isCurrent = if (isSelectingHour) {
+                selectedHour12 == i
+              } else {
+                selectedMinute == (i * 5) % 60
+              }
 
-            // Center Pivot
-            drawCircle(
-              color = Color(0xFF38BDF8),
-              radius = 5.dp.toPx(),
-              center = center
-            )
+              Box(
+                modifier = Modifier
+                  .size(28.dp)
+                  .align(Alignment.Center)
+                  .offset(x = numX.dp, y = numY.dp)
+                  .clip(CircleShape)
+                  .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    if (isSelectingHour) {
+                      selectedHour12 = i
+                      hourInput = String.format(Locale.US, "%02d", i)
+                      isSelectingHour = false
+                      minuteFocusRequester.requestFocus()
+                    } else {
+                      val m = (i * 5) % 60
+                      selectedMinute = m
+                      minuteInput = String.format(Locale.US, "%02d", m)
+                    }
+                  },
+                contentAlignment = Alignment.Center
+              ) {
+                Text(
+                  text = text,
+                  fontSize = 11.sp,
+                  fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
+                  color = if (isCurrent) Color.White else Color(0xFF94A3B8),
+                  fontFamily = FontFamily.Monospace
+                )
+              }
+            }
           }
 
-          // 12 Dial Numerals
-          for (i in 1..12) {
-            val numeralAngle = Math.toRadians(((i * 30f) - 90f).toDouble())
-            val numX = dialRadius.value * cos(numeralAngle).toFloat()
-            val numY = dialRadius.value * sin(numeralAngle).toFloat()
+          Spacer(modifier = Modifier.width(8.dp))
 
-            val text = if (isSelectingHour) {
-              "$i"
-            } else {
-              val m = (i * 5) % 60
-              String.format(Locale.US, "%02d", m)
-            }
-
-            val isCurrent = if (isSelectingHour) {
-              selectedHour12 == i
-            } else {
-              selectedMinute == (i * 5) % 60
-            }
-
-            Box(
-              modifier = Modifier
-                .size(32.dp)
-                .align(Alignment.Center)
-                .offset(x = numX.dp, y = numY.dp)
-                .clip(CircleShape)
-                .clickable {
-                  haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                  if (isSelectingHour) {
-                    selectedHour12 = i
-                    hourInput = String.format(Locale.US, "%02d", i)
-                    isSelectingHour = false
-                  } else {
-                    val m = (i * 5) % 60
-                    selectedMinute = m
-                    minuteInput = String.format(Locale.US, "%02d", m)
-                  }
-                },
-              contentAlignment = Alignment.Center
-            ) {
-              Text(
-                text = text,
-                fontSize = 12.sp,
-                fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
-                color = if (isCurrent) Color.White else Color(0xFF94A3B8),
-                fontFamily = FontFamily.Monospace
-              )
+          // Right: Plus Button [+]
+          Surface(
+            onClick = {
+              haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+              if (isSelectingHour) {
+                val nextH = if (selectedHour12 >= 12) 1 else selectedHour12 + 1
+                selectedHour12 = nextH
+                hourInput = String.format(Locale.US, "%02d", nextH)
+              } else {
+                val nextM = if (selectedMinute >= 59) 0 else selectedMinute + 1
+                selectedMinute = nextM
+                minuteInput = String.format(Locale.US, "%02d", nextM)
+              }
+            },
+            shape = CircleShape,
+            color = Color(0xFF161E31),
+            border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
+            modifier = Modifier.size(38.dp)
+          ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+              Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
             }
           }
         }
