@@ -134,8 +134,8 @@ fun TimelineScreen(
   val coroutineScope = rememberCoroutineScope()
   val listState = rememberLazyListState()
 
-  // Real device calendar day
-  val systemToday = remember {
+  // Real device calendar day dynamically updated with currentMinute / midnight rollover
+  val systemToday = remember(currentMinute) {
     when (java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)) {
       java.util.Calendar.SATURDAY -> RoutineDay.SATURDAY
       java.util.Calendar.SUNDAY -> RoutineDay.SUNDAY

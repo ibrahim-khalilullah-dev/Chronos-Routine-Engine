@@ -544,6 +544,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
 
       // Visual GUI Form Modal Sheet
       if (isModalOpen) {
+        val slot2Start = anchors.firstOrNull { it.slotNumber == 2 }?.startTimeMinute ?: 300
         TaskModalBottomSheet(
           initialTask = editingTask,
           onDismiss = {
@@ -553,7 +554,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           onSaveTask = { task ->
             viewModel.saveDynamicTask(task)
           },
-          onSaveFluidTwin = { title, pool, p1Title, p1Start, p1Dur, p1Voice, p2Title, p2Start, p2Dur, p2Voice, dnd, days, isVoice, nTitle, nBody, ringUri, ringTitle, isSoundAlert ->
+          onSaveFluidTwin = { title, pool, p1Title, p1Start, p1Dur, p1Voice, p2Title, p2Start, p2Dur, p2Voice, dnd, days, isVoice, nTitle, nBody, ringUri, ringTitle, isSoundAlert, twinId, buffer, flex ->
             viewModel.saveFluidTwin(
               title = title,
               totalPoolMinutes = pool,
@@ -572,13 +573,13 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               customNotificationBody = nBody,
               customRingtoneUri = ringUri,
               customRingtoneTitle = ringTitle,
-              isSoundAlertEnabled = isSoundAlert
+              isSoundAlertEnabled = isSoundAlert,
+              existingTwinId = twinId,
+              interTaskBufferMinutes = buffer,
+              customFlexibilityMinutes = flex
             )
           },
           onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle, isSoundAlert, friTitle, friStart, friDur, friVoice, volume, dndDelay ->
-            if (slot == 1) {
-              viewModel.updateSleepDuration(duration / 60f)
-            }
             viewModel.updateAnchorDetails(
               slotNumber = slot,
               title = title,
@@ -602,11 +603,19 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               dndDelayMinutes = dndDelay
             )
           },
-          onSaveSlot5 = { title, voice, days ->
-            viewModel.updateSlot5Protected(title, voice, days)
+          onSaveSlot5 = { title, voice, days, dnd, dndDelay ->
+            viewModel.updateSlot5Protected(title, voice, days, dnd, dndDelay)
           },
           onMoveToTrash = { taskId ->
             viewModel.moveToTrash(taskId)
+          },
+          slot2StartMinute = slot2Start,
+          allDynamicTasks = dynamicTasks,
+          onAbsorbTwin = { toDelete, partner ->
+            viewModel.deleteTwinAndAbsorbTime(toDelete, partner)
+          },
+          onDeleteTwinBoth = { twinId ->
+            viewModel.deleteBothFluidTwinParts(twinId)
           }
         )
       }

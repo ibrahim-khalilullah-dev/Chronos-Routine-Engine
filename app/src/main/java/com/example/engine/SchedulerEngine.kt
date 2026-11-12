@@ -30,7 +30,7 @@ object SchedulerEngine {
    * Slot 6: Maghrib (06:00 PM = 1080m, 30m duration, 5m DND delay)
    * Slot 7: Isha (08:00 PM = 1200m, 35m duration, 10m DND delay)
    */
-  fun createDefaultAnchors(sleepDurationMinutes: Int = 360): List<RoutineTask> {
+  fun createDefaultAnchors(sleepDurationMinutes: Int = 360, slot5Dnd: Boolean = false): List<RoutineTask> {
     val safeSleepDuration = sleepDurationMinutes.coerceIn(240, 720)
     val slot2Start = 300 // 05:00 AM
     val rawBedtime = slot2Start - safeSleepDuration
@@ -123,7 +123,7 @@ object SchedulerEngine {
       startTimeMinute = slot4End,
       durationMinutes = elasticDuration,
       voiceMessage = "বিরতির সময় হয়েছে।",
-      enableDnd = false,
+      enableDnd = slot5Dnd,
       dndDelayMinutes = 0,
       selectedDays = RoutineDay.allDays()
     )
@@ -283,6 +283,8 @@ object SchedulerEngine {
       slotNumber = 5,
       startTimeMinute = slot4End,
       durationMinutes = elasticDuration,
+      enableDnd = existingSlot5?.enableDnd ?: false,
+      dndDelayMinutes = existingSlot5?.dndDelayMinutes ?: 0,
       selectedDays = existingSlot5?.selectedDays ?: RoutineDay.allDays()
     )
     map[5] = slot5
@@ -435,6 +437,7 @@ object SchedulerEngine {
         if (gap1 == null || gap2 == null || gap1.durationMinutes < MIN_FLUID_TWIN_MINUTES || gap2.durationMinutes < MIN_FLUID_TWIN_MINUTES) {
           overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor boundary prevents 45m minimum fluid twin duration."))
           overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor boundary prevents 45m minimum fluid twin duration."))
+          continue
         } else if (gap1.startMinute == gap2.startMinute && gap1.endMinute == gap2.endMinute) {
           // Both twins in same inter-anchor gap
           val twinBuffer = part1.interTaskBufferMinutes.coerceIn(0, 30)
@@ -442,6 +445,8 @@ object SchedulerEngine {
           if (available < MIN_FLUID_TWIN_MINUTES * 2) {
             overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor gap too small to host two 45m fluid twin sessions."))
             overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor gap too small to host two 45m fluid twin sessions."))
+            continue
+          } else {
             var d1 = part1.durationMinutes.coerceIn(MIN_FLUID_TWIN_MINUTES, available - MIN_FLUID_TWIN_MINUTES)
             var d2 = (pool - d1).coerceIn(MIN_FLUID_TWIN_MINUTES, available - d1)
             if (d1 + d2 > available) {
@@ -488,16 +493,22 @@ object SchedulerEngine {
             d2 = (pool - d1).coerceIn(MIN_FLUID_TWIN_MINUTES, cap2)
           }
 
+          val b1 = part1.interTaskBufferMinutes.coerceIn(0, 30)
+          val maxStart1 = gap1.endMinute - (d1 + b1)
           val start1 = when {
-            part1.startTimeMinute in gap1.startMinute..(gap1.endMinute - d1) -> part1.startTimeMinute
+            maxStart1 >= gap1.startMinute && part1.startTimeMinute in gap1.startMinute..maxStart1 -> part1.startTimeMinute
             part1.startTimeMinute < gap1.startMinute -> gap1.startMinute
-            else -> gap1.endMinute - d1
+            maxStart1 >= gap1.startMinute -> maxStart1
+            else -> gap1.startMinute
           }
 
+          val b2 = part2.interTaskBufferMinutes.coerceIn(0, 30)
+          val maxStart2 = gap2.endMinute - (d2 + b2)
           val start2 = when {
-            part2.startTimeMinute in gap2.startMinute..(gap2.endMinute - d2) -> part2.startTimeMinute
+            maxStart2 >= gap2.startMinute && part2.startTimeMinute in gap2.startMinute..maxStart2 -> part2.startTimeMinute
             part2.startTimeMinute < gap2.startMinute -> gap2.startMinute
-            else -> gap2.endMinute - d2
+            maxStart2 >= gap2.startMinute -> maxStart2
+            else -> gap2.startMinute
           }
 
           scheduledTasks.add(part1.copy(startTimeMinute = start1, durationMinutes = d1, isSplitPart = false, isOverflow = false))
@@ -516,6 +527,8 @@ object SchedulerEngine {
     for (dynamicTask in sortedStandardTasks) {
       val gaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
       val requiredDuration = dynamicTask.durationMinutes
+      val taskBuffer = dynamicTask.interTaskBufferMinutes.coerceIn(0, 30)
+      val requiredBlock = requiredDuration + taskBuffer
       val prefStart = dynamicTask.startTimeMinute
       val effectiveTolerance = maxOf(dynamicTask.toleranceMinutes, dynamicTask.customFlexibilityMinutes).coerceIn(0, 30)
 
@@ -544,11 +557,11 @@ object SchedulerEngine {
         var minDistance = Int.MAX_VALUE
 
         for (gap in fencedGaps) {
-          if (gap.durationMinutes >= requiredDuration) {
+          if (gap.durationMinutes >= requiredBlock) {
             val possibleStart = when {
-              prefStart in gap.startMinute..(gap.endMinute - requiredDuration) -> prefStart
+              prefStart in gap.startMinute..(gap.endMinute - requiredBlock) -> prefStart
               prefStart < gap.startMinute -> gap.startMinute
-              else -> gap.endMinute - requiredDuration
+              else -> gap.endMinute - requiredBlock
             }
             val distance = Math.abs(possibleStart - prefStart)
             if (distance < minDistance) {
@@ -574,18 +587,20 @@ object SchedulerEngine {
         // Try tolerance / custom flexibility within fencedGaps
         if (effectiveTolerance > 0) {
           val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(15)
+          val minBlock = minViable + taskBuffer
           var flexGap: ScheduleGap? = null
           var flexStart = -1
           var flexDuration = -1
           var minFlexDist = Int.MAX_VALUE
 
           for (gap in fencedGaps) {
-            if (gap.durationMinutes >= minViable) {
-              val fittedDuration = gap.durationMinutes.coerceIn(minViable, requiredDuration)
+            if (gap.durationMinutes >= minBlock) {
+              val fittedDuration = (gap.durationMinutes - taskBuffer).coerceIn(minViable, requiredDuration)
+              val fittedBlock = fittedDuration + taskBuffer
               val possibleStart = when {
-                prefStart in gap.startMinute..(gap.endMinute - fittedDuration) -> prefStart
+                prefStart in gap.startMinute..(gap.endMinute - fittedBlock) -> prefStart
                 prefStart < gap.startMinute -> gap.startMinute
-                else -> gap.endMinute - fittedDuration
+                else -> gap.endMinute - fittedBlock
               }
               val distance = Math.abs(possibleStart - prefStart)
               if (distance < minFlexDist) {
@@ -626,11 +641,11 @@ object SchedulerEngine {
       var minDistance = Int.MAX_VALUE
 
       for (gap in gaps) {
-        if (gap.durationMinutes >= requiredDuration) {
+        if (gap.durationMinutes >= requiredBlock) {
           val possibleStart = when {
-            prefStart in gap.startMinute..(gap.endMinute - requiredDuration) -> prefStart
+            prefStart in gap.startMinute..(gap.endMinute - requiredBlock) -> prefStart
             prefStart < gap.startMinute -> gap.startMinute
-            else -> gap.endMinute - requiredDuration
+            else -> gap.endMinute - requiredBlock
           }
           val distance = Math.abs(possibleStart - prefStart)
           if (distance < minDistance) {
@@ -656,18 +671,20 @@ object SchedulerEngine {
       // Schedule Float / Tolerance Margin / Custom Flexibility (±5m to ±30m flexibility)
       if (effectiveTolerance > 0) {
         val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(15)
+        val minBlock = minViable + taskBuffer
         var flexGap: ScheduleGap? = null
         var flexStart = -1
         var flexDuration = -1
         var minFlexDist = Int.MAX_VALUE
 
         for (gap in gaps) {
-          if (gap.durationMinutes >= minViable) {
-            val fittedDuration = gap.durationMinutes.coerceIn(minViable, requiredDuration)
+          if (gap.durationMinutes >= minBlock) {
+            val fittedDuration = (gap.durationMinutes - taskBuffer).coerceIn(minViable, requiredDuration)
+            val fittedBlock = fittedDuration + taskBuffer
             val possibleStart = when {
-              prefStart in gap.startMinute..(gap.endMinute - fittedDuration) -> prefStart
+              prefStart in gap.startMinute..(gap.endMinute - fittedBlock) -> prefStart
               prefStart < gap.startMinute -> gap.startMinute
-              else -> gap.endMinute - fittedDuration
+              else -> gap.endMinute - fittedBlock
             }
             val distance = Math.abs(possibleStart - prefStart)
             if (distance < minFlexDist) {

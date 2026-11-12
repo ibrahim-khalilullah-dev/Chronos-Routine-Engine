@@ -883,6 +883,24 @@ fun DynamicTaskCard(
             )
           }
 
+          if (task.interTaskBufferMinutes > 0) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF10B981).copy(alpha = 0.2f))
+                .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)), RoundedCornerShape(8.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+              Text(
+                text = "+${task.interTaskBufferMinutes}m rest",
+                color = Color(0xFF6EE7B7),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+              )
+            }
+          }
+
           if (task.enableDnd) {
             Spacer(modifier = Modifier.width(6.dp))
             Icon(

@@ -357,7 +357,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         val parsedDays = parseDaysToken(daysToken)
 
         val flex = rawTokens.getOrNull(12)?.toIntOrNull()?.coerceIn(0, 30) ?: 0
-        val rest = rawTokens.getOrNull(13)?.toIntOrNull()?.coerceIn(0, 30) ?: 5
+        val rest = rawTokens.getOrNull(13)?.toIntOrNull()?.coerceIn(0, 30) ?: 0
 
         val totalPool = requestedPool.coerceAtLeast(p1Dur + p2Dur)
         val twinId = "fluid_${UUID.randomUUID().toString().take(8)}"
@@ -519,7 +519,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
 
       // Flexibility (toleranceMinutes) & Rest Buffer (interTaskBufferMinutes) OR Exported Twin Tokens
       var tolerance = 0
-      var restBuffer = 5
+      var restBuffer = 0
       var isFluidTwin = false
       var fluidPart: Int? = null
       var fluidPool: Int? = null
@@ -539,7 +539,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           // Regular dynamic: Flexibility & RestBuffer
           tolerance = t7.toIntOrNull()?.coerceIn(0, 30) ?: 0
           if (tokens.size > 8) {
-            restBuffer = tokens[8].toIntOrNull()?.coerceIn(0, 30) ?: 5
+            restBuffer = tokens[8].toIntOrNull()?.coerceIn(0, 30) ?: 0
           }
         }
       }

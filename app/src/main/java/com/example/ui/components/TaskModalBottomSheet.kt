@@ -206,8 +206,11 @@ fun TaskModalBottomSheet(
     customNotificationBody: String,
     customRingtoneUri: String?,
     customRingtoneTitle: String?,
-    isSoundAlertEnabled: Boolean
-  ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    isSoundAlertEnabled: Boolean,
+    existingTwinId: String?,
+    interTaskBufferMinutes: Int,
+    customFlexibilityMinutes: Int
+  ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
   onSaveAnchorDetails: (
     slotNumber: Int,
     title: String,
@@ -230,8 +233,12 @@ fun TaskModalBottomSheet(
     voiceVolume: Float,
     dndDelayMinutes: Int
   ) -> Unit,
-  onSaveSlot5: (title: String, voiceMessage: String, selectedDays: Set<RoutineDay>) -> Unit,
-  onMoveToTrash: (taskId: String) -> Unit = {}
+  onSaveSlot5: (title: String, voiceMessage: String, selectedDays: Set<RoutineDay>, enableDnd: Boolean, dndDelayMinutes: Int) -> Unit,
+  onMoveToTrash: (taskId: String) -> Unit = {},
+  slot2StartMinute: Int = 300,
+  allDynamicTasks: List<RoutineTask> = emptyList(),
+  onAbsorbTwin: ((taskToDeleteId: String, partnerTaskId: String) -> Unit)? = null,
+  onDeleteTwinBoth: ((twinId: String) -> Unit)? = null
 ) {
   val context = LocalContext.current
   val haptic = LocalHapticFeedback.current
@@ -330,27 +337,42 @@ fun TaskModalBottomSheet(
   var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
   var voiceVolume by remember { mutableFloatStateOf(initialTask?.voiceVolume ?: 1f) }
 
+  // Fluid Twin Partner Discovery & Initialization
+  val existingTwinPartner = remember(initialTask, allDynamicTasks) {
+    if (initialTask?.isFluidTwin == true && initialTask.fluidTwinId != null) {
+      allDynamicTasks.firstOrNull { it.fluidTwinId == initialTask.fluidTwinId && it.id != initialTask.id }
+    } else null
+  }
+
+  val resolvedP1Task = if (initialTask?.isFluidTwin == true) {
+    if (initialTask.fluidTwinPart == 1) initialTask else existingTwinPartner
+  } else null
+
+  val resolvedP2Task = if (initialTask?.isFluidTwin == true) {
+    if (initialTask.fluidTwinPart == 2) initialTask else existingTwinPartner
+  } else null
+
   // Dual Session 1 (Cyan Theme #38BDF8)
   var part1Title by remember {
-    mutableStateOf(if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 1) initialTask.title else "")
+    mutableStateOf(resolvedP1Task?.title ?: if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 1) initialTask.title else "")
   }
-  var part1StartHour by remember { mutableIntStateOf(startHour) }
-  var part1StartMinute by remember { mutableIntStateOf(startMinute) }
-  var part1DurationHours by remember { mutableIntStateOf(1) }
-  var part1DurationMins by remember { mutableIntStateOf(30) }
+  var part1StartHour by remember { mutableIntStateOf(resolvedP1Task?.let { it.startTimeMinute / 60 } ?: startHour) }
+  var part1StartMinute by remember { mutableIntStateOf(resolvedP1Task?.let { it.startTimeMinute % 60 } ?: startMinute) }
+  var part1DurationHours by remember { mutableIntStateOf(resolvedP1Task?.let { it.durationMinutes / 60 } ?: 1) }
+  var part1DurationMins by remember { mutableIntStateOf(resolvedP1Task?.let { it.durationMinutes % 60 } ?: 30) }
   var part1SafetyFloor by remember { mutableIntStateOf(45) }
-  var part1VoiceMessage by remember { mutableStateOf(voiceMessage) }
+  var part1VoiceMessage by remember { mutableStateOf(resolvedP1Task?.voiceMessage ?: voiceMessage) }
 
   // Dual Session 2 (Violet Theme #8B5CF6)
   var part2Title by remember {
-    mutableStateOf(if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 2) initialTask.title else "")
+    mutableStateOf(resolvedP2Task?.title ?: if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 2) initialTask.title else "")
   }
-  var part2StartHour by remember { mutableIntStateOf(14) }
-  var part2StartMinute by remember { mutableIntStateOf(0) }
-  var part2DurationHours by remember { mutableIntStateOf(1) }
-  var part2DurationMins by remember { mutableIntStateOf(30) }
+  var part2StartHour by remember { mutableIntStateOf(resolvedP2Task?.let { it.startTimeMinute / 60 } ?: 14) }
+  var part2StartMinute by remember { mutableIntStateOf(resolvedP2Task?.let { it.startTimeMinute % 60 } ?: 0) }
+  var part2DurationHours by remember { mutableIntStateOf(resolvedP2Task?.let { it.durationMinutes / 60 } ?: 1) }
+  var part2DurationMins by remember { mutableIntStateOf(resolvedP2Task?.let { it.durationMinutes % 60 } ?: 30) }
   var part2SafetyFloor by remember { mutableIntStateOf(45) }
-  var part2VoiceMessage by remember { mutableStateOf("") }
+  var part2VoiceMessage by remember { mutableStateOf(resolvedP2Task?.voiceMessage ?: "") }
 
   // System Integrations & Recurrence
   var isSoundAlertEnabled by remember { mutableStateOf(initialTask?.isSoundAlertEnabled ?: true) }
@@ -494,17 +516,16 @@ fun TaskModalBottomSheet(
 
   val triggerSave: () -> Unit = {
     if (isAnchor) {
-      val calculatedDuration = durationHours * 60 + durationMins
+      val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(15)
       val calculatedStart = startHour * 60 + startMinute
-      val calculatedFriDuration = fridayDurationHours * 60 + fridayDurationMins
+      val calculatedFriDuration = (fridayDurationHours * 60 + fridayDurationMins).coerceAtLeast(15)
       val calculatedFriStart = fridayStartHour * 60 + fridayStartMinute
       if (isSlot5) {
-        onSaveSlot5(title.ifBlank { "Elastic Rubber Buffer" }, voiceMessage, selectedDays)
+        onSaveSlot5(title.ifBlank { "Elastic Rubber Buffer" }, voiceMessage, selectedDays, enableDnd, 0)
       } else if (slotNum != null) {
         if (isSlot1) {
           val finalSleepDuration = calculatedDuration.coerceIn(240, 720) // 4h to 12h
-          val slot2WakeMinute = initialTask?.endTimeMinute ?: 300 // default 05:00 AM = 300m
-          val calculatedBedtime = ((slot2WakeMinute - finalSleepDuration) % 1440 + 1440) % 1440
+          val calculatedBedtime = ((slot2StartMinute - finalSleepDuration) % 1440 + 1440) % 1440
           onSaveAnchorDetails(
             1,
             title.ifBlank { "Reverse Sleep Recovery" },
@@ -578,10 +599,13 @@ fun TaskModalBottomSheet(
         "",
         customRingtoneUri,
         customRingtoneTitle,
-        isSoundAlertEnabled
+        isSoundAlertEnabled,
+        initialTask?.fluidTwinId,
+        interTaskBufferMinutes,
+        customFlexibilityMinutes
       )
     } else {
-      val calculatedDuration = durationHours * 60 + durationMins
+      val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(15)
       val calculatedStart = startHour * 60 + startMinute
       val actualTitle = title.ifBlank { "${selectedCategory.icon} ${selectedCategory.defaultName}" }
 
@@ -1291,7 +1315,7 @@ fun TaskModalBottomSheet(
                       suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
                       keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                       modifier = Modifier
-                        .width(66.dp)
+                        .width(84.dp)
                         .testTag("custom_buffer_input"),
                       colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = Color(0xFF0F172A),
@@ -2158,39 +2182,102 @@ fun TaskModalBottomSheet(
     )
   }
 
-  // Delete Confirmation Dialog
+  // Delete Confirmation Dialog (Dual Action for Fluid Twins)
   if (showDeleteConfirmDialog && initialTask != null) {
-    AlertDialog(
-      onDismissRequest = { showDeleteConfirmDialog = false },
-      title = { Text("Delete Routine Task?", fontWeight = FontWeight.Bold, color = TextPrimary) },
-      text = {
-        Text(
-          "“${initialTask.title}” will be moved to the Trash Bin. You can restore it within 30 days.",
-          color = TextSecondary,
-          fontSize = 13.sp
-        )
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            showDeleteConfirmDialog = false
-            onMoveToTrash(initialTask.id)
-            onDismiss()
-          },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed, contentColor = Color.White),
-          shape = RoundedCornerShape(12.dp)
-        ) {
-          Text("Move to Trash", fontWeight = FontWeight.Bold)
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = { showDeleteConfirmDialog = false }) {
-          Text("Cancel", color = TextSecondary)
-        }
-      },
-      containerColor = Color(0xFF121620),
-      shape = RoundedCornerShape(24.dp)
-    )
+    val isTwin = initialTask.isFluidTwin && initialTask.fluidTwinId != null
+    val twinPartner = if (isTwin) {
+      allDynamicTasks.firstOrNull { it.fluidTwinId == initialTask.fluidTwinId && it.id != initialTask.id }
+    } else null
+
+    if (isTwin && twinPartner != null) {
+      AlertDialog(
+        onDismissRequest = { showDeleteConfirmDialog = false },
+        title = { Text("Delete Fluid Twin Session?", fontWeight = FontWeight.Bold, color = TextPrimary) },
+        text = {
+          Text(
+            "“${initialTask.title}” is part of a 2-part fluid routine. Choose whether to absorb its duration into “${twinPartner.title}” or delete both parts.",
+            color = TextSecondary,
+            fontSize = 13.sp
+          )
+        },
+        confirmButton = {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Button(
+              onClick = {
+                showDeleteConfirmDialog = false
+                if (onAbsorbTwin != null) {
+                  onAbsorbTwin(initialTask.id, twinPartner.id)
+                } else {
+                  onMoveToTrash(initialTask.id)
+                }
+                onDismiss()
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF06B6D4), contentColor = Color.White),
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Text("Absorb Duration into Partner", fontWeight = FontWeight.Bold)
+            }
+            Button(
+              onClick = {
+                showDeleteConfirmDialog = false
+                if (onDeleteTwinBoth != null) {
+                  onDeleteTwinBoth(initialTask.fluidTwinId!!)
+                } else {
+                  onMoveToTrash(initialTask.id)
+                  onMoveToTrash(twinPartner.id)
+                }
+                onDismiss()
+              },
+              colors = ButtonDefaults.buttonColors(containerColor = DangerRed, contentColor = Color.White),
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Text("Delete Both Parts", fontWeight = FontWeight.Bold)
+            }
+          }
+        },
+        dismissButton = {
+          TextButton(onClick = { showDeleteConfirmDialog = false }, modifier = Modifier.fillMaxWidth()) {
+            Text("Cancel", color = TextSecondary)
+          }
+        },
+        containerColor = Color(0xFF121620),
+        shape = RoundedCornerShape(24.dp)
+      )
+    } else {
+      AlertDialog(
+        onDismissRequest = { showDeleteConfirmDialog = false },
+        title = { Text("Delete Routine Task?", fontWeight = FontWeight.Bold, color = TextPrimary) },
+        text = {
+          Text(
+            "“${initialTask.title}” will be moved to the Trash Bin. You can restore it within 30 days.",
+            color = TextSecondary,
+            fontSize = 13.sp
+          )
+        },
+        confirmButton = {
+          Button(
+            onClick = {
+              showDeleteConfirmDialog = false
+              onMoveToTrash(initialTask.id)
+              onDismiss()
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = DangerRed, contentColor = Color.White),
+            shape = RoundedCornerShape(12.dp)
+          ) {
+            Text("Move to Trash", fontWeight = FontWeight.Bold)
+          }
+        },
+        dismissButton = {
+          TextButton(onClick = { showDeleteConfirmDialog = false }) {
+            Text("Cancel", color = TextSecondary)
+          }
+        },
+        containerColor = Color(0xFF121620),
+        shape = RoundedCornerShape(24.dp)
+      )
+    }
   }
 
   // Unsaved Changes Dismissal Guard Dialog
@@ -4253,7 +4340,7 @@ private fun CustomAnalogClockModal(
           ) {
             val dialRadius = 74.dp
 
-            // Rotating Clock Hand Canvas with Pointer Drag/Tap
+            // Rotating Clock Hand Canvas with Unified Pointer Input
             Canvas(
               modifier = Modifier
                 .fillMaxSize()
@@ -4282,6 +4369,13 @@ private fun CustomAnalogClockModal(
                         }
                       }
                     },
+                    onDragEnd = {
+                      if (isSelectingHour) {
+                        isSelectingHour = false
+                        minuteFocusRequester.requestFocus()
+                      }
+                    },
+                    onDragCancel = {},
                     onDrag = { change, _ ->
                       change.consume()
                       val cx = size.width / 2f
@@ -4307,29 +4401,6 @@ private fun CustomAnalogClockModal(
                       }
                     }
                   )
-                }
-                .pointerInput(isSelectingHour) {
-                  detectTapGestures { offset ->
-                    val cx = size.width / 2f
-                    val cy = size.height / 2f
-                    val angleRad = atan2((offset.y - cy).toDouble(), (offset.x - cx).toDouble())
-                    var deg = Math.toDegrees(angleRad).toFloat() + 90f
-                    if (deg < 0) deg += 360f
-
-                    if (isSelectingHour) {
-                      val h = ((deg / 30f).roundToInt() % 12).let { if (it == 0) 12 else it }
-                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                      selectedHour12 = h
-                      hourInput = String.format(Locale.US, "%02d", h)
-                      isSelectingHour = false // Automatically transition to minute
-                      minuteFocusRequester.requestFocus()
-                    } else {
-                      val m = ((deg / 6f).roundToInt() % 60)
-                      haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                      selectedMinute = m
-                      minuteInput = String.format(Locale.US, "%02d", m)
-                    }
-                  }
                 }
             ) {
               val center = Offset(size.width / 2f, size.height / 2f)

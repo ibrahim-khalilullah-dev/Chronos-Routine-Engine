@@ -279,15 +279,28 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     viewModelScope.launch {
       scheduleMutex.withLock {
         val current = _anchors.value
-        val updated = SchedulerEngine.adjustAnchor(
-          anchors = current,
-          slotNumber = slotNumber,
-          deltaMinutes = deltaMinutes,
-          sleepDurationMinutes = _sleepDurationMinutes.value
-        )
+        val isFridaySlot3 = slotNumber == 3 && _activeDay.value == RoutineDay.FRIDAY
+        val updated = if (isFridaySlot3) {
+          current.map { task ->
+            if (task.slotNumber == 3) {
+              val currentFriStart = task.fridayStartTimeMinute ?: task.startTimeMinute
+              val newFriStart = ((currentFriStart + deltaMinutes) % 1440 + 1440) % 1440
+              task.copy(fridayStartTimeMinute = newFriStart)
+            } else {
+              task
+            }
+          }
+        } else {
+          SchedulerEngine.adjustAnchor(
+            anchors = current,
+            slotNumber = slotNumber,
+            deltaMinutes = deltaMinutes,
+            sleepDurationMinutes = _sleepDurationMinutes.value
+          )
+        }
         _anchors.value = updated
         repository.saveAnchors(updated)
-        updated.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -425,7 +438,9 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun updateSlot5Protected(
     title: String,
     voiceMessage: String,
-    selectedDays: Set<RoutineDay> = RoutineDay.allDays()
+    selectedDays: Set<RoutineDay> = RoutineDay.allDays(),
+    enableDnd: Boolean = false,
+    dndDelayMinutes: Int = 0
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
@@ -434,14 +449,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
             task.copy(
               title = title.ifEmpty { "Elastic Rubber Buffer" },
               voiceMessage = voiceMessage,
-              selectedDays = selectedDays
+              selectedDays = selectedDays,
+              enableDnd = enableDnd,
+              dndDelayMinutes = dndDelayMinutes
             )
           } else {
             task
           }
         }
-        _anchors.value = current
-        repository.saveAnchors(current)
+        val recalculated = SchedulerEngine.calculateAnchors(current, _sleepDurationMinutes.value)
+        _anchors.value = recalculated
+        repository.saveAnchors(recalculated)
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -541,11 +560,14 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     customNotificationBody: String,
     customRingtoneUri: String? = null,
     customRingtoneTitle: String? = null,
-    isSoundAlertEnabled: Boolean = true
+    isSoundAlertEnabled: Boolean = true,
+    existingTwinId: String? = null,
+    interTaskBufferMinutes: Int = 0,
+    customFlexibilityMinutes: Int = 0
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        val twinId = "fluid_${UUID.randomUUID().toString().take(8)}"
+        val twinId = existingTwinId?.ifBlank { null } ?: "fluid_${UUID.randomUUID().toString().take(8)}"
         val actualP1Title = part1Title.ifBlank { "$title (Part 1)" }
         val actualP2Title = part2Title.ifBlank { "$title (Part 2)" }
         val part1 = RoutineTask(
@@ -568,7 +590,9 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           fluidTotalPoolMinutes = totalPoolMinutes,
           customRingtoneUri = customRingtoneUri,
           customRingtoneTitle = customRingtoneTitle,
-          isSoundAlertEnabled = isSoundAlertEnabled
+          isSoundAlertEnabled = isSoundAlertEnabled,
+          interTaskBufferMinutes = interTaskBufferMinutes,
+          customFlexibilityMinutes = customFlexibilityMinutes
         )
         val part2 = RoutineTask(
           id = "${twinId}_p2",
@@ -590,16 +614,17 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           fluidTotalPoolMinutes = totalPoolMinutes,
           customRingtoneUri = customRingtoneUri,
           customRingtoneTitle = customRingtoneTitle,
-          isSoundAlertEnabled = isSoundAlertEnabled
+          isSoundAlertEnabled = isSoundAlertEnabled,
+          interTaskBufferMinutes = interTaskBufferMinutes,
+          customFlexibilityMinutes = customFlexibilityMinutes
         )
 
-        val list = _dynamicTasks.value.toMutableList()
+        val list = _dynamicTasks.value.filter { it.fluidTwinId != twinId }.toMutableList()
         list.add(part1)
         list.add(part2)
         _dynamicTasks.value = list
         repository.saveDynamicTasks(list)
-        AutomationManager.scheduleTaskAlarms(getApplication(), part1)
-        AutomationManager.scheduleTaskAlarms(getApplication(), part2)
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
