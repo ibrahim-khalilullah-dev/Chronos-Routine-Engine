@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -292,22 +293,24 @@ fun TaskModalBottomSheet(
   var totalPoolMinutesInput by remember { mutableStateOf((initialTotalPool % 60).toString()) }
 
   // Single Task / Master State
-  var title by remember { mutableStateOf(initialTask?.title ?: "") }
-  var startHour by remember { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) / 60) }
-  var startMinute by remember { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) % 60) }
-  var durationHours by remember { mutableIntStateOf((initialTask?.durationMinutes ?: 60) / 60) }
-  var durationMins by remember { mutableIntStateOf((initialTask?.durationMinutes ?: 60) % 60) }
-  var durationHoursInput by remember { mutableStateOf(((initialTask?.durationMinutes ?: 60) / 60).toString()) }
-  var durationMinsInput by remember { mutableStateOf(((initialTask?.durationMinutes ?: 60) % 60).toString()) }
-  var toleranceMinutes by remember { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
-  var customFlexibilityMinutes by remember { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
-  var customFlexInput by remember { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
+  var title by remember(initialTask) { mutableStateOf(initialTask?.title ?: "") }
+  var startHour by remember(initialTask) { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) / 60) }
+  var startMinute by remember(initialTask) { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) % 60) }
+  var durationHours by remember(initialTask) { mutableIntStateOf((initialTask?.durationMinutes ?: 60) / 60) }
+  var durationMins by remember(initialTask) { mutableIntStateOf((initialTask?.durationMinutes ?: 60) % 60) }
+  var durationHoursInput by remember(initialTask) { mutableStateOf(((initialTask?.durationMinutes ?: 60) / 60).toString()) }
+  var durationMinsInput by remember(initialTask) { mutableStateOf(((initialTask?.durationMinutes ?: 60) % 60).toString()) }
+  var toleranceMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
+  var customFlexibilityMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
+  var customFlexInput by remember(initialTask) { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
   var interTaskBufferMinutes by remember(initialTask) {
     mutableIntStateOf(initialTask?.interTaskBufferMinutes ?: 0)
   }
   var bufferInput by remember(initialTask) {
     mutableStateOf((initialTask?.interTaskBufferMinutes ?: 0).toString())
   }
+  var isFlexibilityEnabled by remember(initialTask) { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0) > 0) }
+  var isBufferEnabled by remember(initialTask) { mutableStateOf((initialTask?.interTaskBufferMinutes ?: 0) > 0) }
 
   val decrementBuffer = {
     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -332,10 +335,25 @@ fun TaskModalBottomSheet(
     interTaskBufferMinutes = nextVal
     bufferInput = nextVal.toString()
   }
-  var isHighPriority by remember { mutableStateOf(initialTask?.isHighPriority ?: false) }
-  var isVoiceEnabled by remember { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
-  var voiceMessage by remember { mutableStateOf(initialTask?.voiceMessage ?: "") }
-  var voiceVolume by remember { mutableFloatStateOf(initialTask?.voiceVolume ?: 1f) }
+
+  val decrementFlexibility = {
+    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    val nextVal = (customFlexibilityMinutes - 5).coerceAtLeast(0)
+    customFlexibilityMinutes = nextVal
+    customFlexInput = nextVal.toString()
+  }
+
+  val incrementFlexibility = {
+    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    val nextVal = (customFlexibilityMinutes + 5).coerceAtMost(30)
+    customFlexibilityMinutes = nextVal
+    customFlexInput = nextVal.toString()
+  }
+
+  var isHighPriority by remember(initialTask) { mutableStateOf(initialTask?.isHighPriority ?: false) }
+  var isVoiceEnabled by remember(initialTask) { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
+  var voiceMessage by remember(initialTask) { mutableStateOf(initialTask?.voiceMessage ?: "") }
+  var voiceVolume by remember(initialTask) { mutableFloatStateOf(initialTask?.voiceVolume ?: 1f) }
 
   // Fluid Twin Partner Discovery & Initialization
   val existingTwinPartner = remember(initialTask, allDynamicTasks) {
@@ -609,6 +627,9 @@ fun TaskModalBottomSheet(
       val calculatedStart = startHour * 60 + startMinute
       val actualTitle = title.ifBlank { "${selectedCategory.icon} ${selectedCategory.defaultName}" }
 
+      val effectiveBuffer = if (isBufferEnabled) interTaskBufferMinutes.coerceIn(0, 30) else 0
+      val effectiveFlex = if (isFlexibilityEnabled) customFlexibilityMinutes.coerceIn(0, 30) else 0
+
       val task = RoutineTask(
         id = initialTask?.id ?: "dynamic_${UUID.randomUUID().toString().take(8)}",
         title = actualTitle,
@@ -620,7 +641,7 @@ fun TaskModalBottomSheet(
         enableHaptic = enableHaptic,
         allowSplitting = false,
         isHighPriority = isHighPriority,
-        customFlexibilityMinutes = customFlexibilityMinutes,
+        customFlexibilityMinutes = effectiveFlex,
         selectedDays = selectedDays,
         isVoiceEnabled = isVoiceEnabled,
         customNotificationTitle = actualTitle,
@@ -629,7 +650,7 @@ fun TaskModalBottomSheet(
         customRingtoneTitle = customRingtoneTitle,
         isSoundAlertEnabled = isSoundAlertEnabled,
         toleranceMinutes = toleranceMinutes,
-        interTaskBufferMinutes = interTaskBufferMinutes,
+        interTaskBufferMinutes = effectiveBuffer,
         category = selectedCategory.id
       )
       onSaveTask(task)
@@ -1126,238 +1147,9 @@ fun TaskModalBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Side-by-Side Micro-Tiles: [FLEXIBLE] & [BUFFER TIME]
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              // Box 1 (Left - Flexible)
-              Surface(
-                modifier = Modifier
-                  .weight(1f)
-                  .clip(RoundedCornerShape(14.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 10.dp)
-                ) {
-                  Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                      modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
-                      contentAlignment = Alignment.Center
-                    ) {
-                      Icon(
-                        imageVector = Icons.Default.AccessTime,
-                        contentDescription = null,
-                        tint = Color(0xFF06B6D4),
-                        modifier = Modifier.size(13.dp)
-                      )
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Column {
-                      Text(
-                        text = "FLEXIBLE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFFE2E8F0)
-                      )
-                      Text(
-                        text = "Compression tolerance",
-                        fontSize = 9.sp,
-                        color = Color(0xFF64748B)
-                      )
-                    }
-                  }
-
-                  Spacer(modifier = Modifier.height(8.dp))
-
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                  ) {
-                    IconButton(
-                      onClick = {
-                        customFlexibilityMinutes = (customFlexibilityMinutes - 5).coerceAtLeast(0)
-                        customFlexInput = customFlexibilityMinutes.toString()
-                      },
-                      modifier = Modifier.size(28.dp)
-                    ) {
-                      Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                    }
-                    OutlinedTextField(
-                      value = customFlexInput,
-                      onValueChange = { raw ->
-                        val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                        customFlexInput = clean
-                        customFlexibilityMinutes = parsed.coerceIn(0, 30)
-                      },
-                      prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp) },
-                      suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
-                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                      modifier = Modifier
-                        .width(72.dp)
-                        .testTag("custom_flexibility_input"),
-                      colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF0F172A),
-                        unfocusedContainerColor = Color(0xFF0F172A),
-                        focusedBorderColor = Color(0xFF06B6D4),
-                        unfocusedBorderColor = Color(0xFF1E2C45),
-                        focusedTextColor = Color(0xFFF8FAFC),
-                        unfocusedTextColor = Color(0xFFF8FAFC)
-                      ),
-                      shape = RoundedCornerShape(10.dp),
-                      singleLine = true,
-                      textStyle = TextStyle(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                      )
-                    )
-                    IconButton(
-                      onClick = {
-                        customFlexibilityMinutes = (customFlexibilityMinutes + 5).coerceAtMost(30)
-                        customFlexInput = customFlexibilityMinutes.toString()
-                      },
-                      modifier = Modifier.size(28.dp)
-                    ) {
-                      Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                    }
-                  }
-                }
-              }
-
-              // Box 2 (Right - Buffer Time)
-              Surface(
-                modifier = Modifier
-                  .weight(1f)
-                  .clip(RoundedCornerShape(14.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 10.dp)
-                ) {
-                  Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                      modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF10B981).copy(alpha = 0.15f)),
-                      contentAlignment = Alignment.Center
-                    ) {
-                      Icon(
-                        imageVector = Icons.Default.Timelapse,
-                        contentDescription = null,
-                        tint = Color(0xFF10B981),
-                        modifier = Modifier.size(13.dp)
-                      )
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Column {
-                      Text(
-                        text = "BUFFER TIME",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFFE2E8F0)
-                      )
-                      Text(
-                        text = "Trailing rest gap",
-                        fontSize = 9.sp,
-                        color = Color(0xFF64748B)
-                      )
-                    }
-                  }
-
-                  Spacer(modifier = Modifier.height(8.dp))
-
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                  ) {
-                    // Minus Stepper [-]
-                    Surface(
-                      onClick = { decrementBuffer() },
-                      shape = CircleShape,
-                      color = Color(0xFF1E293B),
-                      border = BorderStroke(1.dp, Color(0xFF334155)),
-                      modifier = Modifier
-                        .size(32.dp)
-                        .testTag("decrement_buffer_button")
-                    ) {
-                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                      }
-                    }
-
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    // Editable Numeric Display
-                    OutlinedTextField(
-                      value = bufferInput,
-                      onValueChange = { raw ->
-                        val digits = raw.filter { it.isDigit() }.take(2)
-                        bufferInput = digits
-                        val parsed = digits.toIntOrNull() ?: 0
-                        interTaskBufferMinutes = parsed.coerceIn(0, 30)
-                      },
-                      suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
-                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                      modifier = Modifier
-                        .width(84.dp)
-                        .testTag("custom_buffer_input"),
-                      colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF0F172A),
-                        unfocusedContainerColor = Color(0xFF0F172A),
-                        focusedBorderColor = Color(0xFF10B981),
-                        unfocusedBorderColor = Color(0xFF1E2C45),
-                        focusedTextColor = Color(0xFFF8FAFC),
-                        unfocusedTextColor = Color(0xFFF8FAFC)
-                      ),
-                      shape = RoundedCornerShape(10.dp),
-                      singleLine = true,
-                      textStyle = TextStyle(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                      )
-                    )
-
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    // Plus Stepper [+]
-                    Surface(
-                      onClick = { incrementBuffer() },
-                      shape = CircleShape,
-                      color = Color(0xFF1E293B),
-                      border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
-                      modifier = Modifier
-                        .size(32.dp)
-                        .testTag("increment_buffer_button")
-                    ) {
-                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
-                      }
-                    }
-                  }
-                }
-              }
-            }
-
-
-
-            // Voice Announcement Studio Card
+            // ==============================================================
+            // 3. VOICE ANNOUNCEMENT STUDIO CARD
+            // ==============================================================
             Surface(
               modifier = Modifier
                 .fillMaxWidth()
@@ -1485,6 +1277,630 @@ fun TaskModalBottomSheet(
                       fontSize = 11.sp,
                       fontFamily = FontFamily.Monospace
                     )
+                  }
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ==============================================================
+            // 4. LUXURY 4-CARD 2x2 SYMMETRICAL MATRIX (ROW 1: FLEXIBLE & BUFFER TIME)
+            // ==============================================================
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              // Card 1: FLEXIBLE Card
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .heightIn(min = 118.dp)
+                  .clip(RoundedCornerShape(16.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+                color = Color(0xFF0A0F1D)
+              ) {
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+                ) {
+                  // Top Header Row
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      Box(
+                        modifier = Modifier
+                          .size(28.dp)
+                          .clip(CircleShape)
+                          .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.AccessTime,
+                          contentDescription = null,
+                          tint = Color(0xFF06B6D4),
+                          modifier = Modifier.size(15.dp)
+                        )
+                      }
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Text(
+                        text = "FLEXIBLE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFE2E8F0)
+                      )
+                    }
+
+                    Switch(
+                      checked = isFlexibilityEnabled,
+                      onCheckedChange = {
+                        isFlexibilityEnabled = it
+                        if (it && customFlexibilityMinutes == 0) {
+                          customFlexibilityMinutes = 5
+                          customFlexInput = "5"
+                        }
+                      },
+                      colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF06B6D4),
+                        uncheckedThumbColor = Color(0xFF94A3B8),
+                        uncheckedTrackColor = Color(0xFF1E2C45)
+                      )
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.height(10.dp))
+
+                  if (!isFlexibilityEnabled) {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Text(
+                        text = "Off (0m)",
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                      )
+                    }
+                  } else {
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.Center
+                    ) {
+                      // Stepper [-]
+                      Surface(
+                        onClick = { decrementFlexibility() },
+                        shape = CircleShape,
+                        color = Color(0xFF1E293B),
+                        border = BorderStroke(1.dp, Color(0xFF334155)),
+                        modifier = Modifier
+                          .size(32.dp)
+                          .testTag("decrement_flexibility_button")
+                      ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                          Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                        }
+                      }
+
+                      Spacer(modifier = Modifier.width(6.dp))
+
+                      // Numeric display
+                      OutlinedTextField(
+                        value = customFlexInput,
+                        onValueChange = { raw ->
+                          val digits = raw.filter { it.isDigit() }.take(2)
+                          customFlexInput = digits
+                          val parsed = digits.toIntOrNull() ?: 0
+                          customFlexibilityMinutes = parsed.coerceIn(0, 30)
+                        },
+                        prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+                        suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier
+                          .width(74.dp)
+                          .testTag("custom_flexibility_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                          focusedContainerColor = Color(0xFF0F172A),
+                          unfocusedContainerColor = Color(0xFF0F172A),
+                          focusedBorderColor = Color(0xFF06B6D4),
+                          unfocusedBorderColor = Color(0xFF1E2C45),
+                          focusedTextColor = Color(0xFFF8FAFC),
+                          unfocusedTextColor = Color(0xFFF8FAFC)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true,
+                        textStyle = TextStyle(
+                          fontSize = 12.sp,
+                          fontWeight = FontWeight.Bold,
+                          textAlign = TextAlign.Center
+                        )
+                      )
+
+                      Spacer(modifier = Modifier.width(6.dp))
+
+                      // Stepper [+]
+                      Surface(
+                        onClick = { incrementFlexibility() },
+                        shape = CircleShape,
+                        color = Color(0xFF1E293B),
+                        border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
+                        modifier = Modifier
+                          .size(32.dp)
+                          .testTag("increment_flexibility_button")
+                      ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                          Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              // Card 2: BUFFER TIME Card
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .heightIn(min = 118.dp)
+                  .clip(RoundedCornerShape(16.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+                color = Color(0xFF0A0F1D)
+              ) {
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+                ) {
+                  // Top Header Row
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      Box(
+                        modifier = Modifier
+                          .size(28.dp)
+                          .clip(CircleShape)
+                          .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.Timelapse,
+                          contentDescription = null,
+                          tint = Color(0xFF10B981),
+                          modifier = Modifier.size(15.dp)
+                        )
+                      }
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Text(
+                        text = "BUFFER TIME",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFE2E8F0)
+                      )
+                    }
+
+                    Switch(
+                      checked = isBufferEnabled,
+                      onCheckedChange = {
+                        isBufferEnabled = it
+                        if (it && interTaskBufferMinutes == 0) {
+                          interTaskBufferMinutes = 5
+                          bufferInput = "5"
+                        }
+                      },
+                      colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF10B981),
+                        uncheckedThumbColor = Color(0xFF94A3B8),
+                        uncheckedTrackColor = Color(0xFF1E2C45)
+                      )
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.height(10.dp))
+
+                  if (!isBufferEnabled) {
+                    Box(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Text(
+                        text = "Off (0m)",
+                        color = Color(0xFF64748B),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                      )
+                    }
+                  } else {
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.Center
+                    ) {
+                      // Minus Stepper [-]
+                      Surface(
+                        onClick = { decrementBuffer() },
+                        shape = CircleShape,
+                        color = Color(0xFF1E293B),
+                        border = BorderStroke(1.dp, Color(0xFF334155)),
+                        modifier = Modifier
+                          .size(32.dp)
+                          .testTag("decrement_buffer_button")
+                      ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                          Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                        }
+                      }
+
+                      Spacer(modifier = Modifier.width(6.dp))
+
+                      // Editable Numeric Display
+                      OutlinedTextField(
+                        value = bufferInput,
+                        onValueChange = { raw ->
+                          val digits = raw.filter { it.isDigit() }.take(2)
+                          bufferInput = digits
+                          val parsed = digits.toIntOrNull() ?: 0
+                          interTaskBufferMinutes = parsed.coerceIn(0, 30)
+                        },
+                        suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier
+                          .width(74.dp)
+                          .testTag("custom_buffer_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                          focusedContainerColor = Color(0xFF0F172A),
+                          unfocusedContainerColor = Color(0xFF0F172A),
+                          focusedBorderColor = Color(0xFF10B981),
+                          unfocusedBorderColor = Color(0xFF1E2C45),
+                          focusedTextColor = Color(0xFFF8FAFC),
+                          unfocusedTextColor = Color(0xFFF8FAFC)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true,
+                        textStyle = TextStyle(
+                          fontSize = 12.sp,
+                          fontWeight = FontWeight.Bold,
+                          textAlign = TextAlign.Center
+                        )
+                      )
+
+                      Spacer(modifier = Modifier.width(6.dp))
+
+                      // Plus Stepper [+]
+                      Surface(
+                        onClick = { incrementBuffer() },
+                        shape = CircleShape,
+                        color = Color(0xFF1E293B),
+                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
+                        modifier = Modifier
+                          .size(32.dp)
+                          .testTag("increment_buffer_button")
+                      ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                          Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // ==============================================================
+            // ROW 2: 2-COLUMN GRID [ TASK ALERTS ] & [ AUTO DND ]
+            // ==============================================================
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              // Column 1: Task Alerts Card
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .heightIn(min = 118.dp)
+                  .clip(RoundedCornerShape(16.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+                color = Color(0xFF0A0F1D)
+              ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                      Box(
+                        modifier = Modifier
+                          .size(28.dp)
+                          .clip(CircleShape)
+                          .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.MusicNote,
+                          contentDescription = null,
+                          tint = Color(0xFF06B6D4),
+                          modifier = Modifier.size(16.dp)
+                        )
+                      }
+                      Text(
+                        text = "TASK ALERTS",
+                        color = Color(0xFFE2E8F0),
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                      )
+                    }
+
+                    Switch(
+                      checked = isSoundAlertEnabled,
+                      onCheckedChange = { isSoundAlertEnabled = it },
+                      colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF06B6D4),
+                        uncheckedThumbColor = Color(0xFF94A3B8),
+                        uncheckedTrackColor = Color(0xFF1E2C45)
+                      )
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.height(10.dp))
+
+                  Surface(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .height(36.dp)
+                      .clip(RoundedCornerShape(8.dp))
+                      .clickable {
+                        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                          putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+                          putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Task Sound")
+                          customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
+                        }
+                        ringtonePickerLauncher.launch(intent)
+                      },
+                    color = Color(0xFF0F172A)
+                  ) {
+                    Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
+                      Text(
+                        text = customRingtoneTitle.take(18),
+                        color = Color(0xFF06B6D4),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1
+                      )
+                    }
+                  }
+                }
+              }
+
+              // Column 2: Auto DND Card
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .heightIn(min = 118.dp)
+                  .clip(RoundedCornerShape(16.dp))
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+                color = Color(0xFF0A0F1D)
+              ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                      Box(
+                        modifier = Modifier
+                          .size(28.dp)
+                          .clip(CircleShape)
+                          .background(Color(0xFFA855F7).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.Bedtime,
+                          contentDescription = null,
+                          tint = Color(0xFFA855F7),
+                          modifier = Modifier.size(16.dp)
+                        )
+                      }
+                      Text(
+                        text = "AUTO DND",
+                        color = Color(0xFFE2E8F0),
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                      )
+                    }
+
+                    Switch(
+                      checked = enableDnd,
+                      onCheckedChange = { enableDnd = it },
+                      colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFFA855F7),
+                        uncheckedThumbColor = Color(0xFF94A3B8),
+                        uncheckedTrackColor = Color(0xFF1E2C45)
+                      )
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.height(10.dp))
+
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .height(36.dp)
+                      .clip(RoundedCornerShape(8.dp))
+                      .background(Color(0xFF0F172A))
+                      .padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.CenterStart
+                  ) {
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      Box(
+                        modifier = Modifier
+                          .size(6.dp)
+                          .clip(CircleShape)
+                          .background(if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B))
+                      )
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text(
+                        text = if (enableDnd) "Engaged" else "Disabled",
+                        color = if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold
+                      )
+                    }
+                  }
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ==============================================================
+            // 6. RECURRENCE SCHEDULE CARD
+            // ==============================================================
+            Surface(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+              color = Color(0xFF0A0F1D)
+            ) {
+              Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text(
+                    text = "RECURRENCE SCHEDULE",
+                    color = Color(0xFF94A3B8),
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.5.sp,
+                    fontSize = 11.sp
+                  )
+
+                  // Capsule Selector
+                  Row(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(20.dp))
+                      .background(Color(0xFF0F172A))
+                      .padding(2.dp)
+                  ) {
+                    Surface(
+                      modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable {
+                          isDailyRecurrence = true
+                          selectedDays = RoutineDay.allDays()
+                        },
+                      color = if (isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
+                    ) {
+                      Text(
+                        text = "Daily",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                      )
+                    }
+
+                    Surface(
+                      modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable {
+                          isDailyRecurrence = false
+                        },
+                      color = if (!isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
+                    ) {
+                      Text(
+                        text = "Custom",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (!isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                      )
+                    }
+                  }
+                }
+
+                if (!isDailyRecurrence) {
+                  Spacer(modifier = Modifier.height(12.dp))
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    listOf(
+                      RoutineDay.SATURDAY to "S",
+                      RoutineDay.SUNDAY to "S",
+                      RoutineDay.MONDAY to "M",
+                      RoutineDay.TUESDAY to "T",
+                      RoutineDay.WEDNESDAY to "W",
+                      RoutineDay.THURSDAY to "T",
+                      RoutineDay.FRIDAY to "F"
+                    ).forEach { (day, label) ->
+                      val isDaySelected = selectedDays.contains(day)
+                      Box(
+                        modifier = Modifier
+                          .size(36.dp)
+                          .clip(CircleShape)
+                          .background(
+                            if (isDaySelected) Color(0xFF06B6D4)
+                            else Color(0xFF0F172A)
+                          )
+                          .border(
+                            BorderStroke(
+                              1.dp,
+                              if (isDaySelected) Color(0xFF22D3EE) else Color(0xFF1E2C45)
+                            ),
+                            CircleShape
+                          )
+                          .clickable {
+                            selectedDays = if (isDaySelected) {
+                              if (selectedDays.size > 1) selectedDays - day else selectedDays
+                            } else {
+                              selectedDays + day
+                            }
+                          },
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Text(
+                          text = label,
+                          fontSize = 12.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = if (isDaySelected) Color.Black else Color(0xFF94A3B8)
+                        )
+                      }
+                    }
                   }
                 }
               }
@@ -1684,295 +2100,6 @@ fun TaskModalBottomSheet(
                 ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s2_tts")
               }
             )
-          }
-
-          Spacer(modifier = Modifier.height(16.dp))
-
-          // ==============================================================
-          // 4. 2-COLUMN SYSTEM INTEGRATIONS GRID
-          // ==============================================================
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-          ) {
-            // Column 1: Task Alerts Card
-            Surface(
-              modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF0A0F1D)
-            ) {
-              Column(modifier = Modifier.padding(12.dp)) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Box(
-                    modifier = Modifier
-                      .size(28.dp)
-                      .clip(CircleShape)
-                      .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.MusicNote,
-                      contentDescription = null,
-                      tint = Color(0xFF06B6D4),
-                      modifier = Modifier.size(16.dp)
-                    )
-                  }
-                  Switch(
-                    checked = isSoundAlertEnabled,
-                    onCheckedChange = { isSoundAlertEnabled = it },
-                    colors = SwitchDefaults.colors(
-                      checkedThumbColor = Color.White,
-                      checkedTrackColor = Color(0xFF06B6D4),
-                      uncheckedThumbColor = Color(0xFF94A3B8),
-                      uncheckedTrackColor = Color(0xFF1E2C45)
-                    )
-                  )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                  text = "TASK ALERTS",
-                  color = Color(0xFFE2E8F0),
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  fontSize = 11.sp
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Surface(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable {
-                      val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Task Sound")
-                        customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
-                      }
-                      ringtonePickerLauncher.launch(intent)
-                    },
-                  color = Color(0xFF0F172A)
-                ) {
-                  Text(
-                    text = customRingtoneTitle.take(18),
-                    color = Color(0xFF06B6D4),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                  )
-                }
-              }
-            }
-
-            // Column 2: Auto DND Card
-            Surface(
-              modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF0A0F1D)
-            ) {
-              Column(modifier = Modifier.padding(12.dp)) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Box(
-                    modifier = Modifier
-                      .size(28.dp)
-                      .clip(CircleShape)
-                      .background(Color(0xFFA855F7).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.Bedtime,
-                      contentDescription = null,
-                      tint = Color(0xFFA855F7),
-                      modifier = Modifier.size(16.dp)
-                    )
-                  }
-                  Switch(
-                    checked = enableDnd,
-                    onCheckedChange = { enableDnd = it },
-                    colors = SwitchDefaults.colors(
-                      checkedThumbColor = Color.White,
-                      checkedTrackColor = Color(0xFFA855F7),
-                      uncheckedThumbColor = Color(0xFF94A3B8),
-                      uncheckedTrackColor = Color(0xFF1E2C45)
-                    )
-                  )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                  text = "AUTO DND",
-                  color = Color(0xFFE2E8F0),
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  fontSize = 11.sp
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF0F172A))
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                ) {
-                  Box(
-                    modifier = Modifier
-                      .size(6.dp)
-                      .clip(CircleShape)
-                      .background(if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B))
-                  )
-                  Spacer(modifier = Modifier.width(6.dp))
-                  Text(
-                    text = if (enableDnd) "Engaged" else "Disabled",
-                    color = if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold
-                  )
-                }
-              }
-            }
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          // ==============================================================
-          // 5. RECURRENCE SCHEDULE CARD
-          // ==============================================================
-          Surface(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(16.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-            color = Color(0xFF0A0F1D)
-          ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = "RECURRENCE SCHEDULE",
-                  color = Color(0xFF94A3B8),
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  letterSpacing = 0.5.sp,
-                  fontSize = 11.sp
-                )
-
-                // Capsule Selector
-                Row(
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFF0F172A))
-                    .padding(2.dp)
-                ) {
-                  Surface(
-                    modifier = Modifier
-                      .clip(RoundedCornerShape(16.dp))
-                      .clickable {
-                        isDailyRecurrence = true
-                        selectedDays = RoutineDay.allDays()
-                      },
-                    color = if (isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
-                  ) {
-                    Text(
-                      text = "Daily",
-                      fontSize = 11.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = if (isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
-                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                  }
-
-                  Surface(
-                    modifier = Modifier
-                      .clip(RoundedCornerShape(16.dp))
-                      .clickable {
-                        isDailyRecurrence = false
-                      },
-                    color = if (!isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
-                  ) {
-                    Text(
-                      text = "Custom",
-                      fontSize = 11.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = if (!isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
-                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                  }
-                }
-              }
-
-              if (!isDailyRecurrence) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                  listOf(
-                    RoutineDay.SATURDAY to "S",
-                    RoutineDay.SUNDAY to "S",
-                    RoutineDay.MONDAY to "M",
-                    RoutineDay.TUESDAY to "T",
-                    RoutineDay.WEDNESDAY to "W",
-                    RoutineDay.THURSDAY to "T",
-                    RoutineDay.FRIDAY to "F"
-                  ).forEach { (day, label) ->
-                    val isDaySelected = selectedDays.contains(day)
-                    Box(
-                      modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(
-                          if (isDaySelected) Color(0xFF06B6D4)
-                          else Color(0xFF0F172A)
-                        )
-                        .border(
-                          BorderStroke(
-                            1.dp,
-                            if (isDaySelected) Color(0xFF22D3EE) else Color(0xFF1E2C45)
-                          ),
-                          CircleShape
-                        )
-                        .clickable {
-                          selectedDays = if (isDaySelected) {
-                            if (selectedDays.size > 1) selectedDays - day else selectedDays
-                          } else {
-                            selectedDays + day
-                          }
-                        },
-                      contentAlignment = Alignment.Center
-                    ) {
-                      Text(
-                        text = label,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDaySelected) Color.Black else Color(0xFF94A3B8)
-                      )
-                    }
-                  }
-                }
-              }
-            }
           }
         }
       }

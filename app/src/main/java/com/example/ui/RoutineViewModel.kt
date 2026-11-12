@@ -537,7 +537,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         list.add(task.copy(isDeleted = false, deletedTimestamp = null))
         _dynamicTasks.value = list
         repository.saveDynamicTasks(list)
-        AutomationManager.scheduleTaskAlarms(getApplication(), task)
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
