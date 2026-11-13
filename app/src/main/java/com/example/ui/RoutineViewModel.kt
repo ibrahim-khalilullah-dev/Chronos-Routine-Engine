@@ -563,7 +563,11 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     isSoundAlertEnabled: Boolean = true,
     existingTwinId: String? = null,
     interTaskBufferMinutes: Int = 0,
-    customFlexibilityMinutes: Int = 0
+    customFlexibilityMinutes: Int = 0,
+    part1IsVoiceEnabled: Boolean = isVoiceEnabled,
+    part2IsVoiceEnabled: Boolean = isVoiceEnabled,
+    part1VoiceVolume: Float = 1.0f,
+    part2VoiceVolume: Float = 1.0f
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
@@ -581,7 +585,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           enableHaptic = true,
           allowSplitting = false,
           selectedDays = selectedDays,
-          isVoiceEnabled = isVoiceEnabled,
+          isVoiceEnabled = part1IsVoiceEnabled,
+          voiceVolume = part1VoiceVolume.coerceIn(0f, 1f),
           customNotificationTitle = customNotificationTitle.ifBlank { actualP1Title },
           customNotificationBody = customNotificationBody,
           isFluidTwin = true,
@@ -605,7 +610,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           enableHaptic = true,
           allowSplitting = false,
           selectedDays = selectedDays,
-          isVoiceEnabled = isVoiceEnabled,
+          isVoiceEnabled = part2IsVoiceEnabled,
+          voiceVolume = part2VoiceVolume.coerceIn(0f, 1f),
           customNotificationTitle = customNotificationTitle.ifBlank { actualP2Title },
           customNotificationBody = customNotificationBody,
           isFluidTwin = true,

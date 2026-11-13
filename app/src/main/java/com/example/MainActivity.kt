@@ -554,7 +554,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           onSaveTask = { task ->
             viewModel.saveDynamicTask(task)
           },
-          onSaveFluidTwin = { title, pool, p1Title, p1Start, p1Dur, p1Voice, p2Title, p2Start, p2Dur, p2Voice, dnd, days, isVoice, nTitle, nBody, ringUri, ringTitle, isSoundAlert, twinId, buffer, flex ->
+          onSaveFluidTwin = { title, pool, p1Title, p1Start, p1Dur, p1Voice, p2Title, p2Start, p2Dur, p2Voice, dnd, days, isVoice, nTitle, nBody, ringUri, ringTitle, isSoundAlert, twinId, buffer, flex, p1IsVoice, p2IsVoice, p1Volume, p2Volume ->
             viewModel.saveFluidTwin(
               title = title,
               totalPoolMinutes = pool,
@@ -576,7 +576,11 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               isSoundAlertEnabled = isSoundAlert,
               existingTwinId = twinId,
               interTaskBufferMinutes = buffer,
-              customFlexibilityMinutes = flex
+              customFlexibilityMinutes = flex,
+              part1IsVoiceEnabled = p1IsVoice,
+              part2IsVoiceEnabled = p2IsVoice,
+              part1VoiceVolume = p1Volume,
+              part2VoiceVolume = p2Volume
             )
           },
           onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle, isSoundAlert, friTitle, friStart, friDur, friVoice, volume, dndDelay ->

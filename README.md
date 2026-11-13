@@ -7,9 +7,9 @@
 <div align="center">
   <br/>
   <a href="https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk" download="chronos.apk">
-    <img src="https://img.shields.io/badge/Download-APK%20(v1.0.0)-10B981?style=for-the-badge&logo=android&logoColor=white&labelColor=0B0E14" height="52" alt="Download Chronos APK" style="border-radius: 20px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);" />
+    <img src="https://img.shields.io/badge/Download-APK%20(Direct%20Install)-10B981?style=for-the-badge&logo=android&logoColor=white&labelColor=0B0E14" height="54" alt="Download Chronos APK" style="border-radius: 20px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);" />
   </a>
-  <p><sub>Direct one-tap APK installation • Android 8.0 to 16 • 100% Offline</sub></p>
+  <p><sub>Direct one-tap APK installation • Always Latest • 100% Offline</sub></p>
   <br/>
 </div>
 
@@ -63,7 +63,7 @@ Slot 5 functions as a self-balancing mathematical shock absorber spanning from S
 ### 4. High Priority Anchor Wall Fence & Custom Flexibility 🛡️
 - **Anchor Fence Enforcement (`isHighPriority = true`):** Confines critical tasks strictly inside the inter-anchor gap enclosing their requested start time. If space is insufficient, Chronos diverts them safely into the **Overflow Pool** rather than permitting jarring timetable jumps across anchor walls ("timetable leaping").
 - **Custom Schedule Flexibility (0 to 30m):** User-configurable compression allowance enabling tasks to cleanly fit into tight circadian windows without overflowing.
-- **Inter-Task Rest Buffer (0 to 30m):** Enforces a mandatory rest buffer (default 5m) between tasks to eliminate cognitive exhaustion.
+- **Inter-Task Rest Buffer (0 to 30m):** Autonomous per-task rest buffer (default 0m; `0..5m` in 1m steps, `5..30m` in 5m steps) with zero global floor override.
 
 ---
 
@@ -131,9 +131,10 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 
 ---
 
-### 13. Streamlined Task Studio & Unified Voice Controls 🎙️
-- **Header Quick-Pill Ergonomics:** Direct header-integrated `Priority` and `Split` interactive toggle pills eliminate redundant cards and maximize screen real estate for thumb-friendly one-handed editing.
-- **Unified Voice Announcement Architecture:** Both `TaskModalBottomSheet` and `AnchorEditBottomSheet` feature dedicated ON/OFF switches with visual collapse across all 7 circadian anchors and Friday Jumu'ah mode. When toggled OFF, speech inputs and preview triggers collapse into a clean, scannable indicator (*"Spoken reminders disabled"*).
+### 13. Streamlined Task Studio & Dual-Session Voice Architecture 🎙️
+- **Header Quick-Pill Ergonomics & Mutual Exclusivity:** Direct header-integrated `Priority` and `Split` interactive toggle pills use `AnimatedVisibility` mutual exclusivity—enabling `Priority` smoothly hides `Split`, and engaging `Split` cleanly hides `Priority`—preventing conflicting scheduling invariants.
+- **Unified Hardware Integration & Recurrence Matrix:** The 2-column hardware integration grid (`TASK ALERTS` & `AUTO DND`) and `RECURRENCE SCHEDULE` card render uniformly across both Single Dynamic Tasks and Split (Fluid Twin) sessions, using a 2-row anti-clipping widget hierarchy (`heightIn(min = 124.dp)`).
+- **Full Dual-Session Voice Studio:** Both Session 1 and Session 2 inside Split mode feature independent voice ON/OFF switches, collapsible speech message inputs, interactive Play/Stop TTS preview toggles, and 0%–100% volume sliders, matching single dynamic tasks and all 7 circadian anchors.
 - **Zero Auto-Splitting Architecture:** Tasks fit intact within available circadian gaps or cleanly route to the Overflow Pool without unexpected fragmentation.
 
 ---
@@ -161,7 +162,7 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 - Android SDK 36 (Build Tools 36.0.0)
 - Gradle 8.9+ / Gradle 9.x
 
-### Build Commands
+### Build & Release Synchronization Commands
 
 ```bash
 # Clone the repository
@@ -171,11 +172,12 @@ cd Chronos-Routine-Engine
 # Run comprehensive Robolectric unit tests
 gradle :app:testDebugUnitTest
 
-# Assemble the debug APK
-gradle :app:assembleDebug
+# Assemble and synchronize root APK for mobile direct downloads
+gradle :app:assembleDebug && cp app/build/outputs/apk/debug/app-debug.apk chronos.apk
+git add chronos.apk README.md && git commit -m "release: update chronos.apk and documentation" && git push
 ```
 
-The compiled APK will be generated at:
+The compiled APK will be generated and synchronized at:
 ```text
 chronos.apk
 app/build/outputs/apk/debug/app-debug.apk

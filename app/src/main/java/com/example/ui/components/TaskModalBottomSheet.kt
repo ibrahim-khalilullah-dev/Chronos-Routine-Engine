@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -120,6 +121,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.RoutineDay
@@ -210,8 +212,12 @@ fun TaskModalBottomSheet(
     isSoundAlertEnabled: Boolean,
     existingTwinId: String?,
     interTaskBufferMinutes: Int,
-    customFlexibilityMinutes: Int
-  ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    customFlexibilityMinutes: Int,
+    part1IsVoiceEnabled: Boolean,
+    part2IsVoiceEnabled: Boolean,
+    part1VoiceVolume: Float,
+    part2VoiceVolume: Float
+  ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
   onSaveAnchorDetails: (
     slotNumber: Int,
     title: String,
@@ -309,8 +315,6 @@ fun TaskModalBottomSheet(
   var bufferInput by remember(initialTask) {
     mutableStateOf((initialTask?.interTaskBufferMinutes ?: 0).toString())
   }
-  var isFlexibilityEnabled by remember(initialTask) { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0) > 0) }
-  var isBufferEnabled by remember(initialTask) { mutableStateOf((initialTask?.interTaskBufferMinutes ?: 0) > 0) }
 
   val decrementBuffer = {
     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -329,7 +333,7 @@ fun TaskModalBottomSheet(
     val current = interTaskBufferMinutes
     val nextVal = when {
       current < 5 -> current + 1                // 0->1, 1->2, 2->3, 3->4, 4->5
-      current in 5..25 -> (current / 5 + 1) * 5 // 5->10, 10->15, 15->20, 20->25, 25->30
+      current in 5..29 -> ((current / 5) + 1) * 5 // 5->10, 10->15, 15->20, 20->25, 25->30
       else -> 30
     }.coerceIn(0, 30)
     interTaskBufferMinutes = nextVal
@@ -338,16 +342,18 @@ fun TaskModalBottomSheet(
 
   val decrementFlexibility = {
     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-    val nextVal = (customFlexibilityMinutes - 5).coerceAtLeast(0)
-    customFlexibilityMinutes = nextVal
-    customFlexInput = nextVal.toString()
+    val current = customFlexibilityMinutes
+    val nextVal = if (current > 0) ((current - 1) / 5) * 5 else 0
+    customFlexibilityMinutes = nextVal.coerceIn(0, 30)
+    customFlexInput = customFlexibilityMinutes.toString()
   }
 
   val incrementFlexibility = {
     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-    val nextVal = (customFlexibilityMinutes + 5).coerceAtMost(30)
-    customFlexibilityMinutes = nextVal
-    customFlexInput = nextVal.toString()
+    val current = customFlexibilityMinutes
+    val nextVal = if (current < 30) ((current / 5) + 1) * 5 else 30
+    customFlexibilityMinutes = nextVal.coerceIn(0, 30)
+    customFlexInput = customFlexibilityMinutes.toString()
   }
 
   var isHighPriority by remember(initialTask) { mutableStateOf(initialTask?.isHighPriority ?: false) }
@@ -371,26 +377,30 @@ fun TaskModalBottomSheet(
   } else null
 
   // Dual Session 1 (Cyan Theme #38BDF8)
-  var part1Title by remember {
+  var part1Title by remember(initialTask) {
     mutableStateOf(resolvedP1Task?.title ?: if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 1) initialTask.title else "")
   }
-  var part1StartHour by remember { mutableIntStateOf(resolvedP1Task?.let { it.startTimeMinute / 60 } ?: startHour) }
-  var part1StartMinute by remember { mutableIntStateOf(resolvedP1Task?.let { it.startTimeMinute % 60 } ?: startMinute) }
-  var part1DurationHours by remember { mutableIntStateOf(resolvedP1Task?.let { it.durationMinutes / 60 } ?: 1) }
-  var part1DurationMins by remember { mutableIntStateOf(resolvedP1Task?.let { it.durationMinutes % 60 } ?: 30) }
-  var part1SafetyFloor by remember { mutableIntStateOf(45) }
-  var part1VoiceMessage by remember { mutableStateOf(resolvedP1Task?.voiceMessage ?: voiceMessage) }
+  var part1StartHour by remember(initialTask) { mutableIntStateOf(resolvedP1Task?.let { it.startTimeMinute / 60 } ?: startHour) }
+  var part1StartMinute by remember(initialTask) { mutableIntStateOf(resolvedP1Task?.let { it.startTimeMinute % 60 } ?: startMinute) }
+  var part1DurationHours by remember(initialTask) { mutableIntStateOf(resolvedP1Task?.let { it.durationMinutes / 60 } ?: 1) }
+  var part1DurationMins by remember(initialTask) { mutableIntStateOf(resolvedP1Task?.let { it.durationMinutes % 60 } ?: 30) }
+  var part1SafetyFloor by remember(initialTask) { mutableIntStateOf(45) }
+  var part1VoiceMessage by remember(initialTask) { mutableStateOf(resolvedP1Task?.voiceMessage ?: voiceMessage) }
+  var isVoiceEnabledS1 by remember(initialTask) { mutableStateOf(resolvedP1Task?.isVoiceEnabled ?: true) }
+  var voiceVolumeS1 by remember(initialTask) { mutableFloatStateOf(resolvedP1Task?.voiceVolume ?: 1f) }
 
   // Dual Session 2 (Violet Theme #8B5CF6)
-  var part2Title by remember {
+  var part2Title by remember(initialTask) {
     mutableStateOf(resolvedP2Task?.title ?: if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 2) initialTask.title else "")
   }
-  var part2StartHour by remember { mutableIntStateOf(resolvedP2Task?.let { it.startTimeMinute / 60 } ?: 14) }
-  var part2StartMinute by remember { mutableIntStateOf(resolvedP2Task?.let { it.startTimeMinute % 60 } ?: 0) }
-  var part2DurationHours by remember { mutableIntStateOf(resolvedP2Task?.let { it.durationMinutes / 60 } ?: 1) }
-  var part2DurationMins by remember { mutableIntStateOf(resolvedP2Task?.let { it.durationMinutes % 60 } ?: 30) }
-  var part2SafetyFloor by remember { mutableIntStateOf(45) }
-  var part2VoiceMessage by remember { mutableStateOf(resolvedP2Task?.voiceMessage ?: "") }
+  var part2StartHour by remember(initialTask) { mutableIntStateOf(resolvedP2Task?.let { it.startTimeMinute / 60 } ?: 14) }
+  var part2StartMinute by remember(initialTask) { mutableIntStateOf(resolvedP2Task?.let { it.startTimeMinute % 60 } ?: 0) }
+  var part2DurationHours by remember(initialTask) { mutableIntStateOf(resolvedP2Task?.let { it.durationMinutes / 60 } ?: 1) }
+  var part2DurationMins by remember(initialTask) { mutableIntStateOf(resolvedP2Task?.let { it.durationMinutes % 60 } ?: 30) }
+  var part2SafetyFloor by remember(initialTask) { mutableIntStateOf(45) }
+  var part2VoiceMessage by remember(initialTask) { mutableStateOf(resolvedP2Task?.voiceMessage ?: "") }
+  var isVoiceEnabledS2 by remember(initialTask) { mutableStateOf(resolvedP2Task?.isVoiceEnabled ?: true) }
+  var voiceVolumeS2 by remember(initialTask) { mutableFloatStateOf(resolvedP2Task?.voiceVolume ?: 1f) }
 
   // System Integrations & Recurrence
   var isSoundAlertEnabled by remember { mutableStateOf(initialTask?.isSoundAlertEnabled ?: true) }
@@ -434,6 +444,8 @@ fun TaskModalBottomSheet(
   // TTS Engine Setup
   var ttsInstance by remember { mutableStateOf<TextToSpeech?>(null) }
   var isTtsReady by remember { mutableStateOf(false) }
+  var isSpeakingVoicePreview by remember { mutableStateOf(false) }
+  var activeVoiceUtteranceId by remember { mutableStateOf<String?>(null) }
 
   DisposableEffect(context) {
     var instance: TextToSpeech? = null
@@ -445,8 +457,34 @@ fun TaskModalBottomSheet(
         } catch (_: Exception) {}
       }
     }
+    instance.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+      override fun onStart(utteranceId: String?) {
+        isSpeakingVoicePreview = true
+        activeVoiceUtteranceId = utteranceId
+      }
+
+      override fun onDone(utteranceId: String?) {
+        if (activeVoiceUtteranceId == null || activeVoiceUtteranceId == utteranceId) {
+          isSpeakingVoicePreview = false
+          activeVoiceUtteranceId = null
+        }
+      }
+
+      @Deprecated("Deprecated in Java")
+      override fun onError(utteranceId: String?) {
+        isSpeakingVoicePreview = false
+        activeVoiceUtteranceId = null
+      }
+
+      override fun onError(utteranceId: String?, errorCode: Int) {
+        isSpeakingVoicePreview = false
+        activeVoiceUtteranceId = null
+      }
+    })
     ttsInstance = instance
     onDispose {
+      isSpeakingVoicePreview = false
+      activeVoiceUtteranceId = null
       try {
         instance?.stop()
         instance?.shutdown()
@@ -612,23 +650,27 @@ fun TaskModalBottomSheet(
         part2VoiceMessage,
         enableDnd,
         selectedDays,
-        isVoiceEnabled,
+        isVoiceEnabledS1 || isVoiceEnabledS2,
         masterTitle,
         "",
         customRingtoneUri,
         customRingtoneTitle,
         isSoundAlertEnabled,
         initialTask?.fluidTwinId,
-        interTaskBufferMinutes,
-        customFlexibilityMinutes
+        interTaskBufferMinutes.coerceIn(0, 30),
+        customFlexibilityMinutes.coerceIn(0, 30),
+        isVoiceEnabledS1,
+        isVoiceEnabledS2,
+        voiceVolumeS1.coerceIn(0f, 1f),
+        voiceVolumeS2.coerceIn(0f, 1f)
       )
     } else {
       val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(15)
       val calculatedStart = startHour * 60 + startMinute
       val actualTitle = title.ifBlank { "${selectedCategory.icon} ${selectedCategory.defaultName}" }
 
-      val effectiveBuffer = if (isBufferEnabled) interTaskBufferMinutes.coerceIn(0, 30) else 0
-      val effectiveFlex = if (isFlexibilityEnabled) customFlexibilityMinutes.coerceIn(0, 30) else 0
+      val clampedBuffer = interTaskBufferMinutes.coerceIn(0, 30)
+      val clampedFlex = customFlexibilityMinutes.coerceIn(0, 30)
 
       val task = RoutineTask(
         id = initialTask?.id ?: "dynamic_${UUID.randomUUID().toString().take(8)}",
@@ -641,16 +683,17 @@ fun TaskModalBottomSheet(
         enableHaptic = enableHaptic,
         allowSplitting = false,
         isHighPriority = isHighPriority,
-        customFlexibilityMinutes = effectiveFlex,
+        customFlexibilityMinutes = clampedFlex,
         selectedDays = selectedDays,
         isVoiceEnabled = isVoiceEnabled,
+        voiceVolume = voiceVolume.coerceIn(0f, 1f),
         customNotificationTitle = actualTitle,
         customNotificationBody = voiceMessage,
         customRingtoneUri = customRingtoneUri,
         customRingtoneTitle = customRingtoneTitle,
         isSoundAlertEnabled = isSoundAlertEnabled,
         toleranceMinutes = toleranceMinutes,
-        interTaskBufferMinutes = effectiveBuffer,
+        interTaskBufferMinutes = clampedBuffer,
         category = selectedCategory.id
       )
       onSaveTask(task)
@@ -759,59 +802,71 @@ fun TaskModalBottomSheet(
               )
             }
           } else {
-            // Header Pill Controls (Priority & Split)
+            // Header Pill Controls (Mutually Exclusive: Priority vs Split)
             Row(
               horizontalArrangement = Arrangement.spacedBy(6.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
               // 1. Priority Pill Button
-              Surface(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(8.dp))
-                  .border(
-                    BorderStroke(
-                      1.dp,
-                      if (isHighPriority) Color(0xFFF59E0B) else Color(0xFF334155)
-                    ),
-                    RoundedCornerShape(8.dp)
+              AnimatedVisibility(visible = !isFluidTwinMode) {
+                Surface(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(
+                      BorderStroke(
+                        1.dp,
+                        if (isHighPriority) Color(0xFFF59E0B) else Color(0xFF334155)
+                      ),
+                      RoundedCornerShape(8.dp)
+                    )
+                    .clickable {
+                      val next = !isHighPriority
+                      isHighPriority = next
+                      if (next) isFluidTwinMode = false
+                    }
+                    .testTag("header_priority_pill"),
+                  color = if (isHighPriority) Color(0xFFF59E0B).copy(alpha = 0.22f) else Color(0xFF1E293B)
+                ) {
+                  Text(
+                    text = "Priority",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (isHighPriority) Color(0xFFFDE68A) else Color(0xFF94A3B8),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                   )
-                  .clickable { isHighPriority = !isHighPriority }
-                  .testTag("header_priority_pill"),
-                color = if (isHighPriority) Color(0xFFF59E0B).copy(alpha = 0.22f) else Color(0xFF1E293B)
-              ) {
-                Text(
-                  text = "Priority",
-                  fontSize = 10.sp,
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  color = if (isHighPriority) Color(0xFFFDE68A) else Color(0xFF94A3B8),
-                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
+                }
               }
 
               // 2. Split Pill Button
-              Surface(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(8.dp))
-                  .border(
-                    BorderStroke(
-                      1.dp,
-                      if (isFluidTwinMode) Color(0xFF8B5CF6) else Color(0xFF334155)
-                    ),
-                    RoundedCornerShape(8.dp)
+              AnimatedVisibility(visible = !isHighPriority) {
+                Surface(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(
+                      BorderStroke(
+                        1.dp,
+                        if (isFluidTwinMode) Color(0xFF8B5CF6) else Color(0xFF334155)
+                      ),
+                      RoundedCornerShape(8.dp)
+                    )
+                    .clickable {
+                      val next = !isFluidTwinMode
+                      isFluidTwinMode = next
+                      if (next) isHighPriority = false
+                    }
+                    .testTag("header_split_pill"),
+                  color = if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.22f) else Color(0xFF1E293B)
+                ) {
+                  Text(
+                    text = "Split",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (isFluidTwinMode) Color(0xFFDDD6FE) else Color(0xFF94A3B8),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                   )
-                  .clickable { isFluidTwinMode = !isFluidTwinMode }
-                  .testTag("header_split_pill"),
-                color = if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.22f) else Color(0xFF1E293B)
-              ) {
-                Text(
-                  text = "Split",
-                  fontSize = 10.sp,
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  color = if (isFluidTwinMode) Color(0xFFDDD6FE) else Color(0xFF94A3B8),
-                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
+                }
               }
             }
           }
@@ -845,7 +900,11 @@ fun TaskModalBottomSheet(
             voiceMessage = voiceMessage,
             onVoiceMessageChange = { voiceMessage = it },
             onTestVoice = {
-              if (isTtsReady && voiceMessage.isNotBlank()) {
+              if (isSpeakingVoicePreview) {
+                ttsInstance?.stop()
+                isSpeakingVoicePreview = false
+                activeVoiceUtteranceId = null
+              } else if (isTtsReady && voiceMessage.isNotBlank()) {
                 val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
                 ttsInstance?.speak(voiceMessage, TextToSpeech.QUEUE_FLUSH, params, "anchor_tts")
               }
@@ -868,11 +927,16 @@ fun TaskModalBottomSheet(
             fridayVoiceMessage = fridayVoiceMessage,
             onFridayVoiceMessageChange = { fridayVoiceMessage = it },
             onTestFridayVoice = {
-              if (isTtsReady && fridayVoiceMessage.isNotBlank()) {
+              if (isSpeakingVoicePreview) {
+                ttsInstance?.stop()
+                isSpeakingVoicePreview = false
+                activeVoiceUtteranceId = null
+              } else if (isTtsReady && fridayVoiceMessage.isNotBlank()) {
                 val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
                 ttsInstance?.speak(fridayVoiceMessage, TextToSpeech.QUEUE_FLUSH, params, "friday_tts")
               }
             },
+            isSpeakingVoicePreview = isSpeakingVoicePreview,
             voiceVolume = voiceVolume,
             onVoiceVolumeChange = { voiceVolume = it },
             enableDnd = enableDnd,
@@ -1215,16 +1279,24 @@ fun TaskModalBottomSheet(
                     trailingIcon = {
                       IconButton(
                         onClick = {
-                          val msg = voiceMessage.ifBlank { "${title.ifBlank { "Task" }} starting now" }
-                          val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
-                          ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "voice_test")
+                          if (isSpeakingVoicePreview) {
+                            ttsInstance?.stop()
+                            isSpeakingVoicePreview = false
+                            activeVoiceUtteranceId = null
+                          } else {
+                            val msg = voiceMessage.ifBlank { "${title.ifBlank { "Task" }} starting now" }
+                            val params = Bundle().apply {
+                              putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f))
+                            }
+                            ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "voice_test_preview")
+                          }
                         },
                         modifier = Modifier.testTag("test_voice_button")
                       ) {
                         Icon(
-                          imageVector = Icons.Default.PlayArrow,
-                          contentDescription = "Test Voice",
-                          tint = Color(0xFF10B981)
+                          imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
+                          contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Voice",
+                          tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else Color(0xFF10B981)
                         )
                       }
                     },
@@ -1295,7 +1367,7 @@ fun TaskModalBottomSheet(
               Surface(
                 modifier = Modifier
                   .weight(1f)
-                  .heightIn(min = 118.dp)
+                  .heightIn(min = 124.dp)
                   .clip(RoundedCornerShape(16.dp))
                   .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
                 color = Color(0xFF0A0F1D)
@@ -1305,141 +1377,112 @@ fun TaskModalBottomSheet(
                     .fillMaxWidth()
                     .padding(12.dp)
                 ) {
-                  // Top Header Row
+                  // Row 1: Icon on Left
                   Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                   ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                      Box(
-                        modifier = Modifier
-                          .size(28.dp)
-                          .clip(CircleShape)
-                          .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Icon(
-                          imageVector = Icons.Default.AccessTime,
-                          contentDescription = null,
-                          tint = Color(0xFF06B6D4),
-                          modifier = Modifier.size(15.dp)
-                        )
-                      }
-                      Spacer(modifier = Modifier.width(8.dp))
-                      Text(
-                        text = "FLEXIBLE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFFE2E8F0)
+                    Box(
+                      modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Icon(
+                        imageVector = Icons.Default.AccessTime,
+                        contentDescription = null,
+                        tint = Color(0xFF06B6D4),
+                        modifier = Modifier.size(15.dp)
                       )
                     }
-
-                    Switch(
-                      checked = isFlexibilityEnabled,
-                      onCheckedChange = {
-                        isFlexibilityEnabled = it
-                        if (it && customFlexibilityMinutes == 0) {
-                          customFlexibilityMinutes = 5
-                          customFlexInput = "5"
-                        }
-                      },
-                      colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFF06B6D4),
-                        uncheckedThumbColor = Color(0xFF94A3B8),
-                        uncheckedTrackColor = Color(0xFF1E2C45)
-                      )
-                    )
                   }
+
+                  Spacer(modifier = Modifier.height(8.dp))
+
+                  // Row 2: Full-Width Title (Zero Truncation)
+                  Text(
+                    text = "FLEXIBLE",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFFE2E8F0),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
 
                   Spacer(modifier = Modifier.height(10.dp))
 
-                  if (!isFlexibilityEnabled) {
-                    Box(
+                  // Row 3: Stepper Control
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                  ) {
+                    // Stepper [-]
+                    Surface(
+                      onClick = { decrementFlexibility() },
+                      shape = CircleShape,
+                      color = Color(0xFF1E293B),
+                      border = BorderStroke(1.dp, Color(0xFF334155)),
                       modifier = Modifier
-                        .fillMaxWidth()
-                        .height(36.dp),
-                      contentAlignment = Alignment.Center
+                        .size(32.dp)
+                        .testTag("decrement_flexibility_button")
                     ) {
-                      Text(
-                        text = "Off (0m)",
-                        color = Color(0xFF64748B),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                      )
-                    }
-                  } else {
-                    Row(
-                      modifier = Modifier.fillMaxWidth(),
-                      verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.Center
-                    ) {
-                      // Stepper [-]
-                      Surface(
-                        onClick = { decrementFlexibility() },
-                        shape = CircleShape,
-                        color = Color(0xFF1E293B),
-                        border = BorderStroke(1.dp, Color(0xFF334155)),
-                        modifier = Modifier
-                          .size(32.dp)
-                          .testTag("decrement_flexibility_button")
-                      ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                          Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                        }
+                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
                       }
+                    }
 
-                      Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
 
-                      // Numeric display
-                      OutlinedTextField(
-                        value = customFlexInput,
-                        onValueChange = { raw ->
-                          val digits = raw.filter { it.isDigit() }.take(2)
-                          customFlexInput = digits
-                          val parsed = digits.toIntOrNull() ?: 0
-                          customFlexibilityMinutes = parsed.coerceIn(0, 30)
-                        },
-                        prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp) },
-                        suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier
-                          .width(74.dp)
-                          .testTag("custom_flexibility_input"),
-                        colors = OutlinedTextFieldDefaults.colors(
-                          focusedContainerColor = Color(0xFF0F172A),
-                          unfocusedContainerColor = Color(0xFF0F172A),
-                          focusedBorderColor = Color(0xFF06B6D4),
-                          unfocusedBorderColor = Color(0xFF1E2C45),
-                          focusedTextColor = Color(0xFFF8FAFC),
-                          unfocusedTextColor = Color(0xFFF8FAFC)
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true,
-                        textStyle = TextStyle(
-                          fontSize = 12.sp,
-                          fontWeight = FontWeight.Bold,
-                          textAlign = TextAlign.Center
-                        )
+                    // Numeric display
+                    OutlinedTextField(
+                      value = customFlexInput,
+                      onValueChange = { raw ->
+                        val digits = raw.filter { it.isDigit() }.take(2)
+                        customFlexInput = digits
+                        val parsed = digits.toIntOrNull() ?: 0
+                        customFlexibilityMinutes = parsed.coerceIn(0, 30)
+                      },
+                      prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+                      suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                      modifier = Modifier
+                        .width(74.dp)
+                        .testTag("custom_flexibility_input"),
+                      colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF0F172A),
+                        unfocusedContainerColor = Color(0xFF0F172A),
+                        focusedBorderColor = Color(0xFF06B6D4),
+                        unfocusedBorderColor = Color(0xFF1E2C45),
+                        focusedTextColor = Color(0xFFF8FAFC),
+                        unfocusedTextColor = Color(0xFFF8FAFC)
+                      ),
+                      shape = RoundedCornerShape(10.dp),
+                      singleLine = true,
+                      textStyle = TextStyle(
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
                       )
+                    )
 
-                      Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
 
-                      // Stepper [+]
-                      Surface(
-                        onClick = { incrementFlexibility() },
-                        shape = CircleShape,
-                        color = Color(0xFF1E293B),
-                        border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
-                        modifier = Modifier
-                          .size(32.dp)
-                          .testTag("increment_flexibility_button")
-                      ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                          Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
-                        }
+                    // Stepper [+]
+                    Surface(
+                      onClick = { incrementFlexibility() },
+                      shape = CircleShape,
+                      color = Color(0xFF1E293B),
+                      border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
+                      modifier = Modifier
+                        .size(32.dp)
+                        .testTag("increment_flexibility_button")
+                    ) {
+                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
                       }
                     }
                   }
@@ -1450,7 +1493,7 @@ fun TaskModalBottomSheet(
               Surface(
                 modifier = Modifier
                   .weight(1f)
-                  .heightIn(min = 118.dp)
+                  .heightIn(min = 124.dp)
                   .clip(RoundedCornerShape(16.dp))
                   .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
                 color = Color(0xFF0A0F1D)
@@ -1460,445 +1503,111 @@ fun TaskModalBottomSheet(
                     .fillMaxWidth()
                     .padding(12.dp)
                 ) {
-                  // Top Header Row
+                  // Row 1: Icon on Left
                   Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                   ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                      Box(
-                        modifier = Modifier
-                          .size(28.dp)
-                          .clip(CircleShape)
-                          .background(Color(0xFF10B981).copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Icon(
-                          imageVector = Icons.Default.Timelapse,
-                          contentDescription = null,
-                          tint = Color(0xFF10B981),
-                          modifier = Modifier.size(15.dp)
-                        )
-                      }
-                      Spacer(modifier = Modifier.width(8.dp))
-                      Text(
-                        text = "BUFFER TIME",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFFE2E8F0)
-                      )
-                    }
-
-                    Switch(
-                      checked = isBufferEnabled,
-                      onCheckedChange = {
-                        isBufferEnabled = it
-                        if (it && interTaskBufferMinutes == 0) {
-                          interTaskBufferMinutes = 5
-                          bufferInput = "5"
-                        }
-                      },
-                      colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFF10B981),
-                        uncheckedThumbColor = Color(0xFF94A3B8),
-                        uncheckedTrackColor = Color(0xFF1E2C45)
-                      )
-                    )
-                  }
-
-                  Spacer(modifier = Modifier.height(10.dp))
-
-                  if (!isBufferEnabled) {
                     Box(
                       modifier = Modifier
-                        .fillMaxWidth()
-                        .height(36.dp),
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF10B981).copy(alpha = 0.15f)),
                       contentAlignment = Alignment.Center
                     ) {
-                      Text(
-                        text = "Off (0m)",
-                        color = Color(0xFF64748B),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                      )
-                    }
-                  } else {
-                    Row(
-                      modifier = Modifier.fillMaxWidth(),
-                      verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.Center
-                    ) {
-                      // Minus Stepper [-]
-                      Surface(
-                        onClick = { decrementBuffer() },
-                        shape = CircleShape,
-                        color = Color(0xFF1E293B),
-                        border = BorderStroke(1.dp, Color(0xFF334155)),
-                        modifier = Modifier
-                          .size(32.dp)
-                          .testTag("decrement_buffer_button")
-                      ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                          Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                        }
-                      }
-
-                      Spacer(modifier = Modifier.width(6.dp))
-
-                      // Editable Numeric Display
-                      OutlinedTextField(
-                        value = bufferInput,
-                        onValueChange = { raw ->
-                          val digits = raw.filter { it.isDigit() }.take(2)
-                          bufferInput = digits
-                          val parsed = digits.toIntOrNull() ?: 0
-                          interTaskBufferMinutes = parsed.coerceIn(0, 30)
-                        },
-                        suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier
-                          .width(74.dp)
-                          .testTag("custom_buffer_input"),
-                        colors = OutlinedTextFieldDefaults.colors(
-                          focusedContainerColor = Color(0xFF0F172A),
-                          unfocusedContainerColor = Color(0xFF0F172A),
-                          focusedBorderColor = Color(0xFF10B981),
-                          unfocusedBorderColor = Color(0xFF1E2C45),
-                          focusedTextColor = Color(0xFFF8FAFC),
-                          unfocusedTextColor = Color(0xFFF8FAFC)
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true,
-                        textStyle = TextStyle(
-                          fontSize = 12.sp,
-                          fontWeight = FontWeight.Bold,
-                          textAlign = TextAlign.Center
-                        )
-                      )
-
-                      Spacer(modifier = Modifier.width(6.dp))
-
-                      // Plus Stepper [+]
-                      Surface(
-                        onClick = { incrementBuffer() },
-                        shape = CircleShape,
-                        color = Color(0xFF1E293B),
-                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
-                        modifier = Modifier
-                          .size(32.dp)
-                          .testTag("increment_buffer_button")
-                      ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                          Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // ==============================================================
-            // ROW 2: 2-COLUMN GRID [ TASK ALERTS ] & [ AUTO DND ]
-            // ==============================================================
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-              // Column 1: Task Alerts Card
-              Surface(
-                modifier = Modifier
-                  .weight(1f)
-                  .heightIn(min = 118.dp)
-                  .clip(RoundedCornerShape(16.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Row(
-                      verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                      Box(
-                        modifier = Modifier
-                          .size(28.dp)
-                          .clip(CircleShape)
-                          .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Icon(
-                          imageVector = Icons.Default.MusicNote,
-                          contentDescription = null,
-                          tint = Color(0xFF06B6D4),
-                          modifier = Modifier.size(16.dp)
-                        )
-                      }
-                      Text(
-                        text = "TASK ALERTS",
-                        color = Color(0xFFE2E8F0),
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp
-                      )
-                    }
-
-                    Switch(
-                      checked = isSoundAlertEnabled,
-                      onCheckedChange = { isSoundAlertEnabled = it },
-                      colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFF06B6D4),
-                        uncheckedThumbColor = Color(0xFF94A3B8),
-                        uncheckedTrackColor = Color(0xFF1E2C45)
-                      )
-                    )
-                  }
-
-                  Spacer(modifier = Modifier.height(10.dp))
-
-                  Surface(
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .height(36.dp)
-                      .clip(RoundedCornerShape(8.dp))
-                      .clickable {
-                        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                          putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
-                          putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Task Sound")
-                          customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
-                        }
-                        ringtonePickerLauncher.launch(intent)
-                      },
-                    color = Color(0xFF0F172A)
-                  ) {
-                    Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
-                      Text(
-                        text = customRingtoneTitle.take(18),
-                        color = Color(0xFF06B6D4),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1
+                      Icon(
+                        imageVector = Icons.Default.Timelapse,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(15.dp)
                       )
                     }
                   }
-                }
-              }
 
-              // Column 2: Auto DND Card
-              Surface(
-                modifier = Modifier
-                  .weight(1f)
-                  .heightIn(min = 118.dp)
-                  .clip(RoundedCornerShape(16.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Row(
-                      verticalAlignment = Alignment.CenterVertically,
-                      horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                      Box(
-                        modifier = Modifier
-                          .size(28.dp)
-                          .clip(CircleShape)
-                          .background(Color(0xFFA855F7).copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Icon(
-                          imageVector = Icons.Default.Bedtime,
-                          contentDescription = null,
-                          tint = Color(0xFFA855F7),
-                          modifier = Modifier.size(16.dp)
-                        )
-                      }
-                      Text(
-                        text = "AUTO DND",
-                        color = Color(0xFFE2E8F0),
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp
-                      )
-                    }
+                  Spacer(modifier = Modifier.height(8.dp))
 
-                    Switch(
-                      checked = enableDnd,
-                      onCheckedChange = { enableDnd = it },
-                      colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFFA855F7),
-                        uncheckedThumbColor = Color(0xFF94A3B8),
-                        uncheckedTrackColor = Color(0xFF1E2C45)
-                      )
-                    )
-                  }
-
-                  Spacer(modifier = Modifier.height(10.dp))
-
-                  Box(
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .height(36.dp)
-                      .clip(RoundedCornerShape(8.dp))
-                      .background(Color(0xFF0F172A))
-                      .padding(horizontal = 8.dp),
-                    contentAlignment = Alignment.CenterStart
-                  ) {
-                    Row(
-                      verticalAlignment = Alignment.CenterVertically
-                    ) {
-                      Box(
-                        modifier = Modifier
-                          .size(6.dp)
-                          .clip(CircleShape)
-                          .background(if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B))
-                      )
-                      Spacer(modifier = Modifier.width(6.dp))
-                      Text(
-                        text = if (enableDnd) "Engaged" else "Disabled",
-                        color = if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold
-                      )
-                    }
-                  }
-                }
-              }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // ==============================================================
-            // 6. RECURRENCE SCHEDULE CARD
-            // ==============================================================
-            Surface(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF0A0F1D)
-            ) {
-              Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
+                  // Row 2: Full-Width Title (Zero Truncation)
                   Text(
-                    text = "RECURRENCE SCHEDULE",
-                    color = Color(0xFF94A3B8),
+                    text = "BUFFER TIME",
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    letterSpacing = 0.5.sp,
-                    fontSize = 11.sp
+                    color = Color(0xFFE2E8F0),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                   )
 
-                  // Capsule Selector
-                  Row(
-                    modifier = Modifier
-                      .clip(RoundedCornerShape(20.dp))
-                      .background(Color(0xFF0F172A))
-                      .padding(2.dp)
-                  ) {
-                    Surface(
-                      modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable {
-                          isDailyRecurrence = true
-                          selectedDays = RoutineDay.allDays()
-                        },
-                      color = if (isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
-                    ) {
-                      Text(
-                        text = "Daily",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                      )
-                    }
+                  Spacer(modifier = Modifier.height(10.dp))
 
-                    Surface(
-                      modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable {
-                          isDailyRecurrence = false
-                        },
-                      color = if (!isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
-                    ) {
-                      Text(
-                        text = "Custom",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (!isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                      )
-                    }
-                  }
-                }
-
-                if (!isDailyRecurrence) {
-                  Spacer(modifier = Modifier.height(12.dp))
+                  // Row 3: Stepper Control
                   Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                   ) {
-                    listOf(
-                      RoutineDay.SATURDAY to "S",
-                      RoutineDay.SUNDAY to "S",
-                      RoutineDay.MONDAY to "M",
-                      RoutineDay.TUESDAY to "T",
-                      RoutineDay.WEDNESDAY to "W",
-                      RoutineDay.THURSDAY to "T",
-                      RoutineDay.FRIDAY to "F"
-                    ).forEach { (day, label) ->
-                      val isDaySelected = selectedDays.contains(day)
-                      Box(
-                        modifier = Modifier
-                          .size(36.dp)
-                          .clip(CircleShape)
-                          .background(
-                            if (isDaySelected) Color(0xFF06B6D4)
-                            else Color(0xFF0F172A)
-                          )
-                          .border(
-                            BorderStroke(
-                              1.dp,
-                              if (isDaySelected) Color(0xFF22D3EE) else Color(0xFF1E2C45)
-                            ),
-                            CircleShape
-                          )
-                          .clickable {
-                            selectedDays = if (isDaySelected) {
-                              if (selectedDays.size > 1) selectedDays - day else selectedDays
-                            } else {
-                              selectedDays + day
-                            }
-                          },
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Text(
-                          text = label,
-                          fontSize = 12.sp,
-                          fontWeight = FontWeight.Bold,
-                          color = if (isDaySelected) Color.Black else Color(0xFF94A3B8)
-                        )
+                    // Minus Stepper [-]
+                    Surface(
+                      onClick = { decrementBuffer() },
+                      shape = CircleShape,
+                      color = Color(0xFF1E293B),
+                      border = BorderStroke(1.dp, Color(0xFF334155)),
+                      modifier = Modifier
+                        .size(32.dp)
+                        .testTag("decrement_buffer_button")
+                    ) {
+                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                      }
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    // Editable Numeric Display
+                    OutlinedTextField(
+                      value = bufferInput,
+                      onValueChange = { raw ->
+                        val digits = raw.filter { it.isDigit() }.take(2)
+                        bufferInput = digits
+                        val parsed = digits.toIntOrNull() ?: 0
+                        interTaskBufferMinutes = parsed.coerceIn(0, 30)
+                      },
+                      suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                      modifier = Modifier
+                        .width(74.dp)
+                        .testTag("custom_buffer_input"),
+                      colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF0F172A),
+                        unfocusedContainerColor = Color(0xFF0F172A),
+                        focusedBorderColor = Color(0xFF10B981),
+                        unfocusedBorderColor = Color(0xFF1E2C45),
+                        focusedTextColor = Color(0xFFF8FAFC),
+                        unfocusedTextColor = Color(0xFFF8FAFC)
+                      ),
+                      shape = RoundedCornerShape(10.dp),
+                      singleLine = true,
+                      textStyle = TextStyle(
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                      )
+                    )
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    // Plus Stepper [+]
+                    Surface(
+                      onClick = { incrementBuffer() },
+                      shape = CircleShape,
+                      color = Color(0xFF1E293B),
+                      border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
+                      modifier = Modifier
+                        .size(32.dp)
+                        .testTag("increment_buffer_button")
+                    ) {
+                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
                       }
                     }
                   }
@@ -2053,13 +1762,24 @@ fun TaskModalBottomSheet(
               },
               safetyFloor = part1SafetyFloor,
               onSafetyFloorChange = { part1SafetyFloor = it },
+              isVoiceEnabled = isVoiceEnabledS1,
+              onIsVoiceEnabledChange = { isVoiceEnabledS1 = it },
               voiceMessage = part1VoiceMessage,
               onVoiceMessageChange = { part1VoiceMessage = it },
+              voiceVolume = voiceVolumeS1,
+              onVoiceVolumeChange = { voiceVolumeS1 = it },
               onTestVoice = {
-                val msg = part1VoiceMessage.ifBlank { "${part1Title.ifBlank { "Session 1" }} starting now" }
-                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
-                ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s1_tts")
-              }
+                if (isSpeakingVoicePreview && activeVoiceUtteranceId == "s1_tts") {
+                  ttsInstance?.stop()
+                  isSpeakingVoicePreview = false
+                  activeVoiceUtteranceId = null
+                } else {
+                  val msg = part1VoiceMessage.ifBlank { "${part1Title.ifBlank { "Session 1" }} starting now" }
+                  val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolumeS1.coerceIn(0f, 1f)) }
+                  ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s1_tts")
+                }
+              },
+              isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s1_tts"
             )
 
             // Vertical Glowing Dashed Connector Line linking S1 and S2
@@ -2092,14 +1812,340 @@ fun TaskModalBottomSheet(
               },
               safetyFloor = part2SafetyFloor,
               onSafetyFloorChange = { part2SafetyFloor = it },
+              isVoiceEnabled = isVoiceEnabledS2,
+              onIsVoiceEnabledChange = { isVoiceEnabledS2 = it },
               voiceMessage = part2VoiceMessage,
               onVoiceMessageChange = { part2VoiceMessage = it },
+              voiceVolume = voiceVolumeS2,
+              onVoiceVolumeChange = { voiceVolumeS2 = it },
               onTestVoice = {
-                val msg = part2VoiceMessage.ifBlank { "${part2Title.ifBlank { "Session 2" }} starting now" }
-                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
-                ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s2_tts")
-              }
+                if (isSpeakingVoicePreview && activeVoiceUtteranceId == "s2_tts") {
+                  ttsInstance?.stop()
+                  isSpeakingVoicePreview = false
+                  activeVoiceUtteranceId = null
+                } else {
+                  val msg = part2VoiceMessage.ifBlank { "${part2Title.ifBlank { "Session 2" }} starting now" }
+                  val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolumeS2.coerceIn(0f, 1f)) }
+                  ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s2_tts")
+                }
+              },
+              isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s2_tts"
             )
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          // ==============================================================
+          // UNIFIED HARDWARE INTEGRATION GRID [ TASK ALERTS ] & [ AUTO DND ]
+          // (Rendered for BOTH Single Dynamic Tasks and Split Fluid Twins)
+          // ==============================================================
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            // Column 1: Task Alerts Card
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 124.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+              color = Color(0xFF0A0F1D)
+            ) {
+              Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                // Row 1: Icon on Left, Switch on Right
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.MusicNote,
+                      contentDescription = null,
+                      tint = Color(0xFF06B6D4),
+                      modifier = Modifier.size(16.dp)
+                    )
+                  }
+
+                  Switch(
+                    checked = isSoundAlertEnabled,
+                    onCheckedChange = { isSoundAlertEnabled = it },
+                    colors = SwitchDefaults.colors(
+                      checkedThumbColor = Color.White,
+                      checkedTrackColor = Color(0xFF06B6D4),
+                      uncheckedThumbColor = Color(0xFF94A3B8),
+                      uncheckedTrackColor = Color(0xFF1E2C45)
+                    )
+                  )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Row 2: Full-Width Title (Zero Truncation / No Collision)
+                Text(
+                  text = "TASK ALERTS",
+                  color = Color(0xFFE2E8F0),
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 11.sp,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Row 3: Ringtone Selector Control
+                Surface(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                      val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Task Sound")
+                        customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
+                      }
+                      ringtonePickerLauncher.launch(intent)
+                    },
+                  color = Color(0xFF0F172A)
+                ) {
+                  Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
+                    Text(
+                      text = customRingtoneTitle,
+                      color = Color(0xFF06B6D4),
+                      fontSize = 10.sp,
+                      fontFamily = FontFamily.Monospace,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis
+                    )
+                  }
+                }
+              }
+            }
+
+            // Column 2: Auto DND Card
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 124.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+              color = Color(0xFF0A0F1D)
+            ) {
+              Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                // Row 1: Icon on Left, Switch on Right
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFFA855F7).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Bedtime,
+                      contentDescription = null,
+                      tint = Color(0xFFA855F7),
+                      modifier = Modifier.size(16.dp)
+                    )
+                  }
+
+                  Switch(
+                    checked = enableDnd,
+                    onCheckedChange = { enableDnd = it },
+                    colors = SwitchDefaults.colors(
+                      checkedThumbColor = Color.White,
+                      checkedTrackColor = Color(0xFFA855F7),
+                      uncheckedThumbColor = Color(0xFF94A3B8),
+                      uncheckedTrackColor = Color(0xFF1E2C45)
+                    )
+                  )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Row 2: Full-Width Title (Zero Truncation / No Collision)
+                Text(
+                  text = "AUTO DND",
+                  color = Color(0xFFE2E8F0),
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 11.sp,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Row 3: Status Control
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF0F172A))
+                    .padding(horizontal = 8.dp),
+                  contentAlignment = Alignment.CenterStart
+                ) {
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Box(
+                      modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B))
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = if (enableDnd) "Engaged" else "Disabled",
+                      color = if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B),
+                      fontSize = 10.sp,
+                      fontFamily = FontFamily.Monospace,
+                      fontWeight = FontWeight.SemiBold,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis
+                    )
+                  }
+                }
+              }
+            }
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          // ==============================================================
+          // UNIFIED RECURRENCE SCHEDULE CARD
+          // ==============================================================
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(16.dp))
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+            color = Color(0xFF0A0F1D)
+          ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = "RECURRENCE SCHEDULE",
+                  color = Color(0xFF94A3B8),
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  letterSpacing = 0.5.sp,
+                  fontSize = 11.sp
+                )
+
+                // Capsule Selector
+                Row(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF0F172A))
+                    .padding(2.dp)
+                ) {
+                  Surface(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(16.dp))
+                      .clickable {
+                        isDailyRecurrence = true
+                        selectedDays = RoutineDay.allDays()
+                      },
+                    color = if (isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
+                  ) {
+                    Text(
+                      text = "Daily",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = if (isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                  }
+
+                  Surface(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(16.dp))
+                      .clickable {
+                        isDailyRecurrence = false
+                      },
+                    color = if (!isDailyRecurrence) Color(0xFF06B6D4) else Color.Transparent
+                  ) {
+                    Text(
+                      text = "Custom",
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = if (!isDailyRecurrence) Color.Black else Color(0xFF94A3B8),
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                  }
+                }
+              }
+
+              if (!isDailyRecurrence) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                  listOf(
+                    RoutineDay.SATURDAY to "S",
+                    RoutineDay.SUNDAY to "S",
+                    RoutineDay.MONDAY to "M",
+                    RoutineDay.TUESDAY to "T",
+                    RoutineDay.WEDNESDAY to "W",
+                    RoutineDay.THURSDAY to "T",
+                    RoutineDay.FRIDAY to "F"
+                  ).forEach { (day, label) ->
+                    val isDaySelected = selectedDays.contains(day)
+                    Box(
+                      modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(
+                          if (isDaySelected) Color(0xFF06B6D4)
+                          else Color(0xFF0F172A)
+                        )
+                        .border(
+                          BorderStroke(
+                            1.dp,
+                            if (isDaySelected) Color(0xFF22D3EE) else Color(0xFF1E2C45)
+                          ),
+                          CircleShape
+                        )
+                        .clickable {
+                          selectedDays = if (isDaySelected) {
+                            if (selectedDays.size > 1) selectedDays - day else selectedDays
+                          } else {
+                            selectedDays + day
+                          }
+                        },
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Text(
+                        text = label,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDaySelected) Color.Black else Color(0xFF94A3B8)
+                      )
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -2532,6 +2578,7 @@ private fun AnchorEditSection(
   onToggleTonePreview: () -> Unit,
   isVoiceEnabled: Boolean = true,
   onIsVoiceEnabledChange: (Boolean) -> Unit = {},
+  isSpeakingVoicePreview: Boolean = false,
   selectedDays: Set<RoutineDay>,
   onSelectedDaysChange: (Set<RoutineDay>) -> Unit
 ) {
@@ -2914,9 +2961,9 @@ private fun AnchorEditSection(
               trailingIcon = {
                 IconButton(onClick = onTestFridayVoice, modifier = Modifier.testTag("test_friday_voice_button")) {
                   Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Test Friday Voice",
-                    tint = Color(0xFF6EE7B7)
+                    imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
+                    contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Friday Voice",
+                    tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else Color(0xFF6EE7B7)
                   )
                 }
               },
@@ -3495,9 +3542,9 @@ private fun AnchorEditSection(
               trailingIcon = {
                 IconButton(onClick = onTestVoice, modifier = Modifier.testTag("test_voice_button")) {
                   Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Test Voice",
-                    tint = accentLight
+                    imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
+                    contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Voice",
+                    tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else accentLight
                   )
                 }
               },
@@ -3942,9 +3989,14 @@ private fun DualSessionCard(
   onDurationChange: (h: Int, m: Int) -> Unit,
   safetyFloor: Int,
   onSafetyFloorChange: (Int) -> Unit,
+  isVoiceEnabled: Boolean,
+  onIsVoiceEnabledChange: (Boolean) -> Unit,
   voiceMessage: String,
   onVoiceMessageChange: (String) -> Unit,
-  onTestVoice: () -> Unit
+  voiceVolume: Float,
+  onVoiceVolumeChange: (Float) -> Unit,
+  onTestVoice: () -> Unit,
+  isSpeakingVoicePreview: Boolean = false
 ) {
   var hoursInput by remember(durationHours) { mutableStateOf(durationHours.toString()) }
   var minsInput by remember(durationMins) { mutableStateOf(durationMins.toString()) }
@@ -4116,27 +4168,144 @@ private fun DualSessionCard(
 
       Spacer(modifier = Modifier.height(10.dp))
 
-      // Voice Audio Sub-card with TTS test button
-      OutlinedTextField(
-        value = voiceMessage,
-        onValueChange = onVoiceMessageChange,
-        placeholder = { Text("Session $sessionNumber voice announcement", color = TextTertiary) },
-        trailingIcon = {
-          IconButton(onClick = onTestVoice) {
-            Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Voice", tint = accentColor)
+      // Full Voice Studio Sub-Card (Switch, Collapsible TextField, Play/Stop Toggle, Volume Slider)
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(14.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+        color = Color(0xFF0A0F1D)
+      ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Box(
+                modifier = Modifier
+                  .size(28.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                  contentDescription = null,
+                  tint = Color(0xFF10B981),
+                  modifier = Modifier.size(15.dp)
+                )
+              }
+              Spacer(modifier = Modifier.width(8.dp))
+              Column {
+                Text(
+                  text = "Voice Announcement",
+                  color = Color(0xFFF8FAFC),
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 12.sp
+                )
+                Text(
+                  text = "Session $sessionNumber speech synthesis",
+                  color = Color(0xFF64748B),
+                  fontSize = 10.sp
+                )
+              }
+            }
+
+            Switch(
+              checked = isVoiceEnabled,
+              onCheckedChange = onIsVoiceEnabledChange,
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF10B981),
+                uncheckedThumbColor = Color(0xFF94A3B8),
+                uncheckedTrackColor = Color(0xFF1E2C45)
+              ),
+              modifier = Modifier.testTag("session_${sessionNumber}_voice_switch")
+            )
           }
-        },
-        modifier = Modifier.fillMaxWidth(),
-        colors = OutlinedTextFieldDefaults.colors(
-          focusedContainerColor = Color(0xFF0F141E),
-          unfocusedContainerColor = Color(0xFF0F141E),
-          focusedBorderColor = accentColor,
-          unfocusedBorderColor = Color(0xFF1F2637),
-          focusedTextColor = Color(0xFFF8FAFC),
-          unfocusedTextColor = Color(0xFFF8FAFC)
-        ),
-        shape = RoundedCornerShape(12.dp)
-      )
+
+          if (isVoiceEnabled) {
+            Spacer(modifier = Modifier.height(10.dp))
+
+            OutlinedTextField(
+              value = voiceMessage,
+              onValueChange = onVoiceMessageChange,
+              placeholder = { Text("Session $sessionNumber voice announcement", color = Color(0xFF475569)) },
+              trailingIcon = {
+                IconButton(
+                  onClick = onTestVoice,
+                  modifier = Modifier.testTag("session_${sessionNumber}_test_voice_button")
+                ) {
+                  Icon(
+                    imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
+                    contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Voice",
+                    tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else Color(0xFF10B981)
+                  )
+                }
+              },
+              modifier = Modifier.fillMaxWidth().testTag("session_${sessionNumber}_voice_input"),
+              colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color(0xFF0F172A),
+                unfocusedContainerColor = Color(0xFF0F172A),
+                focusedBorderColor = Color(0xFF10B981),
+                unfocusedBorderColor = Color(0xFF1E2C45),
+                focusedTextColor = Color(0xFFF8FAFC),
+                unfocusedTextColor = Color(0xFFF8FAFC)
+              ),
+              shape = RoundedCornerShape(12.dp)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Volume Slider (0% - 100%)
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.VolumeMute,
+                contentDescription = null,
+                tint = Color(0xFF64748B),
+                modifier = Modifier.size(16.dp)
+              )
+              Slider(
+                value = voiceVolume,
+                onValueChange = onVoiceVolumeChange,
+                valueRange = 0f..1f,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                colors = SliderDefaults.colors(
+                  thumbColor = Color(0xFF10B981),
+                  activeTrackColor = Color(0xFF10B981),
+                  inactiveTrackColor = Color(0xFF1E2C45)
+                )
+              )
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = null,
+                tint = Color(0xFF10B981),
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "${(voiceVolume * 100).roundToInt()}%",
+                color = Color(0xFF94A3B8),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace
+              )
+            }
+          } else {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = "Spoken reminders disabled for Session $sessionNumber",
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace,
+              color = Color(0xFF64748B)
+            )
+          }
+        }
+      }
     }
   }
 }

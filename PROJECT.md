@@ -303,20 +303,22 @@
 - **Key Implementations:**
   - Concurrency: Uses Kotlin `Mutex` (`scheduleMutex`) to ensure scheduling re-computations and repository mutations are strictly serialized without race conditions.
   - Midnight Rollover Monitor: Autonomous date observer in `viewModelScope` that triggers automatic day-switch to `RoutineDay.today()` at 00:00 midnight.
-  - Fluid Twin Absorption Engine:
+  - Fluid Twin Persistence & Absorption Engine:
+    * `saveFluidTwin(...)`: Persists linked twin parts with shared hardware alerts, DND, recurrence days, flexibility, rest buffer, and independent per-session voice toggles/volumes (`part1IsVoiceEnabled`, `part2IsVoiceEnabled`, `part1VoiceVolume`, `part2VoiceVolume`).
     * `deleteBothFluidTwinParts(twinId)`: Moves both linked twin parts to the Trash Bin.
     * `deleteTwinAndAbsorbTime(deletedTaskId)`: Soft-deletes the selected part, liberates its allocated minutes, absorbs them into the surviving twin partner, unlinks it from the twin pool (`isFluidTwin = false`), and converts it into a standard dynamic task with the full consolidated pool duration.
 
 #### `OneUiCards.kt` (`ui/components/`)
-- **Purpose:** Visual timeline card components conforming to Samsung One UI 8.5 guidelines.
-- **Stability Enhancement:** Completely removed `Modifier.animateContentSize()` from `AnchorSlotCard`, `DynamicTaskCard`, and `OverflowTaskCard` container roots, eliminating infinite remeasure loops and layout freezes during fast scrolls.
+- **Purpose:** Visual timeline card components conforming to Samsung One UI 8.5 guidelines (`#0B0E14` AMOLED obsidian palette, `#0A0F1D` surfaces, `#1E2C45` borders).
+- **Stability & Matrix Alignment:** Completely removed `Modifier.animateContentSize()` from `AnchorSlotCard`, `DynamicTaskCard`, and `OverflowTaskCard` container roots to eliminate infinite remeasure loops during fast scrolls. Displays concise flexibility (`±Xm`) and zero-floor rest buffer badges seamlessly synchronized with the task studio.
 
 #### `TaskModalBottomSheet.kt` (`ui/components/`)
 - **Purpose:** Full-featured creation and editing bottom sheet for Dynamic Tasks, Fluid Twin pairs, and Circadian Anchors.
-- **Streamlined Header Studio:** Features quick-toggle interactive pill controls (`Priority` and `Split`) directly in the modal header, eliminating redundant middle splitting cards.
-- **Unified Voice Announcement Controls:** Integrated dedicated ON/OFF switches with visual collapse:
-  * When Voice Announcement is toggled OFF (`isVoiceEnabled == false`), the speech text input and test button are collapsed, displaying a scannable notice ("Spoken reminders disabled for this task/anchor").
-  * Supports independent voice controls for standard anchors and Friday Jumu'ah dual mode.
+- **Mutually Exclusive Header Pills:** Houses `Priority` (`AnimatedVisibility(visible = !isFluidTwinMode)`) and `Split` (`AnimatedVisibility(visible = !isHighPriority)`) interactive header pills so High Priority anchor-fencing and Fluid Twin splitting remain strictly mutually exclusive.
+- **Anti-Clipping 2x2 Widget Hierarchy:** Standardizes Row 1 (`FLEXIBLE` & `BUFFER TIME`) and Row 2 (`TASK ALERTS` & `AUTO DND`) to uniform `heightIn(min = 124.dp)` squircle cards (`#0A0F1D`, `12.dp` padding) using a 2-row header layout (Row 1: 28dp icon + optional Switch; Row 2: full-width `11.sp` monospace title with `TextOverflow.Ellipsis`; Row 3: stepper/control). `FLEXIBLE` (0–30m in ±5m steps) and `BUFFER TIME` (0–30m precision scale: `0..5` in 1m steps, `5..30` in 5m steps) treat `0` as disabled with no redundant switches.
+- **Unified Hardware Integration & Recurrence:** `TASK ALERTS`, `AUTO DND`, and `RECURRENCE SCHEDULE` render outside the single-vs-split branch so Split (Fluid Twin) sessions share the exact same hardware alert, DND, and weekly recurrence controls as single dynamic tasks.
+- **Dual-Session Voice Studio (`DualSessionCard`):** Both Session 1 and Session 2 include independent voice ON/OFF switches (`isVoiceEnabledS1`/`S2`), collapsible custom voice message fields, interactive Play/Stop TTS preview toggles tracked per utterance ID (`"s1_tts"`, `"s2_tts"`) via `UtteranceProgressListener`, and 0%–100% volume sliders (`voiceVolumeS1`/`S2`).
+- **Live Interactive `UtteranceProgressListener` TTS Briefing Player:** Tracks active speech playback (`isSpeakingVoicePreview` & `activeVoiceUtteranceId`) across Dynamic Tasks, Fluid Twins, and Circadian Anchors (including Friday Jumu'ah mode), toggling the preview button seamlessly between emerald Play (`Icons.Default.PlayArrow`) and crimson Stop (`Icons.Default.Stop`) with immediate `ttsInstance?.stop()` cancellation and clean disposal.
 
 #### `AnchorEditBottomSheet.kt` (`ui/components/`)
 - **Purpose:** Dedicated modal editor for fine-tuning circadian anchor properties and hardware automations.
