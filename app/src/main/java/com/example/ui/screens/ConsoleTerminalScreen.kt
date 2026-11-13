@@ -347,7 +347,7 @@ fun ConsoleTerminalScreen(
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-          text = "• ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Msg\n• TWIN | Pool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days\n• DYNAMIC: Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Msg | Flex(0-30) | Rest(0-30) | Priority(Y/N)",
+          text = "• ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Msg\n• TWIN | Pool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days | Flex(0-30) | Rest(0-30)\n• DYNAMIC: Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Msg | Flex(0-30) | Rest(0-30) | Priority(Y/N)",
           color = Color(0xFF94A3B8),
           fontFamily = FontFamily.Monospace,
           fontSize = 10.sp,
@@ -486,7 +486,7 @@ fun ConsoleTerminalScreen(
             ),
             placeholder = {
               Text(
-                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration | Start | DND | Days | Voice | Message | Flex | Rest | Priority\n# Tap 'Backup' in header to load routine script.",
+                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0-30) | Rest(0-30) | Priority(Y/N)\n# Tap 'Backup' in header to load routine script.",
                 color = TextTertiary,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,

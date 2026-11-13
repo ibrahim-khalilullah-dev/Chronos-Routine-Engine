@@ -276,7 +276,12 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               viewModel.quickAdjustAnchor(slotNum, delta)
             },
             onEditTask = { task ->
-              editingTask = task
+              val canonicalTask = if (task.slotNumber != null) {
+                anchors.firstOrNull { it.slotNumber == task.slotNumber } ?: task
+              } else {
+                task
+              }
+              editingTask = canonicalTask
               isModalOpen = true
             },
             onMoveToTrash = { taskId ->

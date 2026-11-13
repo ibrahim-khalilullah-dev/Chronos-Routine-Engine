@@ -540,4 +540,44 @@ class ExampleRobolectricTest {
       scheduled2!!.startTimeMinute >= (slot2End + 60 + buffer)
     )
   }
+
+  @Test
+  fun `console parser parses explicit flexibility, rest buffer, and priority tokens`() {
+    val line = "Deep Coding | 90 | 08:00 | Y | ALL | Y | Focus sprint | 15 | 5 | Y"
+    val result = ConsoleParser.parse(line)
+    assertEquals(0, result.errorCount)
+    assertEquals(1, result.successCount)
+    val task = result.validTasks.first()
+    assertEquals(15, task.customFlexibilityMinutes)
+    assertEquals(15, task.toleranceMinutes)
+    assertEquals(5, task.interTaskBufferMinutes)
+    assertTrue(task.isHighPriority)
+
+    val sampleResult = ConsoleParser.parse(ConsoleParser.SAMPLE_SNIPPET)
+    assertEquals(0, sampleResult.errorCount)
+    assertTrue("SAMPLE_SNIPPET should include non-zero flexibility", sampleResult.validTasks.any { it.customFlexibilityMinutes > 0 })
+    assertTrue("SAMPLE_SNIPPET should include non-zero rest buffer", sampleResult.validTasks.any { it.interTaskBufferMinutes > 0 })
+  }
+
+  @Test
+  fun `slot 3 friday display mutation does not mutate canonical dhuhr anchor`() {
+    val canonicalAnchors = SchedulerEngine.createDefaultAnchors(360)
+    val canonicalDhuhr = canonicalAnchors.first { it.slotNumber == 3 }
+    val fridaySchedule = SchedulerEngine.scheduleDay(
+      anchors = canonicalAnchors,
+      dynamicTasks = emptyList(),
+      activeDay = RoutineDay.FRIDAY
+    )
+    val displayedFridaySlot3 = fridaySchedule.scheduledTasks.first { it.slotNumber == 3 }
+    assertEquals(750, displayedFridaySlot3.startTimeMinute)
+    assertEquals(120, displayedFridaySlot3.durationMinutes)
+
+    // Resolving canonical anchor by slotNumber preserves regular Dhuhr values
+    val resolvedCanonical = canonicalAnchors.firstOrNull { it.slotNumber == displayedFridaySlot3.slotNumber }
+    assertNotNull(resolvedCanonical)
+    assertEquals(canonicalDhuhr.startTimeMinute, resolvedCanonical!!.startTimeMinute)
+    assertEquals(canonicalDhuhr.durationMinutes, resolvedCanonical.durationMinutes)
+    assertEquals(750, resolvedCanonical.fridayStartTimeMinute)
+    assertEquals(120, resolvedCanonical.fridayDurationMinutes)
+  }
 }

@@ -262,25 +262,23 @@ fun TaskModalBottomSheet(
   val isSlot3 = slotNum == 3
   val isSlot5 = slotNum == 5
 
-  // Slot 3 Friday Dual Mode State
-  var activeSlot3Tab by remember { mutableIntStateOf(0) } // 0 = Regular Days, 1 = Friday Mode 🕌
-  var fridayTitle by remember { mutableStateOf(initialTask?.fridayTitle ?: "Jumu'ah") }
-  val initialFridayStart = initialTask?.fridayStartTimeMinute ?: (12 * 60 + 30) // 12:30 PM default (750m)
-  var fridayStartHour by remember { mutableIntStateOf(initialFridayStart / 60) }
-  var fridayStartMinute by remember { mutableIntStateOf(initialFridayStart % 60) }
+  // Slot 3 Friday Dual Mode State (strictly decoupled from Regular Dhuhr)
+  var activeSlot3Tab by remember(initialTask) { mutableIntStateOf(0) } // 0 = Regular Days, 1 = Friday Mode 🕌
+  var fridayTitle by remember(initialTask) { mutableStateOf(initialTask?.fridayTitle ?: "Jumu'ah") }
+  val initialFridayStart = initialTask?.fridayStartTimeMinute ?: 750 // 12:30 PM default (750m)
+  var fridayStartHour by remember(initialTask) { mutableIntStateOf(initialFridayStart / 60) }
+  var fridayStartMinute by remember(initialTask) { mutableIntStateOf(initialFridayStart % 60) }
   val initialFridayDuration = initialTask?.fridayDurationMinutes ?: 120 // 2h default
-  var fridayDurationHours by remember { mutableIntStateOf(initialFridayDuration / 60) }
-  var fridayDurationMins by remember { mutableIntStateOf(initialFridayDuration % 60) }
-  var fridayDurationHoursInput by remember { mutableStateOf((initialFridayDuration / 60).toString()) }
-  var fridayDurationMinsInput by remember { mutableStateOf((initialFridayDuration % 60).toString()) }
-  var fridayVoiceMessage by remember { mutableStateOf(initialTask?.fridayVoiceMessage ?: "জুমার সময় হয়েছে।") }
+  var fridayDurationHours by remember(initialTask) { mutableIntStateOf(initialFridayDuration / 60) }
+  var fridayDurationMins by remember(initialTask) { mutableIntStateOf(initialFridayDuration % 60) }
+  var fridayVoiceMessage by remember(initialTask) { mutableStateOf(initialTask?.fridayVoiceMessage ?: "জুমার সময় হয়েছে।") }
 
   // Tone Preview Player State
   var isPlayingTonePreview by remember { mutableStateOf(false) }
   var activeRingtone by remember { mutableStateOf<Ringtone?>(null) }
 
   // 13-Category Selector State
-  var selectedCategory by remember {
+  var selectedCategory by remember(initialTask) {
     val initialCat = ROUTINE_CATEGORIES.firstOrNull { it.id == initialTask?.category }
       ?: ROUTINE_CATEGORIES.firstOrNull { initialTask?.title?.contains(it.title, ignoreCase = true) == true }
       ?: ROUTINE_CATEGORIES[0]
@@ -289,23 +287,25 @@ fun TaskModalBottomSheet(
   var showCategoryGridModal by remember { mutableStateOf(false) }
 
   // 2-Session Mode Switcher State
-  var isFluidTwinMode by remember { mutableStateOf(initialTask?.isFluidTwin ?: false) }
+  var isFluidTwinMode by remember(initialTask) { mutableStateOf(initialTask?.isFluidTwin ?: false) }
 
   // Total Routine Duration Controller (for Dual Fluid Twin Mode)
   val initialTotalPool = initialTask?.fluidTotalPoolMinutes ?: ((initialTask?.durationMinutes ?: 90) * 2).coerceAtLeast(180)
-  var totalPoolHours by remember { mutableIntStateOf(initialTotalPool / 60) }
-  var totalPoolMinutes by remember { mutableIntStateOf(initialTotalPool % 60) }
-  var totalPoolHoursInput by remember { mutableStateOf((initialTotalPool / 60).toString()) }
-  var totalPoolMinutesInput by remember { mutableStateOf((initialTotalPool % 60).toString()) }
+  var totalPoolHours by remember(initialTask) { mutableIntStateOf(initialTotalPool / 60) }
+  var totalPoolMinutes by remember(initialTask) { mutableIntStateOf(initialTotalPool % 60) }
+  var totalPoolHoursInput by remember(initialTask) { mutableStateOf((initialTotalPool / 60).toString()) }
+  var totalPoolMinutesInput by remember(initialTask) { mutableStateOf((initialTotalPool % 60).toString()) }
 
-  // Single Task / Master State
+  // Single Task / Regular Anchor State (strictly reads initialTask?.startTimeMinute & durationMinutes)
+  val initialRegularStart = initialTask?.startTimeMinute ?: 540
+  val initialRegularDuration = initialTask?.durationMinutes ?: 60
   var title by remember(initialTask) { mutableStateOf(initialTask?.title ?: "") }
-  var startHour by remember(initialTask) { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) / 60) }
-  var startMinute by remember(initialTask) { mutableIntStateOf((initialTask?.startTimeMinute ?: 540) % 60) }
-  var durationHours by remember(initialTask) { mutableIntStateOf((initialTask?.durationMinutes ?: 60) / 60) }
-  var durationMins by remember(initialTask) { mutableIntStateOf((initialTask?.durationMinutes ?: 60) % 60) }
-  var durationHoursInput by remember(initialTask) { mutableStateOf(((initialTask?.durationMinutes ?: 60) / 60).toString()) }
-  var durationMinsInput by remember(initialTask) { mutableStateOf(((initialTask?.durationMinutes ?: 60) % 60).toString()) }
+  var startHour by remember(initialTask) { mutableIntStateOf(initialRegularStart / 60) }
+  var startMinute by remember(initialTask) { mutableIntStateOf(initialRegularStart % 60) }
+  var durationHours by remember(initialTask) { mutableIntStateOf(initialRegularDuration / 60) }
+  var durationMins by remember(initialTask) { mutableIntStateOf(initialRegularDuration % 60) }
+  var durationHoursInput by remember(initialTask) { mutableStateOf((initialRegularDuration / 60).toString()) }
+  var durationMinsInput by remember(initialTask) { mutableStateOf((initialRegularDuration % 60).toString()) }
   var toleranceMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
   var customFlexibilityMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
   var customFlexInput by remember(initialTask) { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
@@ -403,14 +403,14 @@ fun TaskModalBottomSheet(
   var voiceVolumeS2 by remember(initialTask) { mutableFloatStateOf(resolvedP2Task?.voiceVolume ?: 1f) }
 
   // System Integrations & Recurrence
-  var isSoundAlertEnabled by remember { mutableStateOf(initialTask?.isSoundAlertEnabled ?: true) }
-  var customRingtoneUri by remember { mutableStateOf(initialTask?.customRingtoneUri) }
-  var customRingtoneTitle by remember { mutableStateOf(initialTask?.customRingtoneTitle ?: "Default Notification Tone") }
-  var enableDnd by remember { mutableStateOf(initialTask?.enableDnd ?: false) }
+  var isSoundAlertEnabled by remember(initialTask) { mutableStateOf(initialTask?.isSoundAlertEnabled ?: true) }
+  var customRingtoneUri by remember(initialTask) { mutableStateOf(initialTask?.customRingtoneUri) }
+  var customRingtoneTitle by remember(initialTask) { mutableStateOf(initialTask?.customRingtoneTitle ?: "Default Notification Tone") }
+  var enableDnd by remember(initialTask) { mutableStateOf(initialTask?.enableDnd ?: false) }
   var dndDelayMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.dndDelayMinutes ?: 0) }
-  var enableHaptic by remember { mutableStateOf(initialTask?.enableHaptic ?: true) }
-  var selectedDays by remember { mutableStateOf(initialTask?.selectedDays ?: RoutineDay.allDays()) }
-  var isDailyRecurrence by remember { mutableStateOf(selectedDays.size == 7) }
+  var enableHaptic by remember(initialTask) { mutableStateOf(initialTask?.enableHaptic ?: true) }
+  var selectedDays by remember(initialTask) { mutableStateOf(initialTask?.selectedDays ?: RoutineDay.allDays()) }
+  var isDailyRecurrence by remember(initialTask) { mutableStateOf((initialTask?.selectedDays ?: RoutineDay.allDays()).size == 7) }
 
   // Custom Circular Analog Clock Dialog State
   var showAnalogClockModal by remember { mutableStateOf(false) }

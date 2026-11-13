@@ -9,7 +9,7 @@
   <a href="https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk" download="chronos.apk">
     <img src="https://img.shields.io/badge/Download-APK%20(Direct%20Install)-10B981?style=for-the-badge&logo=android&logoColor=white&labelColor=0B0E14" height="54" alt="Download Chronos APK" style="border-radius: 20px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);" />
   </a>
-  <p><sub>Direct one-tap APK installation • Always Latest • 100% Offline</sub></p>
+  <p><sub>Direct one-tap APK installation • Android 8.0 to 16 • 100% Offline</sub></p>
   <br/>
 </div>
 
