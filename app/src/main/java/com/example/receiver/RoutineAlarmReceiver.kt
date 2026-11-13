@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.example.data.RoutineRepository
 import com.example.service.AutomationManager
 import com.example.service.RoutineAutomationService
 import kotlinx.coroutines.launch
@@ -23,23 +24,31 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
         }
       }
       AutomationManager.ACTION_APPLY_DND -> {
-        AutomationManager.setDndMode(context, true)
-        val serviceIntent = Intent(context, RoutineAutomationService::class.java).apply {
-          this.action = AutomationManager.ACTION_APPLY_DND
-          putExtras(intent)
+        val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
+        if (!taskId.isNullOrBlank()) {
+          val repository = RoutineRepository(context)
+          val targetTask = (repository.getAnchors() + repository.getDynamicTasks())
+            .firstOrNull { it.id == taskId }
+          if (targetTask != null && !targetTask.isDeleted && !targetTask.isCurrentlyPaused() && targetTask.enableDnd) {
+            AutomationManager.setDndMode(context, true, taskId)
+            RoutineAutomationService.onDndApplied(taskId)
+          }
         }
-        context.startService(serviceIntent)
       }
       AutomationManager.ACTION_END_TASK -> {
-        // Bulletproof DND teardown: immediately restore prior interruption filter
-        AutomationManager.setDndMode(context, false)
-
         val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
-        val stopIntent = Intent(context, RoutineAutomationService::class.java).apply {
-          this.action = RoutineAutomationService.ACTION_STOP_AUTOMATION
-          putExtra(AutomationManager.EXTRA_TASK_ID, taskId)
+        val activeDndTaskId = AutomationManager.getActiveDndTaskId(context)
+        val canReleaseByOwner = activeDndTaskId == null || (taskId != null && activeDndTaskId == taskId)
+        val hasExplicitEnableDnd = intent.hasExtra(AutomationManager.EXTRA_ENABLE_DND)
+        val enableDnd = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_DND, false)
+
+        if (canReleaseByOwner && !AutomationManager.hasZeroDelayFollowUpDndTask(context, taskId)) {
+          if (activeDndTaskId != null || enableDnd || !hasExplicitEnableDnd) {
+            AutomationManager.setDndMode(context, false, taskId)
+          }
         }
-        context.startService(stopIntent)
+
+        RoutineAutomationService.requestStop(context, taskId)
 
         if (!taskId.isNullOrBlank()) {
           kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {

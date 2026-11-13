@@ -580,4 +580,97 @@ class ExampleRobolectricTest {
     assertEquals(750, resolvedCanonical.fridayStartTimeMinute)
     assertEquals(120, resolvedCanonical.fridayDurationMinutes)
   }
+
+  @Test
+  fun `repository persists fluidSafetyFloorMinutes accurately`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val twinTask = RoutineTask(
+      id = "twin_safety_persist_p1",
+      title = "Safety Twin",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420,
+      durationMinutes = 30,
+      isFluidTwin = true,
+      fluidTwinId = "twin_safety_persist",
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 60,
+      fluidSafetyFloorMinutes = 12
+    )
+    repo.saveDynamicTasks(listOf(twinTask))
+    val loaded = repo.getDynamicTasks().first { it.id == "twin_safety_persist_p1" }
+    assertEquals(12, loaded.fluidSafetyFloorMinutes)
+  }
+
+  @Test
+  fun `task-owned dnd tracking and zero-delay follow-up detection prevent premature dnd teardown`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val today = RoutineDay.today()
+    val firstTask = RoutineTask(
+      id = "dnd_chain_1",
+      title = "First DND Session",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360, // 06:00 AM
+      durationMinutes = 30,  // Ends 06:30 AM (390m)
+      enableDnd = true,
+      dndDelayMinutes = 0,
+      selectedDays = setOf(today)
+    )
+    val secondTask = RoutineTask(
+      id = "dnd_chain_2",
+      title = "Immediate Followup DND",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 390, // 06:30 AM
+      durationMinutes = 30,
+      enableDnd = true,
+      dndDelayMinutes = 0,
+      selectedDays = setOf(today)
+    )
+    repo.saveAnchors(SchedulerEngine.createDefaultAnchors(360))
+    repo.saveDynamicTasks(listOf(firstTask, secondTask))
+
+    assertTrue(
+      "Back-to-back 0-delay DND task starting at ending minute must be detected",
+      AutomationManager.hasZeroDelayFollowUpDndTask(context, firstTask.id)
+    )
+    assertFalse(
+      "Second task with no 0-delay follow-up DND should return false",
+      AutomationManager.hasZeroDelayFollowUpDndTask(context, secondTask.id)
+    )
+
+    // Verify DND owner prefs tracking
+    val prefs = context.getSharedPreferences("chronos_dnd_prefs", Context.MODE_PRIVATE)
+    prefs.edit().putString("key_active_dnd_task_id", "dnd_chain_1").commit()
+    assertEquals("dnd_chain_1", AutomationManager.getActiveDndTaskId(context))
+
+    // Mismatched taskId does not clear owner (since DND permission ungranted in Robolectric, releaseDndIfHeldByTask checks owner first)
+    AutomationManager.releaseDndIfHeldByTask(context, "other_task")
+    assertEquals("dnd_chain_1", AutomationManager.getActiveDndTaskId(context))
+  }
+
+  @Test
+  fun `alarm receiver ignores stale apply_dnd for paused or deleted tasks`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val pausedTask = RoutineTask(
+      id = "paused_dnd_task",
+      title = "Paused DND Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 500,
+      durationMinutes = 30,
+      enableDnd = true,
+      dndDelayMinutes = 5,
+      isPausedIndefinitely = true
+    )
+    repo.saveDynamicTasks(listOf(pausedTask))
+
+    val receiver = com.example.receiver.RoutineAlarmReceiver()
+    val intent = android.content.Intent(AutomationManager.ACTION_APPLY_DND).apply {
+      putExtra(AutomationManager.EXTRA_TASK_ID, pausedTask.id)
+    }
+    receiver.onReceive(context, intent)
+    // Should not set active DND owner when task is paused
+    assertEquals(null, AutomationManager.getActiveDndTaskId(context))
+  }
 }

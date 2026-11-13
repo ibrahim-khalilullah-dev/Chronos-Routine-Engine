@@ -791,11 +791,39 @@ fun DynamicTaskCard(
             }
           }
 
-          Text(
-            text = if (task.isFluidTwin) "Fluid Twin Liquid Session • ${task.fluidTotalPoolMinutes ?: task.durationMinutes}m Pool" else "Dynamic Scheduled Session",
-            color = TextSecondary,
-            fontSize = 12.sp
-          )
+          Spacer(modifier = Modifier.height(4.dp))
+          val categoryItem = remember(task.category) {
+            val normalizedCat = task.category?.trim()?.lowercase()?.ifBlank { null } ?: "general"
+            ROUTINE_CATEGORIES.firstOrNull { it.id == normalizedCat } ?: ROUTINE_CATEGORIES.first()
+          }
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)), RoundedCornerShape(6.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+                .testTag("dynamic_task_category_badge_${task.id}")
+            ) {
+              Text(
+                text = "${categoryItem.icon} ${categoryItem.title}",
+                color = TextPrimary.copy(alpha = 0.9f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+              )
+            }
+            Text(
+              text = if (task.isFluidTwin) "Fluid Twin • ${task.fluidTotalPoolMinutes ?: task.durationMinutes}m Pool" else "Dynamic Session",
+              color = TextSecondary,
+              fontSize = 11.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {

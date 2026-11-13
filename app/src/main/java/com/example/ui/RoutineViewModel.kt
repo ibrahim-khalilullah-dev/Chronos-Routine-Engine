@@ -13,6 +13,7 @@ import com.example.model.TaskType
 import com.example.service.ActiveAutomationState
 import com.example.service.AutomationManager
 import com.example.service.RoutineAutomationService
+import com.example.ui.components.FluidTwinSaveRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,6 +78,9 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
 
   private val _deletedTasks = MutableStateFlow(repository.getDeletedTasks())
   val deletedTasks: StateFlow<List<RoutineTask>> = _deletedTasks.asStateFlow()
+
+  private val _taskRatingHistory = MutableStateFlow(repository.getTaskRatingHistory())
+  val taskRatingHistory: StateFlow<List<TaskRatingRecord>> = _taskRatingHistory.asStateFlow()
 
   private val _currentMinute = MutableStateFlow(getCurrentMinuteOfDay())
   val currentMinute: StateFlow<Int> = _currentMinute.asStateFlow()
@@ -155,6 +159,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     _activeDay.value = repository.getActiveDay()
     _sortMode.value = repository.getSortMode()
     val history = repository.getTaskRatingHistory()
+    _taskRatingHistory.value = history
     for (r in history) {
       com.example.ui.components.taskRatingCache[r.taskId] = r.ratingPct
     }
@@ -250,15 +255,22 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   }
 
   fun recordTaskRating(task: RoutineTask, ratingPct: Int) {
+    val normalizedCategory = when {
+      task.type == TaskType.ANCHOR_SLEEP || task.slotNumber == 1 -> "sleep"
+      task.type == TaskType.ANCHOR_ELASTIC || task.slotNumber == 5 -> "anchor_elastic"
+      task.type == TaskType.ANCHOR_STANDARD -> "anchor_standard"
+      else -> task.category?.trim()?.lowercase()?.ifBlank { null } ?: "general"
+    }
     val record = TaskRatingRecord(
       taskId = task.id,
       taskTitle = task.title,
-      category = task.category ?: if (task.type == TaskType.ANCHOR_SLEEP) "Sleep" else if (task.type == TaskType.ANCHOR_ELASTIC) "Rest Buffer" else if (task.type == TaskType.ANCHOR_STANDARD) "Anchor" else "General",
+      category = normalizedCategory,
       durationMinutes = task.durationMinutes,
       ratingPct = ratingPct,
       timestamp = System.currentTimeMillis()
     )
     repository.recordTaskRating(record)
+    _taskRatingHistory.value = repository.getTaskRatingHistory()
     com.example.ui.components.taskRatingCache[task.id] = ratingPct
   }
 
@@ -314,7 +326,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         val recalculated = SchedulerEngine.calculateAnchors(_anchors.value, mins)
         _anchors.value = recalculated
         repository.saveAnchors(recalculated)
-        recalculated.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -357,11 +369,13 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           return@launch
         }
 
+        val affectedIds = mutableListOf<String>()
         val targetIsAnchor = isAnchor || slotNumber != null || _anchors.value.any { it.id == taskId }
         if (targetIsAnchor) {
           val targetSlot = slotNumber ?: _anchors.value.firstOrNull { it.id == taskId }?.slotNumber
           val updated = _anchors.value.map { task ->
             if (task.id == taskId || (targetSlot != null && task.slotNumber == targetSlot)) {
+              affectedIds.add(task.id)
               task.copy(
                 isPausedIndefinitely = indefinitely,
                 isPausedTodayOnly = todayOnly,
@@ -376,6 +390,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         } else {
           val updated = _dynamicTasks.value.map { task ->
             if (task.id == taskId || task.parentTaskId == taskId) {
+              affectedIds.add(task.id)
               task.copy(
                 isPausedIndefinitely = indefinitely,
                 isPausedTodayOnly = todayOnly,
@@ -389,6 +404,10 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           repository.saveDynamicTasks(updated)
         }
         AutomationManager.cancelTaskAlarms(getApplication(), taskId)
+        affectedIds.forEach { affectedId ->
+          AutomationManager.releaseDndIfHeldByTask(getApplication(), affectedId)
+        }
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -427,10 +446,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           _dynamicTasks.value = updated
           repository.saveDynamicTasks(updated)
         }
-        val resumedTask = (if (targetIsAnchor) _anchors.value else _dynamicTasks.value).firstOrNull { it.id == taskId }
-        if (resumedTask != null) {
-          AutomationManager.scheduleTaskAlarms(getApplication(), resumedTask)
-        }
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -460,6 +476,11 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         val recalculated = SchedulerEngine.calculateAnchors(current, _sleepDurationMinutes.value)
         _anchors.value = recalculated
         repository.saveAnchors(recalculated)
+        if (!enableDnd) {
+          recalculated.firstOrNull { it.slotNumber == 5 }?.let {
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
+          }
+        }
         AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
@@ -525,7 +546,12 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         val recalculated = SchedulerEngine.calculateAnchors(current, activeSleepMins)
         _anchors.value = recalculated
         repository.saveAnchors(recalculated)
-        recalculated.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
+        if (!enableDnd) {
+          recalculated.firstOrNull { it.slotNumber == slotNumber }?.let {
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
+          }
+        }
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -537,99 +563,105 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         list.add(task.copy(isDeleted = false, deletedTimestamp = null))
         _dynamicTasks.value = list
         repository.saveDynamicTasks(list)
+        if (!task.enableDnd || task.isCurrentlyPaused()) {
+          AutomationManager.releaseDndIfHeldByTask(getApplication(), task.id)
+        }
         AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
 
-  fun saveFluidTwin(
-    title: String,
-    totalPoolMinutes: Int,
-    part1Title: String,
-    part1StartMinute: Int,
-    part1Duration: Int,
-    part1VoiceMessage: String,
-    part2Title: String,
-    part2StartMinute: Int,
-    part2Duration: Int,
-    part2VoiceMessage: String,
-    enableDnd: Boolean,
-    selectedDays: Set<RoutineDay>,
-    isVoiceEnabled: Boolean,
-    customNotificationTitle: String,
-    customNotificationBody: String,
-    customRingtoneUri: String? = null,
-    customRingtoneTitle: String? = null,
-    isSoundAlertEnabled: Boolean = true,
-    existingTwinId: String? = null,
-    interTaskBufferMinutes: Int = 0,
-    customFlexibilityMinutes: Int = 0,
-    part1IsVoiceEnabled: Boolean = isVoiceEnabled,
-    part2IsVoiceEnabled: Boolean = isVoiceEnabled,
-    part1VoiceVolume: Float = 1.0f,
-    part2VoiceVolume: Float = 1.0f
-  ) {
+  fun saveFluidTwin(request: FluidTwinSaveRequest) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        val twinId = existingTwinId?.ifBlank { null } ?: "fluid_${UUID.randomUUID().toString().take(8)}"
-        val actualP1Title = part1Title.ifBlank { "$title (Part 1)" }
-        val actualP2Title = part2Title.ifBlank { "$title (Part 2)" }
+        val twinId = request.existingTwinId?.ifBlank { null } ?: "fluid_${UUID.randomUUID().toString().take(8)}"
+        val actualP1Title = request.part1Title.ifBlank { "${request.title} (Part 1)" }
+        val actualP2Title = request.part2Title.ifBlank { "${request.title} (Part 2)" }
+        val p1Dur = request.part1Duration.coerceAtLeast(1)
+        val p2Dur = request.part2Duration.coerceAtLeast(1)
+        val p1Floor = request.part1SafetyFloorMinutes.coerceIn(0, p1Dur)
+        val p2Floor = request.part2SafetyFloorMinutes.coerceIn(0, p2Dur)
+        val totalPool = request.totalPoolMinutes.coerceAtLeast(p1Dur + p2Dur)
+        val clampedFlex = request.customFlexibilityMinutes.coerceIn(0, 30)
+        val clampedDndDelay = if (request.enableDnd) request.dndDelayMinutes.coerceIn(0, 25) else 0
         val part1 = RoutineTask(
           id = "${twinId}_p1",
           title = actualP1Title,
           type = TaskType.DYNAMIC,
-          startTimeMinute = part1StartMinute,
-          durationMinutes = part1Duration.coerceAtLeast(45),
-          voiceMessage = part1VoiceMessage.ifBlank { "$actualP1Title starting now." },
-          enableDnd = enableDnd,
-          enableHaptic = true,
+          startTimeMinute = request.part1StartMinute,
+          durationMinutes = p1Dur,
+          voiceMessage = request.part1VoiceMessage.ifBlank { "$actualP1Title starting now." },
+          enableDnd = request.enableDnd,
+          dndDelayMinutes = clampedDndDelay,
+          enableHaptic = request.enableHaptic,
           allowSplitting = false,
-          selectedDays = selectedDays,
-          isVoiceEnabled = part1IsVoiceEnabled,
-          voiceVolume = part1VoiceVolume.coerceIn(0f, 1f),
-          customNotificationTitle = customNotificationTitle.ifBlank { actualP1Title },
-          customNotificationBody = customNotificationBody,
+          selectedDays = request.selectedDays,
+          isVoiceEnabled = request.part1IsVoiceEnabled,
+          voiceVolume = request.part1VoiceVolume.coerceIn(0f, 1f),
+          customNotificationTitle = request.customNotificationTitle.ifBlank { actualP1Title },
+          customNotificationBody = request.customNotificationBody,
           isFluidTwin = true,
           fluidTwinId = twinId,
           fluidTwinPart = 1,
-          fluidTotalPoolMinutes = totalPoolMinutes,
-          customRingtoneUri = customRingtoneUri,
-          customRingtoneTitle = customRingtoneTitle,
-          isSoundAlertEnabled = isSoundAlertEnabled,
-          interTaskBufferMinutes = interTaskBufferMinutes,
-          customFlexibilityMinutes = customFlexibilityMinutes
+          fluidTotalPoolMinutes = totalPool,
+          fluidSafetyFloorMinutes = p1Floor,
+          customRingtoneUri = request.customRingtoneUri,
+          customRingtoneTitle = request.customRingtoneTitle,
+          isSoundAlertEnabled = request.isSoundAlertEnabled,
+          interTaskBufferMinutes = request.interTaskBufferMinutes.coerceIn(0, 30),
+          customFlexibilityMinutes = clampedFlex,
+          toleranceMinutes = clampedFlex,
+          category = request.category,
+          isDeleted = false,
+          deletedTimestamp = null
         )
         val part2 = RoutineTask(
           id = "${twinId}_p2",
           title = actualP2Title,
           type = TaskType.DYNAMIC,
-          startTimeMinute = part2StartMinute,
-          durationMinutes = part2Duration.coerceAtLeast(45),
-          voiceMessage = part2VoiceMessage.ifBlank { "$actualP2Title starting now." },
-          enableDnd = enableDnd,
-          enableHaptic = true,
+          startTimeMinute = request.part2StartMinute,
+          durationMinutes = p2Dur,
+          voiceMessage = request.part2VoiceMessage.ifBlank { "$actualP2Title starting now." },
+          enableDnd = request.enableDnd,
+          dndDelayMinutes = clampedDndDelay,
+          enableHaptic = request.enableHaptic,
           allowSplitting = false,
-          selectedDays = selectedDays,
-          isVoiceEnabled = part2IsVoiceEnabled,
-          voiceVolume = part2VoiceVolume.coerceIn(0f, 1f),
-          customNotificationTitle = customNotificationTitle.ifBlank { actualP2Title },
-          customNotificationBody = customNotificationBody,
+          selectedDays = request.selectedDays,
+          isVoiceEnabled = request.part2IsVoiceEnabled,
+          voiceVolume = request.part2VoiceVolume.coerceIn(0f, 1f),
+          customNotificationTitle = request.customNotificationTitle.ifBlank { actualP2Title },
+          customNotificationBody = request.customNotificationBody,
           isFluidTwin = true,
           fluidTwinId = twinId,
           fluidTwinPart = 2,
-          fluidTotalPoolMinutes = totalPoolMinutes,
-          customRingtoneUri = customRingtoneUri,
-          customRingtoneTitle = customRingtoneTitle,
-          isSoundAlertEnabled = isSoundAlertEnabled,
-          interTaskBufferMinutes = interTaskBufferMinutes,
-          customFlexibilityMinutes = customFlexibilityMinutes
+          fluidTotalPoolMinutes = totalPool,
+          fluidSafetyFloorMinutes = p2Floor,
+          customRingtoneUri = request.customRingtoneUri,
+          customRingtoneTitle = request.customRingtoneTitle,
+          isSoundAlertEnabled = request.isSoundAlertEnabled,
+          interTaskBufferMinutes = request.interTaskBufferMinutes.coerceIn(0, 30),
+          customFlexibilityMinutes = clampedFlex,
+          toleranceMinutes = clampedFlex,
+          category = request.category,
+          isDeleted = false,
+          deletedTimestamp = null
         )
 
-        val list = _dynamicTasks.value.filter { it.fluidTwinId != twinId }.toMutableList()
+        val list = _dynamicTasks.value.filter {
+          it.fluidTwinId != twinId && it.id != request.sourceSingleTaskId
+        }.toMutableList()
         list.add(part1)
         list.add(part2)
         _dynamicTasks.value = list
         repository.saveDynamicTasks(list)
+        request.sourceSingleTaskId?.let { sourceId ->
+          AutomationManager.cancelTaskAlarms(getApplication(), sourceId)
+          AutomationManager.releaseDndIfHeldByTask(getApplication(), sourceId)
+        }
+        if (!request.enableDnd) {
+          AutomationManager.releaseDndIfHeldByTask(getApplication(), part1.id)
+          AutomationManager.releaseDndIfHeldByTask(getApplication(), part2.id)
+        }
         AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
@@ -642,10 +674,12 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         _dynamicTasks.value = updated
         _deletedTasks.value = repository.getDeletedTasks()
         AutomationManager.cancelTaskAlarms(getApplication(), taskId)
+        AutomationManager.releaseDndIfHeldByTask(getApplication(), taskId)
 
         if (_activeAutomationStateIsTask(taskId)) {
           stopActiveAutomation()
         }
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -657,12 +691,14 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         twins.forEach { task ->
           repository.softDeleteTask(task.id)
           AutomationManager.cancelTaskAlarms(getApplication(), task.id)
+          AutomationManager.releaseDndIfHeldByTask(getApplication(), task.id)
           if (_activeAutomationStateIsTask(task.id)) {
             stopActiveAutomation()
           }
         }
         _dynamicTasks.value = repository.getDynamicTasks()
         _deletedTasks.value = repository.getDeletedTasks()
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -670,8 +706,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun deleteTwinAndAbsorbTime(taskToDeleteId: String, partnerTaskId: String) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        val taskToDelete = _dynamicTasks.value.firstOrNull { it.id == taskToDeleteId }
-        val partnerTask = _dynamicTasks.value.firstOrNull { it.id == partnerTaskId }
+        val taskToDelete = _dynamicTasks.value.firstOrNull { it.id == taskToDeleteId && !it.isDeleted }
+        val partnerTask = _dynamicTasks.value.firstOrNull { it.id == partnerTaskId && !it.isDeleted }
         if (taskToDelete != null && partnerTask != null) {
           val absorbedDuration = (partnerTask.durationMinutes + taskToDelete.durationMinutes)
             .coerceAtLeast(partnerTask.fluidTotalPoolMinutes ?: (partnerTask.durationMinutes + taskToDelete.durationMinutes))
@@ -680,10 +716,12 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
             isFluidTwin = false,
             fluidTwinId = null,
             fluidTwinPart = null,
-            fluidTotalPoolMinutes = null
+            fluidTotalPoolMinutes = null,
+            fluidSafetyFloorMinutes = 0
           )
           repository.softDeleteTask(taskToDeleteId)
           AutomationManager.cancelTaskAlarms(getApplication(), taskToDeleteId)
+          AutomationManager.releaseDndIfHeldByTask(getApplication(), taskToDeleteId)
           if (_activeAutomationStateIsTask(taskToDeleteId)) {
             stopActiveAutomation()
           }
@@ -694,7 +732,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           repository.saveDynamicTasks(updatedList)
           _dynamicTasks.value = updatedList
           _deletedTasks.value = repository.getDeletedTasks()
-          AutomationManager.scheduleTaskAlarms(getApplication(), updatedPartner)
+          AutomationManager.rescheduleAllAlarms(getApplication())
         } else if (taskToDelete != null) {
           moveToTrash(taskToDeleteId)
         }
@@ -705,13 +743,32 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun restoreFromTrash(taskId: String) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        val updated = repository.restoreTask(taskId)
+        var updated = repository.restoreTask(taskId)
+        val restoredTask = updated.firstOrNull { it.id == taskId }
+        if (restoredTask != null && restoredTask.isFluidTwin && !restoredTask.fluidTwinId.isNullOrBlank()) {
+          val hasActivePartner = updated.any {
+            it.fluidTwinId == restoredTask.fluidTwinId && it.id != restoredTask.id && !it.isDeleted
+          }
+          if (!hasActivePartner) {
+            updated = updated.map {
+              if (it.id == restoredTask.id) {
+                it.copy(
+                  isFluidTwin = false,
+                  fluidTwinId = null,
+                  fluidTwinPart = null,
+                  fluidTotalPoolMinutes = null,
+                  fluidSafetyFloorMinutes = 0
+                )
+              } else {
+                it
+              }
+            }
+            repository.saveDynamicTasks(updated)
+          }
+        }
         _dynamicTasks.value = updated
         _deletedTasks.value = repository.getDeletedTasks()
-        val restoredTask = updated.firstOrNull { it.id == taskId }
-        if (restoredTask != null) {
-          AutomationManager.scheduleTaskAlarms(getApplication(), restoredTask)
-        }
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -754,13 +811,20 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     viewModelScope.launch {
       scheduleMutex.withLock {
         // If restoring backup configuration
-        backupSleepMinutes?.let { mins ->
-          _sleepDurationMinutes.value = mins
-          repository.setSleepDurationMinutes(mins)
+        if (backupSleepMinutes != null) {
+          val syncedSleep = backupSleepMinutes.coerceIn(240, 720)
+          _sleepDurationMinutes.value = syncedSleep
+          repository.setSleepDurationMinutes(syncedSleep)
+        } else {
+          parsedAnchors.firstOrNull { it.slotNumber == 1 }?.let { slot1 ->
+            val syncedSleep = slot1.durationMinutes.coerceIn(240, 720)
+            _sleepDurationMinutes.value = syncedSleep
+            repository.setSleepDurationMinutes(syncedSleep)
+          }
         }
         backupBufferMinutes?.let { buf ->
-          _bufferMinutes.value = buf
-          repository.setBufferMinutes(buf)
+          _bufferMinutes.value = buf.coerceIn(0, 30)
+          repository.setBufferMinutes(_bufferMinutes.value)
         }
         if (parsedAnchors.isNotEmpty()) {
           val currentAnchors = _anchors.value.toMutableList()
@@ -775,12 +839,12 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           val recalculated = SchedulerEngine.calculateAnchors(currentAnchors, _sleepDurationMinutes.value)
           _anchors.value = recalculated
           repository.saveAnchors(recalculated)
-          recalculated.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
         }
 
         val list = if (replaceExisting) {
           _dynamicTasks.value.forEach {
             AutomationManager.cancelTaskAlarms(getApplication(), it.id)
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
           }
           newTasks
         } else {
@@ -788,13 +852,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         }
         _dynamicTasks.value = list
         repository.saveDynamicTasks(list)
-        newTasks.forEach { AutomationManager.scheduleTaskAlarms(getApplication(), it) }
+        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
 
   fun stopActiveAutomation() {
-    AutomationManager.setDndMode(getApplication(), false)
+    val activeTaskId = activeAutomation.value.taskId
+    if (!activeTaskId.isNullOrBlank()) {
+      AutomationManager.releaseDndIfHeldByTask(getApplication(), activeTaskId)
+    } else {
+      AutomationManager.setDndMode(getApplication(), false)
+    }
     val intent = android.content.Intent(getApplication(), RoutineAutomationService::class.java).apply {
       action = RoutineAutomationService.ACTION_STOP_AUTOMATION
     }

@@ -68,18 +68,18 @@ Slot 5 functions as a self-balancing mathematical shock absorber spanning from S
 ---
 
 ### 5. Fluid Twin Tasks & Absorption Engine 💧
-Link two distinct routine sessions under a shared total duration pool:
-- **Hydraulic Communicating Vessels:** Extending Session A proportionally contracts Session B in real time without manual re-calculation (`P = D1 + D2`). Both twins respect immovable anchor boundaries and maintain a strict 45-minute safety floor (`MIN_FLUID_TWIN_MINUTES = 45`).
+Link two distinct routine sessions under a shared total duration pool (2m up to 12h, supporting `<45m` short sprints):
+- **Hydraulic Communicating Vessels:** Extending Session A proportionally contracts Session B in real time without manual re-calculation (`P = D1 + D2`). Both twins respect immovable anchor boundaries, per-part rest buffers, and optional per-session custom safety floors (`fluidSafetyFloorMinutes`, `0` = unconstrained down to `1m`).
 - **Fluid Twin Absorption Engine:** When deleting a twin part, users are provided two safe paths:
   1. **Delete Both Parts:** Completely purges both linked sessions into the Trash Bin.
   2. **Absorb Duration:** Absorbs the allocated pool into the surviving partner, decoupling it from the fluid link and cleanly converting it into an unconstrained standard dynamic task with the full consolidated duration.
-- **Autonomous Alarms:** Each twin session maintains independent voice messages, ringtones, and notification policies.
+- **Shared Controls & Autonomous Voice:** Twin pairs share Category, Flexibility, Buffer Time, Task Alerts (with Ringtone Preview), Auto DND, and Recurrence while each session maintains independent voice toggles, speech messages, and volume sliders.
 
 ---
 
-### 6. Deep-Sleep Immune Delayed DND (`ACTION_APPLY_DND`) 🌙
-- **Exact RTC Hardware Wakeup:** Delayed DND triggers (0–25m delay after task start) bypass Android Doze and OEM battery-killer freezes by registering a dedicated exact alarm (`ACTION_APPLY_DND`) in `AlarmManager` instead of transient in-memory Handler timers.
-- **Priority Filter Management:** Seamlessly transitions into `NotificationManager.INTERRUPTION_FILTER_PRIORITY` even when the device screen is off and the CPU is in deep sleep.
+### 6. Deep-Sleep Immune, Task-Owned DND (`ACTION_APPLY_DND`) 🌙
+- **Exact RTC Hardware Wakeup:** Delayed DND triggers (0–25m delay after task start) bypass Android Doze and OEM battery-killer freezes by registering a dedicated exact alarm (`ACTION_APPLY_DND`) in `AlarmManager` instead of transient in-memory Handler timers, and `ACTION_END_TASK` uses `setAlarmClock()` whenever DND is enabled.
+- **Task-Owned DND & Overlap Guard:** Persists the active DND owner task ID synchronously (`commit()`), rejects stale `ACTION_APPLY_DND` triggers for deleted/paused tasks, releases DND cleanly on deletion/pause/edit, and prevents mid-transition DND flicker when a zero-delay follow-up DND task starts immediately at boundary.
 - **Automatic State Restoration:** Restores previous system interruption filter upon task conclusion.
 
 ---
@@ -90,9 +90,9 @@ Link two distinct routine sessions under a shared total duration pool:
 
 ---
 
-### 8. Lockscreen Notifications with Exact Ending Times 🔔
-- **Comprehensive Notification Telemetry:** Lockscreen and heads-up notifications prominently display exact task completion times (e.g., `Ends at 10:45 AM` / `10:45 AM পর্যন্ত`), allowing instant at-a-glance awareness without unlocking the device.
-- **Audio-Ducking Lock-Screen TTS:** Announces custom task briefings through `TextToSpeech` with `AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` so active music or podcasts gracefully duck volume during announcements.
+### 8. Lockscreen Notifications, Security & Decoupled Alerts 🔔
+- **Lock-Screen Privacy & Visibility:** Lockscreen notifications (`VISIBILITY_PUBLIC`) prominently display exact task completion times (e.g., `Ends at 10:45 AM`), while opening the Chronos UI from a locked device always respects the device PIN/biometric lock.
+- **Decoupled Alert Channels:** Haptic vibration (`enableHaptic`), notification chimes (`isSoundAlertEnabled`, with in-studio Play/Stop ringtone preview), and audio-ducked `TextToSpeech` voice briefings (`isVoiceEnabled`, using a cancellable 1500ms delay when chimes are active) operate independently.
 
 ---
 
@@ -105,8 +105,8 @@ Manage temporary routine suspensions without deleting configured tasks:
 
 ---
 
-### 10. Deep-Sleep 2–3 Day Perpetual Alarm Chaining Engine 🛡️
-- **Perpetual Next-Cycle Chaining:** Upon task completion (`ACTION_END_TASK`), Chronos automatically calculates and queues the subsequent cycle for recurring dynamic tasks (7 days ahead) and anchors, maintaining a perpetual 2–3+ day horizon of exact hardware wakeups.
+### 10. Deep-Sleep 7-Day Perpetual Alarm Engine 🛡️
+- **Earliest Non-Overflow Scheduling:** `AutomationManager.rescheduleAllAlarms()` evaluates each active task across a 7-day lookahead and registers its earliest upcoming non-overflow scheduled occurrence in `AlarmManager`.
 - **Deep Doze Immunity:** Alarms survive aggressive OEM battery cleaners and multi-day deep Doze without requiring the user to open or foreground the app.
 - **Universal Clock & Boot Resynchronization:** Registers pending alarms using `setExactAndAllowWhileIdle` and `setAlarmClock` immediately upon reboot (`BOOT_COMPLETED`), application update (`MY_PACKAGE_REPLACED`), time change (`ACTION_TIME_SET`), and timezone change (`ACTION_TIMEZONE_CHANGED`).
 
@@ -120,10 +120,10 @@ Manage temporary routine suspensions without deleting configured tasks:
 ---
 
 ### 12. Monospace Obsidian Terminal Studio CLI Engine (v2) 💻
-A developer-first, high-throughput monospace Obsidian terminal console with real-time debounced syntax parsing (250ms), active metrics diagnostic card, collapsible error accordion, and inline context-aware ghost auto-prediction:
-- **`ANCHOR` Directive:** `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Message` (plus Friday overrides for Slot 3).
-- **`TWIN` Directive:** `TWIN | TotalPool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND(Y/N) | Days | Flex | Rest`.
-- **`DYNAMIC` Directive (v2 with Priority):** `Task Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0-30) | Rest(0-30) | Priority(Y/N)`.
+A developer-first, high-throughput monospace Obsidian terminal console with real-time debounced syntax parsing (250ms), active metrics diagnostic card, collapsible error accordion, and clickable inline context-aware ghost auto-prediction:
+- **`ANCHOR` Directive:** `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Message | [FriTitle | FriStart | FriDur | FriMsg] | [Days | Sound(Y/N) | VoiceVol(0-100)]`.
+- **`TWIN` Directive:** `TWIN | TotalPool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND(Y/N) | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1Voice(Y/N) | P2Voice(Y/N) | P1Vol | P2Vol | Sound]`.
+- **`DYNAMIC` Directive (v2):** `Task Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0-30) | Rest(0-30) | Priority(Y/N) | Category | [VoiceVol(0-100) | Sound(Y/N)]`.
 - **Spacious 540dp Studio Layout:** High-contrast AMOLED obsidian dark styling (`#0B0E14`), hairline border (`#1E293B`), synchronized line-numbered gutter (24dp), and header-integrated **"Backup"** action button.
 - **One UI Active Metrics Row:** Real-time diagnostic cards tracking `Total Tasks`, `Anchors`, `Priority`, and `Syntax Status (Valid/Errors)`.
 - **Collapsible Error Accordion:** Clean chip-style error reporting preventing layout explosion during active typing.
@@ -133,8 +133,8 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 
 ### 13. Streamlined Task Studio & Dual-Session Voice Architecture 🎙️
 - **Header Quick-Pill Ergonomics & Mutual Exclusivity:** Direct header-integrated `Priority` and `Split` interactive toggle pills use `AnimatedVisibility` mutual exclusivity—enabling `Priority` smoothly hides `Split`, and engaging `Split` cleanly hides `Priority`—preventing conflicting scheduling invariants.
-- **Unified Hardware Integration & Recurrence Matrix:** The 2-column hardware integration grid (`TASK ALERTS` & `AUTO DND`) and `RECURRENCE SCHEDULE` card render uniformly across both Single Dynamic Tasks and Split (Fluid Twin) sessions, using a 2-row anti-clipping widget hierarchy (`heightIn(min = 124.dp)`).
-- **Full Dual-Session Voice Studio:** Both Session 1 and Session 2 inside Split mode feature independent voice ON/OFF switches, collapsible speech message inputs, interactive Play/Stop TTS preview toggles, and 0%–100% volume sliders, matching single dynamic tasks and all 7 circadian anchors.
+- **Unified Studio Controls & Ringtone Preview:** `Category` selector, `FLEXIBLE` & `BUFFER TIME` row, `TASK ALERTS` (with Play/Stop ringtone preview), `AUTO DND`, and `RECURRENCE SCHEDULE` render uniformly across both Single Dynamic Tasks and Split (Fluid Twin) sessions, using a 2-row anti-clipping widget hierarchy (`heightIn(min = 124.dp)`).
+- **Full Dual-Session Voice Studio:** Both Session 1 and Session 2 inside Split mode feature independent voice ON/OFF switches, custom per-session Safety Floors, collapsible speech message inputs, interactive Play/Stop TTS preview toggles, and 0%–100% volume sliders, matching single dynamic tasks and all 7 circadian anchors.
 - **Zero Auto-Splitting Architecture:** Tasks fit intact within available circadian gaps or cleanly route to the Overflow Pool without unexpected fragmentation.
 
 ---

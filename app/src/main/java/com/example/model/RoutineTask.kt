@@ -74,6 +74,7 @@ data class RoutineTask(
   val fluidTwinId: String? = null,
   val fluidTwinPart: Int? = null,
   val fluidTotalPoolMinutes: Int? = null,
+  val fluidSafetyFloorMinutes: Int = 0,
   val customRingtoneUri: String? = null,
   val customRingtoneTitle: String? = null,
   val isSoundAlertEnabled: Boolean = true,

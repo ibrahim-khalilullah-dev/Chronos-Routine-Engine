@@ -491,6 +491,7 @@ class RoutineRepository(context: Context) {
         if (t.fluidTwinId != null) put("fluidTwinId", t.fluidTwinId)
         if (t.fluidTwinPart != null) put("fluidTwinPart", t.fluidTwinPart)
         if (t.fluidTotalPoolMinutes != null) put("fluidTotalPoolMinutes", t.fluidTotalPoolMinutes)
+        put("fluidSafetyFloorMinutes", t.fluidSafetyFloorMinutes)
         if (t.customRingtoneUri != null) put("customRingtoneUri", t.customRingtoneUri)
         if (t.customRingtoneTitle != null) put("customRingtoneTitle", t.customRingtoneTitle)
         put("isSoundAlertEnabled", t.isSoundAlertEnabled)
@@ -557,6 +558,7 @@ class RoutineRepository(context: Context) {
         fluidTwinId = if (obj.has("fluidTwinId")) obj.getString("fluidTwinId") else null,
         fluidTwinPart = if (obj.has("fluidTwinPart")) obj.getInt("fluidTwinPart") else null,
         fluidTotalPoolMinutes = if (obj.has("fluidTotalPoolMinutes")) obj.getInt("fluidTotalPoolMinutes") else null,
+        fluidSafetyFloorMinutes = obj.optInt("fluidSafetyFloorMinutes", 0).coerceAtLeast(0),
         customRingtoneUri = if (obj.has("customRingtoneUri")) obj.getString("customRingtoneUri") else null,
         customRingtoneTitle = if (obj.has("customRingtoneTitle")) obj.getString("customRingtoneTitle") else null,
         isSoundAlertEnabled = obj.optBoolean("isSoundAlertEnabled", true),

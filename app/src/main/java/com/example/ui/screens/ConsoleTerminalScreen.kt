@@ -90,7 +90,7 @@ fun ConsoleTerminalScreen(
   dynamicTasks: List<RoutineTask> = emptyList(),
   sleepDurationMinutes: Int = 360,
   bufferMinutes: Int = 0,
-  onApplyTasks: (tasks: List<RoutineTask>, replaceAll: Boolean, parsedAnchors: List<RoutineTask>) -> Unit,
+  onApplyTasks: (tasks: List<RoutineTask>, replaceAll: Boolean, parsedAnchors: List<RoutineTask>, backupSleepMinutes: Int?, backupBufferMinutes: Int?) -> Unit,
   onBack: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
@@ -347,7 +347,7 @@ fun ConsoleTerminalScreen(
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-          text = "• ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Msg\n• TWIN | Pool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days | Flex(0-30) | Rest(0-30)\n• DYNAMIC: Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Msg | Flex(0-30) | Rest(0-30) | Priority(Y/N)",
+          text = "• ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Msg | [FriTitle | FriStart | FriDur | FriMsg] | [Days | Sound(Y/N) | VoiceVol(0-100)]\n• TWIN | Pool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days | Flex(0-30) | Rest(0-30) | [Category | P1Safety | P2Safety | P1Voice(Y/N) | P2Voice(Y/N) | P1Vol | P2Vol | Sound]\n• DYNAMIC | Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Msg | Flex(0-30) | Rest(0-30) | Priority(Y/N) | Category | [VoiceVol(0-100) | Sound(Y/N)]",
           color = Color(0xFF94A3B8),
           fontFamily = FontFamily.Monospace,
           fontSize = 10.sp,
@@ -451,6 +451,54 @@ fun ConsoleTerminalScreen(
 
         Spacer(modifier = Modifier.height(6.dp))
 
+        // Inline Ghost Syntax Prediction Bar
+        val cursorPos = consoleTextFieldValue.selection.start.coerceIn(0, consoleText.length)
+        val lineStart = if (cursorPos == 0) 0 else consoleText.lastIndexOf('\n', cursorPos - 1).let { if (it < 0) 0 else it + 1 }
+        val lineEnd = consoleText.indexOf('\n', cursorPos).let { if (it < 0) consoleText.length else it }
+        val currentLine = consoleText.substring(lineStart, lineEnd)
+        val syntaxPrediction = remember(currentLine) { ConsoleParser.getSyntaxPrediction(currentLine) }
+
+        AnimatedVisibility(visible = syntaxPrediction != null) {
+          syntaxPrediction?.let { prediction ->
+            Surface(
+              onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                val newText = consoleText.substring(0, lineEnd) + prediction + consoleText.substring(lineEnd)
+                val newCursor = lineEnd + prediction.length
+                consoleTextFieldValue = TextFieldValue(newText, TextRange(newCursor))
+              },
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+                .testTag("ghost_syntax_prediction_bar"),
+              shape = RoundedCornerShape(10.dp),
+              color = Color(0xFF0A1424),
+              border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.45f))
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = "TAB/TAP ↳",
+                  color = Color(0xFF06B6D4),
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                  text = prediction,
+                  color = Color(0xFF94A3B8),
+                  fontFamily = FontFamily.Monospace,
+                  fontSize = 11.sp,
+                  maxLines = 1
+                )
+              }
+            }
+          }
+        }
+
         Row(modifier = Modifier.fillMaxWidth()) {
           // Compact Gutter (Line Numbers): snugly 24.dp width, 4.dp right margin, lineHeight = 20.sp
           val lineCount = consoleText.lines().size.coerceAtLeast(1)
@@ -486,7 +534,7 @@ fun ConsoleTerminalScreen(
             ),
             placeholder = {
               Text(
-                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0-30) | Rest(0-30) | Priority(Y/N)\n# Tap 'Backup' in header to load routine script.",
+                text = "# Enter dynamic routine tasks here...\n# Syntax: Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0-30) | Rest(0-30) | Priority(Y/N) | Category\n# Tap 'Backup' in header to load routine script.",
                 color = TextTertiary,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
@@ -607,7 +655,13 @@ fun ConsoleTerminalScreen(
             if (isProcessEnabled) {
               Modifier.clickable {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onApplyTasks(parseResult.validTasks, false, parseResult.parsedAnchors)
+                onApplyTasks(
+                  parseResult.validTasks,
+                  false,
+                  parseResult.parsedAnchors,
+                  parseResult.backupSleepMinutes,
+                  parseResult.backupBufferMinutes
+                )
               }
             } else Modifier
           )
@@ -653,7 +707,13 @@ fun ConsoleTerminalScreen(
             if (isProcessEnabled) {
               Modifier.clickable {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onApplyTasks(parseResult.validTasks, true, parseResult.parsedAnchors)
+                onApplyTasks(
+                  parseResult.validTasks,
+                  true,
+                  parseResult.parsedAnchors,
+                  parseResult.backupSleepMinutes,
+                  parseResult.backupBufferMinutes
+                )
               }
             } else Modifier
           )

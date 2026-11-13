@@ -52,6 +52,39 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
 
     private val _serviceState = MutableStateFlow(ActiveAutomationState())
     val serviceState: StateFlow<ActiveAutomationState> = _serviceState.asStateFlow()
+
+    @Volatile
+    private var activeInstance: RoutineAutomationService? = null
+
+    fun onDndApplied(taskId: String?) {
+      val current = _serviceState.value
+      if (current.isRunning && (taskId == null || current.taskId == taskId)) {
+        _serviceState.value = current.copy(isDndActive = true)
+      }
+      activeInstance?.let { instance ->
+        if (taskId == null || instance.activeTaskId == taskId) {
+          instance.currentDndApplied = true
+        }
+      }
+    }
+
+    fun requestStop(context: Context, taskId: String?) {
+      val current = _serviceState.value
+      if (!current.isRunning) return
+      if (taskId != null && current.taskId != taskId) return
+      val instance = activeInstance
+      if (instance != null && (taskId == null || instance.activeTaskId == taskId)) {
+        Handler(Looper.getMainLooper()).post {
+          if (taskId == null || instance.activeTaskId == taskId) {
+            instance.stopAutomation()
+          }
+        }
+      } else {
+        try {
+          context.stopService(Intent(context, RoutineAutomationService::class.java))
+        } catch (_: Exception) {}
+      }
+    }
   }
 
   private var tts: TextToSpeech? = null
@@ -65,11 +98,14 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   private var isDndConfiguredForTask = false
   private var dndHandler: Handler? = null
   private var dndRunnable: Runnable? = null
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private var ttsDelayRunnable: Runnable? = null
   private var isVoiceEnabled = true
   private var voiceVolume = 1.0f
 
   override fun onCreate() {
     super.onCreate()
+    activeInstance = this
     createNotificationChannel()
     audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     acquireWakeLock()
@@ -186,7 +222,11 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     val formattedDuration = intent.getStringExtra(AutomationManager.EXTRA_FORMATTED_DURATION) ?: ""
     val formattedEndTime = intent.getStringExtra(AutomationManager.EXTRA_FORMATTED_END_TIME) ?: ""
 
+    val previousTaskId = activeTaskId
     activeTaskId = taskId
+    ttsDelayRunnable?.let { mainHandler.removeCallbacks(it) }
+    ttsDelayRunnable = null
+    pendingSpeechText = null
 
     acquireWakeLock()
 
@@ -210,32 +250,32 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       nm?.notify(NOTIFICATION_ID, notification)
     }
 
-    // Apply DND mode strictly guarded by permission check:
+    // Apply DND mode strictly guarded by permission check & task ownership:
     // If dndDelayMinutes <= 0 && enableDnd, engage DND immediately; if dndDelayMinutes > 0, AlarmManager fires ACTION_APPLY_DND
+    val activeDndOwner = AutomationManager.getActiveDndTaskId(this)
     if (enableDnd && AutomationManager.isDndPermissionGranted(this)) {
       if (dndDelayMinutes <= 0) {
-        currentDndApplied = AutomationManager.setDndMode(this, true)
+        currentDndApplied = AutomationManager.setDndMode(this, true, taskId)
       } else {
-        if (currentDndApplied) {
-          AutomationManager.setDndMode(this, false)
+        if (currentDndApplied && (activeDndOwner == null || activeDndOwner == previousTaskId || activeDndOwner == taskId)) {
+          AutomationManager.setDndMode(this, false, activeDndOwner ?: taskId)
         }
         currentDndApplied = false
       }
     } else {
-      if (currentDndApplied) {
-        AutomationManager.setDndMode(this, false)
+      if (currentDndApplied && (activeDndOwner == null || activeDndOwner == previousTaskId || activeDndOwner == taskId)) {
+        AutomationManager.setDndMode(this, false, activeDndOwner ?: taskId)
       }
       currentDndApplied = false
     }
 
-    // Audio & Haptic Alerts: strictly respect isSoundAlertEnabled toggle
-    if (isSoundAlertEnabled) {
-      // Gentle Haptic pulse
-      if (enableHaptic) {
-        AutomationManager.triggerHaptic(this)
-      }
+    // Decoupled Haptic Pulse (fires independently of sound alert toggle)
+    if (enableHaptic) {
+      AutomationManager.triggerHaptic(this)
+    }
 
-      // Play chosen system notification sound
+    // Decoupled Ringtone / Chime Sound Alert
+    if (isSoundAlertEnabled) {
       try {
         val soundUri = if (!ringtoneUriString.isNullOrBlank()) {
           Uri.parse(ringtoneUriString)
@@ -245,19 +285,32 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
         val ringtone = RingtoneManager.getRingtone(applicationContext, soundUri)
         ringtone?.play()
       } catch (_: Exception) {}
+    }
 
-      // Voice Reminder via TTS if enabled
-      if (isVoiceEnabled) {
+    // Decoupled Voice Reminder via TTS (always speaks if isVoiceEnabled, delayed 1500ms if chime is also playing)
+    if (isVoiceEnabled) {
+      if (isSoundAlertEnabled) {
+        val scheduledSpeech = voiceMessage
+        val runnable = Runnable {
+          ttsDelayRunnable = null
+          if (isVoiceEnabled && activeTaskId == taskId) {
+            if (isTtsReady) {
+              speakMessage(scheduledSpeech)
+            } else {
+              pendingSpeechText = scheduledSpeech
+            }
+          }
+        }
+        ttsDelayRunnable = runnable
+        mainHandler.postDelayed(runnable, 1500L)
+      } else {
         if (isTtsReady) {
           speakMessage(voiceMessage)
         } else {
           pendingSpeechText = voiceMessage
         }
-      } else {
-        releaseWakeLock()
       }
     } else {
-      // Sound alert is OFF: Alarms, DND and visual notifications fire silently
       releaseWakeLock()
     }
 
@@ -334,11 +387,19 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       dndRunnable?.let { dndHandler?.removeCallbacks(it) }
       dndRunnable = null
       dndHandler = null
-      if (currentDndApplied || isDndConfiguredForTask) {
-        AutomationManager.setDndMode(this, false)
-        currentDndApplied = false
-        isDndConfiguredForTask = false
+      ttsDelayRunnable?.let { mainHandler.removeCallbacks(it) }
+      ttsDelayRunnable = null
+      pendingSpeechText = null
+      val stoppedTaskId = activeTaskId
+      val activeDndOwner = AutomationManager.getActiveDndTaskId(this)
+      if ((currentDndApplied || isDndConfiguredForTask) &&
+        (activeDndOwner == null || (stoppedTaskId != null && activeDndOwner == stoppedTaskId)) &&
+        !AutomationManager.hasZeroDelayFollowUpDndTask(this, stoppedTaskId)
+      ) {
+        AutomationManager.setDndMode(this, false, stoppedTaskId)
       }
+      currentDndApplied = false
+      isDndConfiguredForTask = false
       tts?.stop()
     } catch (_: Exception) {
     } finally {
@@ -424,6 +485,9 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   }
 
   override fun onDestroy() {
+    if (activeInstance === this) {
+      activeInstance = null
+    }
     try {
       stopAutomation()
     } finally {

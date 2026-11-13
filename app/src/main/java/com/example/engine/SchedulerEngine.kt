@@ -426,42 +426,54 @@ object SchedulerEngine {
         }
       } else {
         // Strict Anchor Boundary Enforcement: anchors act as impenetrable walls
-        val anchorGaps = findAvailableGaps(dayAnchors, interTaskBufferMinutes)
+        val anchorGaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
         val gap1 = anchorGaps.find { part1.startTimeMinute in it.startMinute until it.endMinute }
           ?: anchorGaps.minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - part1.startTimeMinute) }
         val gap2 = anchorGaps.find { part2.startTimeMinute in it.startMinute until it.endMinute }
           ?: anchorGaps.minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - part2.startTimeMinute) }
 
         val pool = part1.fluidTotalPoolMinutes ?: (part1.durationMinutes + part2.durationMinutes)
+        val floor1 = if (part1.durationMinutes <= 0) 0 else part1.fluidSafetyFloorMinutes.coerceIn(1, part1.durationMinutes)
+        val floor2 = if (part2.durationMinutes <= 0) 0 else part2.fluidSafetyFloorMinutes.coerceIn(1, part2.durationMinutes)
+        val b1 = part1.interTaskBufferMinutes.coerceIn(0, 30)
+        val b2 = part2.interTaskBufferMinutes.coerceIn(0, 30)
 
-        if (gap1 == null || gap2 == null || gap1.durationMinutes < MIN_FLUID_TWIN_MINUTES || gap2.durationMinutes < MIN_FLUID_TWIN_MINUTES) {
-          overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor boundary prevents 45m minimum fluid twin duration."))
-          overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor boundary prevents 45m minimum fluid twin duration."))
+        if (part1.durationMinutes == 0 && part2.durationMinutes == 0) {
+          scheduledTasks.add(part1.copy(startTimeMinute = part1.startTimeMinute.coerceIn(0, 1439), durationMinutes = 0, isSplitPart = false, isOverflow = false))
+          scheduledTasks.add(part2.copy(startTimeMinute = part2.startTimeMinute.coerceIn(0, 1439), durationMinutes = 0, isSplitPart = false, isOverflow = false))
+          continue
+        }
+
+        if (gap1 == null || gap2 == null || gap1.durationMinutes < floor1 + b1 || gap2.durationMinutes < floor2 + b2) {
+          overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor boundary prevents minimum fluid twin duration."))
+          overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor boundary prevents minimum fluid twin duration."))
           continue
         } else if (gap1.startMinute == gap2.startMinute && gap1.endMinute == gap2.endMinute) {
           // Both twins in same inter-anchor gap
-          val twinBuffer = part1.interTaskBufferMinutes.coerceIn(0, 30)
-          val available = gap1.durationMinutes - twinBuffer
-          if (available < MIN_FLUID_TWIN_MINUTES * 2) {
-            overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor gap too small to host two 45m fluid twin sessions."))
-            overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor gap too small to host two 45m fluid twin sessions."))
+          val available = (gap1.durationMinutes - b1 - b2).coerceAtLeast(0)
+          if (available < floor1 + floor2) {
+            overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor gap too small to host both fluid twin sessions."))
+            overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor gap too small to host both fluid twin sessions."))
             continue
           } else {
-            var d1 = part1.durationMinutes.coerceIn(MIN_FLUID_TWIN_MINUTES, available - MIN_FLUID_TWIN_MINUTES)
-            var d2 = (pool - d1).coerceIn(MIN_FLUID_TWIN_MINUTES, available - d1)
+            val maxD1 = (available - floor2).coerceAtLeast(floor1)
+            var d1 = part1.durationMinutes.coerceIn(floor1, maxD1)
+            val maxD2 = (available - d1).coerceAtLeast(floor2)
+            var d2 = (pool - d1).coerceIn(floor2, maxD2)
             if (d1 + d2 > available) {
-              d1 = available / 2
+              val extra = (available - floor1 - floor2).coerceAtLeast(0)
+              d1 = floor1 + extra / 2
               d2 = available - d1
             }
             val minStart1 = gap1.startMinute
-            val maxStart1 = gap1.endMinute - (d1 + twinBuffer + d2)
+            val maxStart1 = gap1.endMinute - (d1 + b1 + d2 + b2)
             val start1 = if (maxStart1 >= minStart1) {
               part1.startTimeMinute.coerceIn(minStart1, maxStart1)
             } else {
               minStart1
             }
-            val minStart2 = start1 + d1 + twinBuffer
-            val maxStart2 = gap1.endMinute - d2
+            val minStart2 = start1 + d1 + b1
+            val maxStart2 = gap1.endMinute - (d2 + b2)
             val start2 = if (maxStart2 >= minStart2) {
               if (part2.startTimeMinute >= minStart2) {
                 part2.startTimeMinute.coerceIn(minStart2, maxStart2)
@@ -476,24 +488,28 @@ object SchedulerEngine {
           }
         } else {
           // Distinct inter-anchor gaps: Communicating vessels liquid time sharing
-          val cap1 = gap1.durationMinutes
-          val cap2 = gap2.durationMinutes
+          val cap1 = (gap1.durationMinutes - b1).coerceAtLeast(0)
+          val cap2 = (gap2.durationMinutes - b2).coerceAtLeast(0)
+          if (cap1 < floor1 || cap2 < floor2) {
+            overflowTasks.add(part1.copy(isOverflow = true, overflowReason = "Anchor boundary prevents minimum fluid twin duration."))
+            overflowTasks.add(part2.copy(isOverflow = true, overflowReason = "Anchor boundary prevents minimum fluid twin duration."))
+            continue
+          }
 
-          var d1 = part1.durationMinutes.coerceIn(MIN_FLUID_TWIN_MINUTES, cap1)
-          var d2 = (pool - d1).coerceAtLeast(MIN_FLUID_TWIN_MINUTES)
+          var d1 = part1.durationMinutes.coerceIn(floor1, cap1)
+          var d2 = (pool - d1).coerceAtLeast(floor2)
 
           // If Part 2 is compressed by anchor wall in Gap 2, surplus flows to Part 1
           if (d2 > cap2) {
             d2 = cap2
-            d1 = (pool - d2).coerceIn(MIN_FLUID_TWIN_MINUTES, cap1)
+            d1 = (pool - d2).coerceIn(floor1, cap1)
           }
           // If Part 1 is compressed by anchor wall in Gap 1, surplus flows to Part 2
           if (d1 > cap1) {
             d1 = cap1
-            d2 = (pool - d1).coerceIn(MIN_FLUID_TWIN_MINUTES, cap2)
+            d2 = (pool - d1).coerceIn(floor2, cap2)
           }
 
-          val b1 = part1.interTaskBufferMinutes.coerceIn(0, 30)
           val maxStart1 = gap1.endMinute - (d1 + b1)
           val start1 = when {
             maxStart1 >= gap1.startMinute && part1.startTimeMinute in gap1.startMinute..maxStart1 -> part1.startTimeMinute
@@ -502,7 +518,6 @@ object SchedulerEngine {
             else -> gap1.startMinute
           }
 
-          val b2 = part2.interTaskBufferMinutes.coerceIn(0, 30)
           val maxStart2 = gap2.endMinute - (d2 + b2)
           val start2 = when {
             maxStart2 >= gap2.startMinute && part2.startTimeMinute in gap2.startMinute..maxStart2 -> part2.startTimeMinute
@@ -525,11 +540,25 @@ object SchedulerEngine {
     val anchorGaps = findAvailableGaps(dayAnchors, interTaskBufferMinutes)
 
     for (dynamicTask in sortedStandardTasks) {
+      val requiredDuration = dynamicTask.durationMinutes.coerceAtLeast(0)
+      val prefStart = dynamicTask.startTimeMinute
+
+      // 0-minute instant notification / memory signal: allocate momentary trigger marker without failing gap checks
+      if (requiredDuration == 0) {
+        scheduledTasks.add(
+          dynamicTask.copy(
+            startTimeMinute = ((prefStart % 1440) + 1440) % 1440,
+            durationMinutes = 0,
+            isSplitPart = false,
+            isOverflow = false
+          )
+        )
+        continue
+      }
+
       val gaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
-      val requiredDuration = dynamicTask.durationMinutes
       val taskBuffer = dynamicTask.interTaskBufferMinutes.coerceIn(0, 30)
       val requiredBlock = requiredDuration + taskBuffer
-      val prefStart = dynamicTask.startTimeMinute
       val effectiveTolerance = maxOf(dynamicTask.toleranceMinutes, dynamicTask.customFlexibilityMinutes).coerceIn(0, 30)
 
       // High Priority Anchor Wall Fence: strictly confine to inter-anchor gap enclosing prefStart
@@ -586,7 +615,8 @@ object SchedulerEngine {
 
         // Try tolerance / custom flexibility within fencedGaps
         if (effectiveTolerance > 0) {
-          val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(15)
+          val minFloor = if (requiredDuration >= 15) 15 else 1
+          val minViable = (requiredDuration - effectiveTolerance).coerceIn(minFloor, requiredDuration)
           val minBlock = minViable + taskBuffer
           var flexGap: ScheduleGap? = null
           var flexStart = -1
@@ -670,7 +700,8 @@ object SchedulerEngine {
 
       // Schedule Float / Tolerance Margin / Custom Flexibility (±5m to ±30m flexibility)
       if (effectiveTolerance > 0) {
-        val minViable = (requiredDuration - effectiveTolerance).coerceAtLeast(15)
+        val minFloor = if (requiredDuration >= 15) 15 else 1
+        val minViable = (requiredDuration - effectiveTolerance).coerceIn(minFloor, requiredDuration)
         val minBlock = minViable + taskBuffer
         var flexGap: ScheduleGap? = null
         var flexStart = -1

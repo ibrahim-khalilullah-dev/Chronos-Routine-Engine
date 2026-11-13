@@ -131,6 +131,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
   val sortMode by viewModel.sortMode.collectAsState()
   val deletedTasks by viewModel.deletedTasks.collectAsState()
   val currentMinute by viewModel.currentMinute.collectAsState()
+  val taskRatingHistory by viewModel.taskRatingHistory.collectAsState()
 
   // Modal Sheet State
   var isModalOpen by remember { mutableStateOf(false) }
@@ -174,6 +175,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           selected = activeTab == NavigationTab.TIMELINE,
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            showAddChooserSheet = false
             viewModel.selectTab(NavigationTab.TIMELINE)
           },
           icon = { Icon(Icons.AutoMirrored.Filled.FormatListBulleted, contentDescription = "Timeline") },
@@ -193,7 +195,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           selected = showAddChooserSheet,
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            showAddChooserSheet = true
+            showAddChooserSheet = !showAddChooserSheet
           },
           icon = {
             Icon(
@@ -218,6 +220,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           selected = activeTab == NavigationTab.AUTOMATION,
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            showAddChooserSheet = false
             viewModel.selectTab(NavigationTab.AUTOMATION)
             viewModel.refreshPermissions()
           },
@@ -238,6 +241,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           selected = activeTab == NavigationTab.SETTINGS,
           onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            showAddChooserSheet = false
             viewModel.selectTab(NavigationTab.SETTINGS)
           },
           icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
@@ -298,6 +302,12 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             },
             onRateTask = { task, rating ->
               viewModel.recordTaskRating(task, rating)
+            },
+            onDeleteBothFluidTwinParts = { twinId ->
+              viewModel.deleteBothFluidTwinParts(twinId)
+            },
+            onDeleteTwinAndAbsorbTime = { toDeleteId, partnerId ->
+              viewModel.deleteTwinAndAbsorbTime(toDeleteId, partnerId)
             }
           )
         }
@@ -308,8 +318,8 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             dynamicTasks = dynamicTasks,
             sleepDurationMinutes = sleepDurationMinutes,
             bufferMinutes = bufferMinutes,
-            onApplyTasks = { newTasks, replaceAll, parsedAnchors ->
-              viewModel.applyBulkConsoleTasks(newTasks, replaceAll, parsedAnchors)
+            onApplyTasks = { newTasks, replaceAll, parsedAnchors, sleepMins, bufMins ->
+              viewModel.applyBulkConsoleTasks(newTasks, replaceAll, parsedAnchors, sleepMins, bufMins)
               viewModel.selectTab(NavigationTab.TIMELINE)
             },
             onBack = {
@@ -356,7 +366,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             onResumeTask = { id, isAnchor, slot ->
               viewModel.resumeTask(id, isAnchor, slot)
             },
-            taskRatingHistory = viewModel.getTaskRatingHistory()
+            taskRatingHistory = taskRatingHistory
           )
         }
 
@@ -559,34 +569,8 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           onSaveTask = { task ->
             viewModel.saveDynamicTask(task)
           },
-          onSaveFluidTwin = { title, pool, p1Title, p1Start, p1Dur, p1Voice, p2Title, p2Start, p2Dur, p2Voice, dnd, days, isVoice, nTitle, nBody, ringUri, ringTitle, isSoundAlert, twinId, buffer, flex, p1IsVoice, p2IsVoice, p1Volume, p2Volume ->
-            viewModel.saveFluidTwin(
-              title = title,
-              totalPoolMinutes = pool,
-              part1Title = p1Title,
-              part1StartMinute = p1Start,
-              part1Duration = p1Dur,
-              part1VoiceMessage = p1Voice,
-              part2Title = p2Title,
-              part2StartMinute = p2Start,
-              part2Duration = p2Dur,
-              part2VoiceMessage = p2Voice,
-              enableDnd = dnd,
-              selectedDays = days,
-              isVoiceEnabled = isVoice,
-              customNotificationTitle = nTitle,
-              customNotificationBody = nBody,
-              customRingtoneUri = ringUri,
-              customRingtoneTitle = ringTitle,
-              isSoundAlertEnabled = isSoundAlert,
-              existingTwinId = twinId,
-              interTaskBufferMinutes = buffer,
-              customFlexibilityMinutes = flex,
-              part1IsVoiceEnabled = p1IsVoice,
-              part2IsVoiceEnabled = p2IsVoice,
-              part1VoiceVolume = p1Volume,
-              part2VoiceVolume = p2Volume
-            )
+          onSaveFluidTwin = { request ->
+            viewModel.saveFluidTwin(request)
           },
           onSaveAnchorDetails = { slot, title, start, duration, voice, dnd, haptic, days, isVoice, notifTitle, notifBody, ringUri, ringTitle, isSoundAlert, friTitle, friStart, friDur, friVoice, volume, dndDelay ->
             viewModel.updateAnchorDetails(
@@ -619,7 +603,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             viewModel.moveToTrash(taskId)
           },
           slot2StartMinute = slot2Start,
-          allDynamicTasks = dynamicTasks,
+          allDynamicTasks = dynamicTasks.filter { !it.isDeleted },
           onAbsorbTwin = { toDelete, partner ->
             viewModel.deleteTwinAndAbsorbTime(toDelete, partner)
           },

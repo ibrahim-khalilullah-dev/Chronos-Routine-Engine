@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,6 +60,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -123,6 +125,7 @@ val ANALYTICS_CATEGORIES = mapOf(
   "commuting" to AnalyticsCategory("commuting", "🚗", "Commute & Transit", Color(0xFF64748B)),
   "internet" to AnalyticsCategory("internet", "🖥️", "Web & Research", Color(0xFF8B5CF6)),
   "tv" to AnalyticsCategory("tv", "📺", "Leisure & Media", Color(0xFF6B7280)),
+  "general" to AnalyticsCategory("general", "⚡", "General", Color(0xFF06B6D4)),
   "anchor_elastic" to AnalyticsCategory("anchor_elastic", "🛡️", "Elastic Buffer", Color(0xFF8B5CF6)),
   "anchor_standard" to AnalyticsCategory("anchor_standard", "⚓", "Anchor Pillar", Color(0xFF3B82F6))
 )
@@ -134,7 +137,7 @@ fun resolveTaskCategory(task: RoutineTask): AnalyticsCategory {
   if (task.type == TaskType.ANCHOR_ELASTIC || task.slotNumber == 5) {
     return ANALYTICS_CATEGORIES["anchor_elastic"]!!
   }
-  val catId = task.category?.lowercase()
+  val catId = task.category?.trim()?.lowercase()?.ifBlank { null }
   if (catId != null && ANALYTICS_CATEGORIES.containsKey(catId)) {
     return ANALYTICS_CATEGORIES[catId]!!
   }
@@ -161,12 +164,18 @@ fun resolveTaskCategory(task: RoutineTask): AnalyticsCategory {
     task.type == TaskType.ANCHOR_STANDARD ->
       ANALYTICS_CATEGORIES["anchor_standard"]!!
     else ->
-      AnalyticsCategory(id = "general", icon = "⚡", name = task.title.take(18), color = Color(0xFF06B6D4))
+      ANALYTICS_CATEGORIES["general"]!!
   }
 }
 
 fun resolveRecordCategory(record: TaskRatingRecord): AnalyticsCategory {
-  val catId = record.category.lowercase()
+  val catId = record.category.trim().lowercase()
+  if (catId == "rest buffer") {
+    return ANALYTICS_CATEGORIES["anchor_elastic"]!!
+  }
+  if (catId == "anchor") {
+    return ANALYTICS_CATEGORIES["anchor_standard"]!!
+  }
   if (ANALYTICS_CATEGORIES.containsKey(catId)) {
     return ANALYTICS_CATEGORIES[catId]!!
   }
@@ -193,7 +202,7 @@ fun resolveRecordCategory(record: TaskRatingRecord): AnalyticsCategory {
     record.category.contains("ANCHOR", ignoreCase = true) ->
       ANALYTICS_CATEGORIES["anchor_standard"]!!
     else ->
-      AnalyticsCategory(id = "general", icon = "⚡", name = record.taskTitle.take(18), color = Color(0xFF06B6D4))
+      ANALYTICS_CATEGORIES["general"]!!
   }
 }
 
@@ -1359,7 +1368,7 @@ fun SettingsScreen(
       )
 
       // Horizontal Scrollable Category Filter Chips with Task Length Counts
-      if (effectiveTasks.isNotEmpty()) {
+      if (overviewSourceTasks.isNotEmpty()) {
         LazyRow(
           modifier = Modifier
             .fillMaxWidth()
@@ -1386,7 +1395,7 @@ fun SettingsScreen(
               shape = RoundedCornerShape(12.dp)
             ) {
               Text(
-                text = "All (${effectiveTasks.size})",
+                text = "All (${overviewSourceTasks.size})",
                 fontSize = 12.sp,
                 fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Medium,
                 color = if (isAllSelected) Color(0xFF6EE7B7) else Color(0xFF94A3B8),
@@ -1396,7 +1405,7 @@ fun SettingsScreen(
           }
 
           // 2. Dynamic Category Chips present in the active schedule with Task Counts
-          items(overviewCategoryChips, key = { it.id }) { catItem ->
+          itemsIndexed(overviewCategoryChips, key = { index, item -> "${item.id}_${item.name}_$index" }) { _, catItem ->
             val isSelected = selectedOverviewCategoryId == catItem.id
             Surface(
               modifier = Modifier
@@ -1462,140 +1471,142 @@ fun SettingsScreen(
         } else {
           Column(modifier = Modifier.fillMaxWidth()) {
             filteredOverviewTasks.forEachIndexed { index, task ->
-              val cat = resolveTaskCategory(task)
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .testTag("overview_task_row_${task.id}")
-                  .padding(horizontal = 16.dp, vertical = 13.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                // Left & Center: 1. Start Time + 2. Task Name / Title + 3. Duration Badge
+              key("${task.id}_$index") {
+                val cat = resolveTaskCategory(task)
                 Row(
-                  modifier = Modifier.weight(1f),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("overview_task_row_${task.id}")
+                    .padding(horizontal = 16.dp, vertical = 13.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
                   verticalAlignment = Alignment.CenterVertically
                 ) {
-                  // 1. Start Time (Formatted 12h e.g. "09:00 AM", Cyan accent)
-                  Text(
-                    text = task.formattedStartTime,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF67E8F9),
-                    modifier = Modifier.width(74.dp)
-                  )
-
-                  Spacer(modifier = Modifier.width(8.dp))
-
-                  // 2. Task Name / Title + 3. Duration Badge
-                  Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                      text = task.title,
-                      fontSize = 14.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFFF8FAFC),
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                      text = task.formattedDuration,
-                      fontSize = 11.sp,
-                      fontWeight = FontWeight.Medium,
-                      color = Color(0xFF94A3B8)
-                    )
-                  }
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                // 4. Category Badge (Compact One UI squircle pill with icon + name)
-                Surface(
-                  shape = RoundedCornerShape(8.dp),
-                  color = cat.color.copy(alpha = 0.15f),
-                  border = BorderStroke(1.dp, cat.color.copy(alpha = 0.35f))
-                ) {
+                  // Left & Center: 1. Start Time + 2. Task Name / Title + 3. Duration Badge
                   Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically
                   ) {
-                    Text(text = cat.icon, fontSize = 11.sp)
-                    Spacer(modifier = Modifier.width(4.dp))
+                    // 1. Start Time (Formatted 12h e.g. "09:00 AM", Cyan accent)
                     Text(
-                      text = cat.name,
-                      fontSize = 11.sp,
-                      fontWeight = FontWeight.SemiBold,
-                      color = cat.color,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis
+                      text = task.formattedStartTime,
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF67E8F9),
+                      modifier = Modifier.width(74.dp)
                     )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // 2. Task Name / Title + 3. Duration Badge
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(
+                        text = task.title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFF8FAFC),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                      )
+                      Spacer(modifier = Modifier.height(2.dp))
+                      Text(
+                        text = task.formattedDuration,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF94A3B8)
+                      )
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.width(10.dp))
+
+                  // 4. Category Badge (Compact One UI squircle pill with icon + name)
+                  Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = cat.color.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, cat.color.copy(alpha = 0.35f))
+                  ) {
+                    Row(
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      Text(text = cat.icon, fontSize = 11.sp)
+                      Spacer(modifier = Modifier.width(4.dp))
+                      Text(
+                        text = cat.name,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = cat.color,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                      )
+                    }
+                  }
+
+                  // 5. Pause / Vacation Control (Slot 1 Reverse Sleep is strictly protected and cannot be paused)
+                  val isSlot1 = task.slotNumber == 1
+                  if (!isSlot1) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    val isPaused = task.isCurrentlyPaused()
+                    val isAnchorTask = task.slotNumber != null || task.type == TaskType.ANCHOR_STANDARD || task.type == TaskType.ANCHOR_ELASTIC
+                    if (isPaused) {
+                      Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFF59E0B).copy(alpha = 0.18f),
+                        border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
+                        modifier = Modifier
+                          .testTag("overview_task_resume_${task.id}")
+                          .clickable {
+                            onResumeTask(task.id, isAnchorTask, task.slotNumber)
+                          }
+                      ) {
+                        Row(
+                          modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                          verticalAlignment = Alignment.CenterVertically
+                        ) {
+                          Text("⏸️", fontSize = 10.sp)
+                          Spacer(modifier = Modifier.width(3.dp))
+                          Text(
+                            text = "Resume",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFBBF24)
+                          )
+                        }
+                      }
+                    } else {
+                      Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF1E293B).copy(alpha = 0.7f),
+                        border = BorderStroke(1.dp, Color(0xFF334155)),
+                        modifier = Modifier
+                          .testTag("overview_task_pause_${task.id}")
+                          .clickable {
+                            taskToPause = task
+                            pauseMode = PauseOption.TODAY_ONLY
+                            pauseDaysInput = "3"
+                          }
+                      ) {
+                        Box(
+                          modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                          contentAlignment = Alignment.Center
+                        ) {
+                          Text(
+                            text = "⏸️",
+                            fontSize = 11.sp
+                          )
+                        }
+                      }
+                    }
                   }
                 }
 
-                // 5. Pause / Vacation Control (Slot 1 Reverse Sleep is strictly protected and cannot be paused)
-                val isSlot1 = task.slotNumber == 1
-                if (!isSlot1) {
-                  Spacer(modifier = Modifier.width(8.dp))
-                  val isPaused = task.isCurrentlyPaused()
-                  val isAnchorTask = task.slotNumber != null || task.type == TaskType.ANCHOR_STANDARD || task.type == TaskType.ANCHOR_ELASTIC
-                  if (isPaused) {
-                    Surface(
-                      shape = RoundedCornerShape(8.dp),
-                      color = Color(0xFFF59E0B).copy(alpha = 0.18f),
-                      border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
-                      modifier = Modifier
-                        .testTag("overview_task_resume_${task.id}")
-                        .clickable {
-                          onResumeTask(task.id, isAnchorTask, task.slotNumber)
-                        }
-                    ) {
-                      Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                      ) {
-                        Text("⏸️", fontSize = 10.sp)
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                          text = "Resume",
-                          fontSize = 11.sp,
-                          fontWeight = FontWeight.Bold,
-                          color = Color(0xFFFBBF24)
-                        )
-                      }
-                    }
-                  } else {
-                    Surface(
-                      shape = RoundedCornerShape(8.dp),
-                      color = Color(0xFF1E293B).copy(alpha = 0.7f),
-                      border = BorderStroke(1.dp, Color(0xFF334155)),
-                      modifier = Modifier
-                        .testTag("overview_task_pause_${task.id}")
-                        .clickable {
-                          taskToPause = task
-                          pauseMode = PauseOption.TODAY_ONLY
-                          pauseDaysInput = "3"
-                        }
-                    ) {
-                      Box(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Text(
-                          text = "⏸️",
-                          fontSize = 11.sp
-                        )
-                      }
-                    }
-                  }
+                if (index < filteredOverviewTasks.lastIndex) {
+                  HorizontalDivider(
+                    color = Color(0xFF1F2637),
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                  )
                 }
-              }
-
-              if (index < filteredOverviewTasks.lastIndex) {
-                HorizontalDivider(
-                  color = Color(0xFF1F2637),
-                  thickness = 1.dp,
-                  modifier = Modifier.padding(horizontal = 16.dp)
-                )
               }
             }
           }

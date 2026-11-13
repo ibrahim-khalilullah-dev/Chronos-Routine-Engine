@@ -363,10 +363,10 @@ fun ChronosArchitectureGuideSheet(
         ) {
           Text(
             text = "Fluid Twins link two separate routine sessions (such as Morning Architecture and Afternoon Review) under a unified total duration pool:\n\n" +
-              "• Communicating Vessels: Adding time to Session A proportionally contracts Session B while maintaining total pool integrity (P = D1 + D2).\n" +
-              "• Anchor Wall Safety: Both sessions strictly respect immovable anchor walls and maintain a 45-minute safety floor.\n" +
+              "• Communicating Vessels: Adding time to Session A proportionally contracts Session B while maintaining total pool integrity (P = D1 + D2), supporting pools from 2m up to 12h (including <45m short sprints).\n" +
+              "• Per-Session Safety Floors: Each twin part supports an optional custom safety floor (fluidSafetyFloorMinutes, 0 = unconstrained down to 1m) while strictly respecting immovable anchor walls and per-part rest buffers.\n" +
               "• Surplus Flow: If one session is compressed by an anchor boundary, surplus minutes automatically flow to the partner twin.\n" +
-              "• Autonomous Telemetry: Each twin session maintains independent voice messages, ringtones, and notification policies.",
+              "• Autonomous Telemetry: Each twin session maintains independent voice toggles, speech messages, and volume sliders alongside shared alerts, category, flexibility, buffer, and DND rules.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp
@@ -389,7 +389,7 @@ fun ChronosArchitectureGuideSheet(
             text = "Chronos introduces rigid compartmentalization rules to prevent timetable drift:\n\n" +
               "• High Priority Anchor Wall Fence: When marked High Priority (isHighPriority = true), a task is strictly confined to the inter-anchor gap enclosing its preferred start time. If space is insufficient, it moves to the Overflow Pool rather than jumping across anchor walls into unrelated time zones.\n" +
               "• Custom Flexibility (0 to 30m): User-defined tolerance margin allows tasks to gently compress their duration to fit into tight circadian gaps without overflowing.\n" +
-              "• Inter-Task Rest Buffer (0 to 30m, default 5m): Enforces an automatic cognitive cool-down buffer after every scheduled task.",
+              "• Inter-Task Rest Buffer (0 to 30m, default 0m): Enforces an optional per-task cognitive cool-down buffer after scheduled tasks.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp
@@ -434,9 +434,9 @@ fun ChronosArchitectureGuideSheet(
         ) {
           Text(
             text = "Engineered specifically for complete immunity against aggressive OEM task killers (such as Samsung One UI Device Care deep sleep):\n\n" +
-              "• AlarmManager.setAlarmClock: Alarms use system clock alarm architecture, guaranteeing execution through deep sleep and Doze mode.\n" +
-              "• Priority DND with 0–25m Delay Timer: Switches system interruption filter to Priority on task start and restores original status on end. Anchors support a 0–25 minute delayed engagement timer.\n" +
-              "• Audio-Ducking Lock-Screen TTS: Voice briefings request transient audio ducking (AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK) to lower background media volume while speaking.\n" +
+              "• AlarmManager.setAlarmClock: Start alarms and DND-enabled end alarms use system clock alarm architecture, scheduling the earliest upcoming non-overflow occurrence over a 7-day horizon.\n" +
+              "• Task-Owned Priority DND & Overlap Guard: Tracks the active DND owner task ID synchronously, rejects delayed DND triggers for paused or deleted tasks, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.\n" +
+              "• Decoupled Alerts & Audio Ducking: Sound chimes, haptic vibration, and TTS voice briefings run independently with a cancellable 1500ms chime-before-voice delay and transient audio ducking while keeping app access protected behind your device lock.\n" +
               "• 4-Tier Offline Vault: Routines automatically persist to chronos_vault.json across external, public documents, and internal storage, enabling zero-click restoration on fresh reinstallation.",
             color = TextSecondary,
             fontSize = 12.sp,
@@ -474,21 +474,21 @@ fun ChronosArchitectureGuideSheet(
           ) {
             Column(modifier = Modifier.padding(12.dp)) {
               Text(
-                text = "1. ANCHOR | Slot(1-7) | Title | Start | Dur | DND | Delay | Voice | Msg",
+                text = "1. ANCHOR | Slot(1-7) | Title | Start | Dur | DND | Delay | Voice | Msg | [FriOverrides] | [Days | Sound | VoiceVol]",
                 color = Color(0xFF06B6D4),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold
               )
               Text(
-                text = "2. TWIN | Pool | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days | Flex | Rest",
+                text = "2. TWIN | Pool | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1VoiceYN | P2VoiceYN | P1Vol | P2Vol | Sound]",
                 color = Color(0xFF38BDF8),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold
               )
               Text(
-                text = "3. DYNAMIC | Name | Dur | Start | DND | Days | Voice | Msg | Flex | Rest",
+                text = "3. DYNAMIC | Name | Dur | Start | DND | Days | Voice | Msg | Flex | Rest | Priority | Category | [VoiceVol | Sound]",
                 color = Color(0xFF34D399),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,
@@ -496,7 +496,7 @@ fun ChronosArchitectureGuideSheet(
               )
               Spacer(modifier = Modifier.height(8.dp))
               Text(
-                text = "Example:\nDeep Work | 90 | 09:30 | Y | Mon,Wed,Fri | Y | Focus session starting now | 15 | 5",
+                text = "Example:\nDeep Work | 90 | 09:30 | Y | Mon,Wed,Fri | Y | Focus session starting now | 15 | 0 | Y | work | 100 | Y",
                 color = Color(0xFFE2E8F0),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,

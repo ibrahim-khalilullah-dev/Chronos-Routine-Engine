@@ -87,6 +87,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -157,6 +158,7 @@ data class RoutineCategory(
 )
 
 val ROUTINE_CATEGORIES = listOf(
+  RoutineCategory("general", "⚡", "General", "Routine Task"),
   RoutineCategory("break", "☕", "Break", "Coffee Break"),
   RoutineCategory("commuting", "🚗", "Commuting", "Commute & Travel"),
   RoutineCategory("eating", "🍴", "Eating", "Meal & Nutrition"),
@@ -182,6 +184,40 @@ fun sanitizeNumberInput(input: String, maxDigits: Int = 2): Pair<String, Int> {
   return Pair(clean, parsed)
 }
 
+data class FluidTwinSaveRequest(
+  val title: String,
+  val totalPoolMinutes: Int,
+  val part1Title: String,
+  val part1StartMinute: Int,
+  val part1Duration: Int,
+  val part1VoiceMessage: String,
+  val part2Title: String,
+  val part2StartMinute: Int,
+  val part2Duration: Int,
+  val part2VoiceMessage: String,
+  val enableDnd: Boolean,
+  val selectedDays: Set<RoutineDay>,
+  val isVoiceEnabled: Boolean,
+  val customNotificationTitle: String,
+  val customNotificationBody: String,
+  val customRingtoneUri: String? = null,
+  val customRingtoneTitle: String? = null,
+  val isSoundAlertEnabled: Boolean = true,
+  val existingTwinId: String? = null,
+  val sourceSingleTaskId: String? = null,
+  val interTaskBufferMinutes: Int = 0,
+  val customFlexibilityMinutes: Int = 0,
+  val part1IsVoiceEnabled: Boolean = isVoiceEnabled,
+  val part2IsVoiceEnabled: Boolean = isVoiceEnabled,
+  val part1VoiceVolume: Float = 1.0f,
+  val part2VoiceVolume: Float = 1.0f,
+  val part1SafetyFloorMinutes: Int = 0,
+  val part2SafetyFloorMinutes: Int = 0,
+  val enableHaptic: Boolean = true,
+  val dndDelayMinutes: Int = 0,
+  val category: String? = null
+)
+
 /**
  * PHASE 5A & 6A: High-end AMOLED Dark "Routine Studio Form" & Preserved Anchor Editor.
  */
@@ -191,33 +227,7 @@ fun TaskModalBottomSheet(
   initialTask: RoutineTask? = null,
   onDismiss: () -> Unit,
   onSaveTask: (RoutineTask) -> Unit,
-  onSaveFluidTwin: (
-    title: String,
-    totalPoolMinutes: Int,
-    part1Title: String,
-    part1StartMinute: Int,
-    part1Duration: Int,
-    part1VoiceMessage: String,
-    part2Title: String,
-    part2StartMinute: Int,
-    part2Duration: Int,
-    part2VoiceMessage: String,
-    enableDnd: Boolean,
-    selectedDays: Set<RoutineDay>,
-    isVoiceEnabled: Boolean,
-    customNotificationTitle: String,
-    customNotificationBody: String,
-    customRingtoneUri: String?,
-    customRingtoneTitle: String?,
-    isSoundAlertEnabled: Boolean,
-    existingTwinId: String?,
-    interTaskBufferMinutes: Int,
-    customFlexibilityMinutes: Int,
-    part1IsVoiceEnabled: Boolean,
-    part2IsVoiceEnabled: Boolean,
-    part1VoiceVolume: Float,
-    part2VoiceVolume: Float
-  ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+  onSaveFluidTwin: (FluidTwinSaveRequest) -> Unit = {},
   onSaveAnchorDetails: (
     slotNumber: Int,
     title: String,
@@ -287,14 +297,40 @@ fun TaskModalBottomSheet(
   var showCategoryGridModal by remember { mutableStateOf(false) }
 
   // 2-Session Mode Switcher State
-  var isFluidTwinMode by remember(initialTask) { mutableStateOf(initialTask?.isFluidTwin ?: false) }
+  val isEditingFluidTwin = initialTask?.isFluidTwin == true
+  var isFluidTwinMode by remember(initialTask) { mutableStateOf(isEditingFluidTwin) }
+
+  // Fluid Twin Partner Discovery & Initialization (strictly exclude deleted tasks)
+  val existingTwinPartner = remember(initialTask, allDynamicTasks) {
+    if (initialTask?.isFluidTwin == true && initialTask.fluidTwinId != null) {
+      allDynamicTasks.firstOrNull { !it.isDeleted && it.fluidTwinId == initialTask.fluidTwinId && it.id != initialTask.id }
+    } else null
+  }
+
+  val resolvedP1Task = if (initialTask?.isFluidTwin == true) {
+    if (initialTask.fluidTwinPart == 1) initialTask else existingTwinPartner
+  } else null
+
+  val resolvedP2Task = if (initialTask?.isFluidTwin == true) {
+    if (initialTask.fluidTwinPart == 2) initialTask else existingTwinPartner
+  } else null
 
   // Total Routine Duration Controller (for Dual Fluid Twin Mode)
-  val initialTotalPool = initialTask?.fluidTotalPoolMinutes ?: ((initialTask?.durationMinutes ?: 90) * 2).coerceAtLeast(180)
+  val initialTotalPool = if (isEditingFluidTwin) {
+    initialTask?.fluidTotalPoolMinutes
+      ?: ((resolvedP1Task?.durationMinutes ?: 0) + (resolvedP2Task?.durationMinutes ?: 0)).coerceAtLeast(2)
+  } else {
+    0
+  }
   var totalPoolHours by remember(initialTask) { mutableIntStateOf(initialTotalPool / 60) }
   var totalPoolMinutes by remember(initialTask) { mutableIntStateOf(initialTotalPool % 60) }
-  var totalPoolHoursInput by remember(initialTask) { mutableStateOf((initialTotalPool / 60).toString()) }
-  var totalPoolMinutesInput by remember(initialTask) { mutableStateOf((initialTotalPool % 60).toString()) }
+  var totalPoolHoursInput by remember(initialTask) {
+    mutableStateOf(if (isEditingFluidTwin && initialTotalPool > 0) (initialTotalPool / 60).toString() else "")
+  }
+  var totalPoolMinutesInput by remember(initialTask) {
+    mutableStateOf(if (isEditingFluidTwin && initialTotalPool > 0) (initialTotalPool % 60).toString() else "")
+  }
+  var splitValidationError by remember(initialTask) { mutableStateOf<String?>(null) }
 
   // Single Task / Regular Anchor State (strictly reads initialTask?.startTimeMinute & durationMinutes)
   val initialRegularStart = initialTask?.startTimeMinute ?: 540
@@ -361,46 +397,63 @@ fun TaskModalBottomSheet(
   var voiceMessage by remember(initialTask) { mutableStateOf(initialTask?.voiceMessage ?: "") }
   var voiceVolume by remember(initialTask) { mutableFloatStateOf(initialTask?.voiceVolume ?: 1f) }
 
-  // Fluid Twin Partner Discovery & Initialization
-  val existingTwinPartner = remember(initialTask, allDynamicTasks) {
-    if (initialTask?.isFluidTwin == true && initialTask.fluidTwinId != null) {
-      allDynamicTasks.firstOrNull { it.fluidTwinId == initialTask.fluidTwinId && it.id != initialTask.id }
-    } else null
-  }
-
-  val resolvedP1Task = if (initialTask?.isFluidTwin == true) {
-    if (initialTask.fluidTwinPart == 1) initialTask else existingTwinPartner
-  } else null
-
-  val resolvedP2Task = if (initialTask?.isFluidTwin == true) {
-    if (initialTask.fluidTwinPart == 2) initialTask else existingTwinPartner
-  } else null
-
-  // Dual Session 1 (Cyan Theme #38BDF8)
+  // Dual Session 1 (Cyan Theme #38BDF8) - starts at 0/empty when creating or converting single task
   var part1Title by remember(initialTask) {
-    mutableStateOf(resolvedP1Task?.title ?: if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 1) initialTask.title else "")
+    mutableStateOf(if (isEditingFluidTwin) (resolvedP1Task?.title ?: initialTask?.title.orEmpty()) else "")
   }
-  var part1StartHour by remember(initialTask) { mutableIntStateOf(resolvedP1Task?.let { it.startTimeMinute / 60 } ?: startHour) }
-  var part1StartMinute by remember(initialTask) { mutableIntStateOf(resolvedP1Task?.let { it.startTimeMinute % 60 } ?: startMinute) }
-  var part1DurationHours by remember(initialTask) { mutableIntStateOf(resolvedP1Task?.let { it.durationMinutes / 60 } ?: 1) }
-  var part1DurationMins by remember(initialTask) { mutableIntStateOf(resolvedP1Task?.let { it.durationMinutes % 60 } ?: 30) }
-  var part1SafetyFloor by remember(initialTask) { mutableIntStateOf(45) }
-  var part1VoiceMessage by remember(initialTask) { mutableStateOf(resolvedP1Task?.voiceMessage ?: voiceMessage) }
-  var isVoiceEnabledS1 by remember(initialTask) { mutableStateOf(resolvedP1Task?.isVoiceEnabled ?: true) }
-  var voiceVolumeS1 by remember(initialTask) { mutableFloatStateOf(resolvedP1Task?.voiceVolume ?: 1f) }
+  var part1StartHour by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) (resolvedP1Task?.let { it.startTimeMinute / 60 } ?: startHour) else startHour)
+  }
+  var part1StartMinute by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) (resolvedP1Task?.let { it.startTimeMinute % 60 } ?: startMinute) else startMinute)
+  }
+  var part1DurationHours by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP1Task?.durationMinutes ?: 0) / 60) else 0)
+  }
+  var part1DurationMins by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP1Task?.durationMinutes ?: 0) % 60) else 0)
+  }
+  var part1SafetyFloor by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) (resolvedP1Task?.fluidSafetyFloorMinutes ?: 0) else 0)
+  }
+  var part1VoiceMessage by remember(initialTask) {
+    mutableStateOf(if (isEditingFluidTwin) (resolvedP1Task?.voiceMessage ?: "") else "")
+  }
+  var isVoiceEnabledS1 by remember(initialTask) {
+    mutableStateOf(if (isEditingFluidTwin) (resolvedP1Task?.isVoiceEnabled ?: true) else true)
+  }
+  var voiceVolumeS1 by remember(initialTask) {
+    mutableFloatStateOf(if (isEditingFluidTwin) (resolvedP1Task?.voiceVolume ?: 1f) else 1f)
+  }
 
-  // Dual Session 2 (Violet Theme #8B5CF6)
+  // Dual Session 2 (Violet Theme #8B5CF6) - starts at 0/empty when creating or converting single task
   var part2Title by remember(initialTask) {
-    mutableStateOf(resolvedP2Task?.title ?: if (initialTask?.isFluidTwin == true && initialTask.fluidTwinPart == 2) initialTask.title else "")
+    mutableStateOf(if (isEditingFluidTwin) (resolvedP2Task?.title ?: "") else "")
   }
-  var part2StartHour by remember(initialTask) { mutableIntStateOf(resolvedP2Task?.let { it.startTimeMinute / 60 } ?: 14) }
-  var part2StartMinute by remember(initialTask) { mutableIntStateOf(resolvedP2Task?.let { it.startTimeMinute % 60 } ?: 0) }
-  var part2DurationHours by remember(initialTask) { mutableIntStateOf(resolvedP2Task?.let { it.durationMinutes / 60 } ?: 1) }
-  var part2DurationMins by remember(initialTask) { mutableIntStateOf(resolvedP2Task?.let { it.durationMinutes % 60 } ?: 30) }
-  var part2SafetyFloor by remember(initialTask) { mutableIntStateOf(45) }
-  var part2VoiceMessage by remember(initialTask) { mutableStateOf(resolvedP2Task?.voiceMessage ?: "") }
-  var isVoiceEnabledS2 by remember(initialTask) { mutableStateOf(resolvedP2Task?.isVoiceEnabled ?: true) }
-  var voiceVolumeS2 by remember(initialTask) { mutableFloatStateOf(resolvedP2Task?.voiceVolume ?: 1f) }
+  var part2StartHour by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) (resolvedP2Task?.let { it.startTimeMinute / 60 } ?: 14) else 14)
+  }
+  var part2StartMinute by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) (resolvedP2Task?.let { it.startTimeMinute % 60 } ?: 0) else 0)
+  }
+  var part2DurationHours by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP2Task?.durationMinutes ?: 0) / 60) else 0)
+  }
+  var part2DurationMins by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP2Task?.durationMinutes ?: 0) % 60) else 0)
+  }
+  var part2SafetyFloor by remember(initialTask) {
+    mutableIntStateOf(if (isEditingFluidTwin) (resolvedP2Task?.fluidSafetyFloorMinutes ?: 0) else 0)
+  }
+  var part2VoiceMessage by remember(initialTask) {
+    mutableStateOf(if (isEditingFluidTwin) (resolvedP2Task?.voiceMessage ?: "") else "")
+  }
+  var isVoiceEnabledS2 by remember(initialTask) {
+    mutableStateOf(if (isEditingFluidTwin) (resolvedP2Task?.isVoiceEnabled ?: true) else true)
+  }
+  var voiceVolumeS2 by remember(initialTask) {
+    mutableFloatStateOf(if (isEditingFluidTwin) (resolvedP2Task?.voiceVolume ?: 1f) else 1f)
+  }
 
   // System Integrations & Recurrence
   var isSoundAlertEnabled by remember(initialTask) { mutableStateOf(initialTask?.isSoundAlertEnabled ?: true) }
@@ -533,7 +586,58 @@ fun TaskModalBottomSheet(
   val hasUnsavedChanges by remember {
     derivedStateOf {
       if (initialTask == null) {
-        title.isNotBlank() || voiceMessage.isNotBlank() || (durationHoursInput != "1" && durationHoursInput.isNotBlank())
+        if (isFluidTwinMode) {
+          part1Title.isNotBlank() ||
+            part2Title.isNotBlank() ||
+            (totalPoolHours * 60 + totalPoolMinutes) > 0 ||
+            (part1DurationHours * 60 + part1DurationMins) > 0 ||
+            (part2DurationHours * 60 + part2DurationMins) > 0 ||
+            part1SafetyFloor > 0 ||
+            part2SafetyFloor > 0 ||
+            part1VoiceMessage.isNotBlank() ||
+            part2VoiceMessage.isNotBlank() ||
+            enableDnd ||
+            !isSoundAlertEnabled ||
+            customFlexibilityMinutes > 0 ||
+            interTaskBufferMinutes > 0
+        } else {
+          title.isNotBlank() ||
+            voiceMessage.isNotBlank() ||
+            (durationHoursInput != "1" && durationHoursInput.isNotBlank()) ||
+            enableDnd ||
+            !isSoundAlertEnabled ||
+            isHighPriority ||
+            customFlexibilityMinutes > 0 ||
+            interTaskBufferMinutes > 0
+        }
+      } else if (isEditingFluidTwin) {
+        val initPool = initialTask.fluidTotalPoolMinutes
+          ?: ((resolvedP1Task?.durationMinutes ?: 0) + (resolvedP2Task?.durationMinutes ?: 0))
+        val initP1Dur = resolvedP1Task?.durationMinutes ?: 0
+        val initP2Dur = resolvedP2Task?.durationMinutes ?: 0
+        val initP1Start = resolvedP1Task?.startTimeMinute ?: 0
+        val initP2Start = resolvedP2Task?.startTimeMinute ?: (14 * 60)
+        (totalPoolHours * 60 + totalPoolMinutes) != initPool ||
+          part1Title != (resolvedP1Task?.title ?: "") ||
+          part2Title != (resolvedP2Task?.title ?: "") ||
+          (part1StartHour * 60 + part1StartMinute) != initP1Start ||
+          (part2StartHour * 60 + part2StartMinute) != initP2Start ||
+          (part1DurationHours * 60 + part1DurationMins) != initP1Dur ||
+          (part2DurationHours * 60 + part2DurationMins) != initP2Dur ||
+          part1SafetyFloor != (resolvedP1Task?.fluidSafetyFloorMinutes ?: 0) ||
+          part2SafetyFloor != (resolvedP2Task?.fluidSafetyFloorMinutes ?: 0) ||
+          part1VoiceMessage != (resolvedP1Task?.voiceMessage ?: "") ||
+          part2VoiceMessage != (resolvedP2Task?.voiceMessage ?: "") ||
+          isVoiceEnabledS1 != (resolvedP1Task?.isVoiceEnabled ?: true) ||
+          isVoiceEnabledS2 != (resolvedP2Task?.isVoiceEnabled ?: true) ||
+          voiceVolumeS1 != (resolvedP1Task?.voiceVolume ?: 1f) ||
+          voiceVolumeS2 != (resolvedP2Task?.voiceVolume ?: 1f) ||
+          enableDnd != initialDnd ||
+          isSoundAlertEnabled != initialSound ||
+          (initialTask.category != null && selectedCategory.id != initialTask.category) ||
+          selectedDays != initialTask.selectedDays ||
+          customFlexibilityMinutes != initialTask.customFlexibilityMinutes ||
+          interTaskBufferMinutes != initialTask.interTaskBufferMinutes
       } else {
         title != initialTitle ||
           (durationHours * 60 + durationMins) != initialDuration ||
@@ -545,8 +649,8 @@ fun TaskModalBottomSheet(
           (initialTask.category != null && selectedCategory.id != initialTask.category) ||
           selectedDays != initialTask.selectedDays ||
           voiceVolume != initialTask.voiceVolume ||
-          isHighPriority != (initialTask.isHighPriority ?: false) ||
-          customFlexibilityMinutes != (initialTask.customFlexibilityMinutes ?: 0) ||
+          isHighPriority != initialTask.isHighPriority ||
+          customFlexibilityMinutes != initialTask.customFlexibilityMinutes ||
           interTaskBufferMinutes != initialTask.interTaskBufferMinutes ||
           (isSlot3 && (
             fridayTitle != (initialTask.fridayTitle ?: "Jumu'ah") ||
@@ -571,6 +675,7 @@ fun TaskModalBottomSheet(
   }
 
   val triggerSave: () -> Unit = {
+    var canDismiss = true
     if (isAnchor) {
       val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(15)
       val calculatedStart = startHour * 60 + startMinute
@@ -630,42 +735,64 @@ fun TaskModalBottomSheet(
         }
       }
     } else if (isFluidTwinMode) {
-      val p1Dur = (part1DurationHours * 60 + part1DurationMins).coerceAtLeast(part1SafetyFloor)
-      val p2Dur = (part2DurationHours * 60 + part2DurationMins).coerceAtLeast(part2SafetyFloor)
-      val totalPool = (p1Dur + p2Dur).coerceAtLeast(part1SafetyFloor + part2SafetyFloor)
-      val p1Start = part1StartHour * 60 + part1StartMinute
-      val p2Start = part2StartHour * 60 + part2StartMinute
-      val masterTitle = selectedCategory.title
+      val pool = totalPoolHours * 60 + totalPoolMinutes
+      val p1Dur = part1DurationHours * 60 + part1DurationMins
+      val p2Dur = part2DurationHours * 60 + part2DurationMins
+      val validationError = when {
+        pool < 2 -> "Total routine pool must be at least 2 minutes."
+        p1Dur < 1 || p2Dur < 1 -> "Both Session 1 and Session 2 must be at least 1 minute."
+        part1SafetyFloor > p1Dur -> "Session 1 safety floor (${part1SafetyFloor}m) cannot exceed Session 1 duration (${p1Dur}m)."
+        part2SafetyFloor > p2Dur -> "Session 2 safety floor (${part2SafetyFloor}m) cannot exceed Session 2 duration (${p2Dur}m)."
+        else -> null
+      }
+      if (validationError != null) {
+        splitValidationError = validationError
+        canDismiss = false
+      } else {
+        splitValidationError = null
+        val totalPool = pool.coerceAtLeast(p1Dur + p2Dur)
+        val p1Start = part1StartHour * 60 + part1StartMinute
+        val p2Start = part2StartHour * 60 + part2StartMinute
+        val masterTitle = selectedCategory.title
 
-      onSaveFluidTwin(
-        masterTitle,
-        totalPool,
-        part1Title.ifBlank { "${selectedCategory.title} (Part 1)" },
-        p1Start,
-        p1Dur,
-        part1VoiceMessage,
-        part2Title.ifBlank { "${selectedCategory.title} (Part 2)" },
-        p2Start,
-        p2Dur,
-        part2VoiceMessage,
-        enableDnd,
-        selectedDays,
-        isVoiceEnabledS1 || isVoiceEnabledS2,
-        masterTitle,
-        "",
-        customRingtoneUri,
-        customRingtoneTitle,
-        isSoundAlertEnabled,
-        initialTask?.fluidTwinId,
-        interTaskBufferMinutes.coerceIn(0, 30),
-        customFlexibilityMinutes.coerceIn(0, 30),
-        isVoiceEnabledS1,
-        isVoiceEnabledS2,
-        voiceVolumeS1.coerceIn(0f, 1f),
-        voiceVolumeS2.coerceIn(0f, 1f)
-      )
+        onSaveFluidTwin(
+          FluidTwinSaveRequest(
+            title = masterTitle,
+            totalPoolMinutes = totalPool,
+            part1Title = part1Title.ifBlank { "${selectedCategory.title} (Part 1)" },
+            part1StartMinute = p1Start,
+            part1Duration = p1Dur,
+            part1VoiceMessage = part1VoiceMessage,
+            part2Title = part2Title.ifBlank { "${selectedCategory.title} (Part 2)" },
+            part2StartMinute = p2Start,
+            part2Duration = p2Dur,
+            part2VoiceMessage = part2VoiceMessage,
+            enableDnd = enableDnd,
+            selectedDays = selectedDays,
+            isVoiceEnabled = isVoiceEnabledS1 || isVoiceEnabledS2,
+            customNotificationTitle = masterTitle,
+            customNotificationBody = "",
+            customRingtoneUri = customRingtoneUri,
+            customRingtoneTitle = customRingtoneTitle,
+            isSoundAlertEnabled = isSoundAlertEnabled,
+            existingTwinId = initialTask?.fluidTwinId,
+            sourceSingleTaskId = if (initialTask != null && !initialTask.isFluidTwin) initialTask.id else null,
+            interTaskBufferMinutes = interTaskBufferMinutes.coerceIn(0, 30),
+            customFlexibilityMinutes = customFlexibilityMinutes.coerceIn(0, 30),
+            part1IsVoiceEnabled = isVoiceEnabledS1,
+            part2IsVoiceEnabled = isVoiceEnabledS2,
+            part1VoiceVolume = voiceVolumeS1.coerceIn(0f, 1f),
+            part2VoiceVolume = voiceVolumeS2.coerceIn(0f, 1f),
+            part1SafetyFloorMinutes = part1SafetyFloor.coerceIn(0, p1Dur),
+            part2SafetyFloorMinutes = part2SafetyFloor.coerceIn(0, p2Dur),
+            enableHaptic = enableHaptic,
+            dndDelayMinutes = dndDelayMinutes.coerceIn(0, 25),
+            category = selectedCategory.id
+          )
+        )
+      }
     } else {
-      val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(15)
+      val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(0)
       val calculatedStart = startHour * 60 + startMinute
       val actualTitle = title.ifBlank { "${selectedCategory.icon} ${selectedCategory.defaultName}" }
 
@@ -692,13 +819,15 @@ fun TaskModalBottomSheet(
         customRingtoneUri = customRingtoneUri,
         customRingtoneTitle = customRingtoneTitle,
         isSoundAlertEnabled = isSoundAlertEnabled,
-        toleranceMinutes = toleranceMinutes,
+        toleranceMinutes = clampedFlex,
         interTaskBufferMinutes = clampedBuffer,
         category = selectedCategory.id
       )
       onSaveTask(task)
     }
-    onDismiss()
+    if (canDismiss) {
+      onDismiss()
+    }
   }
 
   // Consume all nested scroll dispatch so vertical scrolling inside the form never collapses or dismisses the sheet
@@ -802,7 +931,7 @@ fun TaskModalBottomSheet(
               )
             }
           } else {
-            // Header Pill Controls (Mutually Exclusive: Priority vs Split)
+            // Header Pill Controls (Mutually Exclusive: Priority vs Split; Split locked when editing an existing Fluid Twin)
             Row(
               horizontalArrangement = Arrangement.spacedBy(6.dp),
               verticalAlignment = Alignment.CenterVertically
@@ -838,34 +967,65 @@ fun TaskModalBottomSheet(
                 }
               }
 
-              // 2. Split Pill Button
-              AnimatedVisibility(visible = !isHighPriority) {
-                Surface(
+              // 2. Split Pill (Locked static badge when editing an existing Fluid Twin)
+              if (isEditingFluidTwin) {
+                Box(
                   modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .border(
-                      BorderStroke(
-                        1.dp,
-                        if (isFluidTwinMode) Color(0xFF8B5CF6) else Color(0xFF334155)
-                      ),
-                      RoundedCornerShape(8.dp)
-                    )
-                    .clickable {
-                      val next = !isFluidTwinMode
-                      isFluidTwinMode = next
-                      if (next) isHighPriority = false
-                    }
-                    .testTag("header_split_pill"),
-                  color = if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.22f) else Color(0xFF1E293B)
+                    .background(Color(0xFF8B5CF6).copy(alpha = 0.22f))
+                    .border(BorderStroke(1.dp, Color(0xFF8B5CF6)), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                   Text(
-                    text = "Split",
+                    text = "TWIN",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    color = if (isFluidTwinMode) Color(0xFFDDD6FE) else Color(0xFF94A3B8),
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    color = Color(0xFFDDD6FE)
                   )
+                }
+              } else {
+                AnimatedVisibility(visible = !isHighPriority) {
+                  Surface(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(8.dp))
+                      .border(
+                        BorderStroke(
+                          1.dp,
+                          if (isFluidTwinMode) Color(0xFF8B5CF6) else Color(0xFF334155)
+                        ),
+                        RoundedCornerShape(8.dp)
+                      )
+                      .clickable {
+                        val next = !isFluidTwinMode
+                        isFluidTwinMode = next
+                        if (next) {
+                          isHighPriority = false
+                          totalPoolHours = 0
+                          totalPoolMinutes = 0
+                          totalPoolHoursInput = ""
+                          totalPoolMinutesInput = ""
+                          part1DurationHours = 0
+                          part1DurationMins = 0
+                          part1SafetyFloor = 0
+                          part2DurationHours = 0
+                          part2DurationMins = 0
+                          part2SafetyFloor = 0
+                          splitValidationError = null
+                        }
+                      }
+                      .testTag("header_split_pill"),
+                    color = if (isFluidTwinMode) Color(0xFF8B5CF6).copy(alpha = 0.22f) else Color(0xFF1E293B)
+                  ) {
+                    Text(
+                      text = "Split",
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      fontFamily = FontFamily.Monospace,
+                      color = if (isFluidTwinMode) Color(0xFFDDD6FE) else Color(0xFF94A3B8),
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                  }
                 }
               }
             }
@@ -966,55 +1126,56 @@ fun TaskModalBottomSheet(
           // LUXURY ROUTINE STUDIO FORM (DYNAMIC TASKS - OBSIDIAN STUDIO)
           // -----------------------------------------------------------
 
-          if (!isFluidTwinMode) {
-            // Task Title Label & Domain Pill Row
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = "TASK TITLE",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 1.sp,
-                color = Color(0xFF94A3B8)
-              )
+          // Shared Header & Domain Category Pill Row (Rendered for BOTH Single & Split modes)
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = if (isFluidTwinMode) "FLUID TWIN DOMAIN" else "TASK TITLE",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace,
+              letterSpacing = 1.sp,
+              color = Color(0xFF94A3B8)
+            )
 
-              // Interactive Category Pill Dropdown
-              Surface(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(20.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(20.dp))
-                  .clickable { showCategoryGridModal = true }
-                  .testTag("category_selector_card"),
-                color = Color(0xFF0F172A)
+            // Interactive Category Pill Dropdown
+            Surface(
+              modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(20.dp))
+                .clickable { showCategoryGridModal = true }
+                .testTag("category_selector_card"),
+              color = Color(0xFF0F172A)
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
               ) {
-                Row(
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Text(text = selectedCategory.icon, fontSize = 13.sp)
-                  Spacer(modifier = Modifier.width(6.dp))
-                  Text(
-                    text = selectedCategory.title,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFFE2E8F0)
-                  )
-                  Spacer(modifier = Modifier.width(4.dp))
-                  Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = Color(0xFF94A3B8),
-                    modifier = Modifier.size(14.dp)
-                  )
-                }
+                Text(text = selectedCategory.icon, fontSize = 13.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = selectedCategory.title,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color(0xFFE2E8F0)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                  imageVector = Icons.Default.KeyboardArrowDown,
+                  contentDescription = null,
+                  tint = Color(0xFF94A3B8),
+                  modifier = Modifier.size(14.dp)
+                )
               }
             }
+          }
 
-            Spacer(modifier = Modifier.height(8.dp))
+          Spacer(modifier = Modifier.height(8.dp))
+
+          if (!isFluidTwinMode) {
 
             // Task Title Input Field
             OutlinedTextField(
@@ -1355,265 +1516,6 @@ fun TaskModalBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(14.dp))
-
-            // ==============================================================
-            // 4. LUXURY 4-CARD 2x2 SYMMETRICAL MATRIX (ROW 1: FLEXIBLE & BUFFER TIME)
-            // ==============================================================
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-              // Card 1: FLEXIBLE Card
-              Surface(
-                modifier = Modifier
-                  .weight(1f)
-                  .heightIn(min = 124.dp)
-                  .clip(RoundedCornerShape(16.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
-                ) {
-                  // Row 1: Icon on Left
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Box(
-                      modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
-                      contentAlignment = Alignment.Center
-                    ) {
-                      Icon(
-                        imageVector = Icons.Default.AccessTime,
-                        contentDescription = null,
-                        tint = Color(0xFF06B6D4),
-                        modifier = Modifier.size(15.dp)
-                      )
-                    }
-                  }
-
-                  Spacer(modifier = Modifier.height(8.dp))
-
-                  // Row 2: Full-Width Title (Zero Truncation)
-                  Text(
-                    text = "FLEXIBLE",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFFE2E8F0),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                  )
-
-                  Spacer(modifier = Modifier.height(10.dp))
-
-                  // Row 3: Stepper Control
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                  ) {
-                    // Stepper [-]
-                    Surface(
-                      onClick = { decrementFlexibility() },
-                      shape = CircleShape,
-                      color = Color(0xFF1E293B),
-                      border = BorderStroke(1.dp, Color(0xFF334155)),
-                      modifier = Modifier
-                        .size(32.dp)
-                        .testTag("decrement_flexibility_button")
-                    ) {
-                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                      }
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    // Numeric display
-                    OutlinedTextField(
-                      value = customFlexInput,
-                      onValueChange = { raw ->
-                        val digits = raw.filter { it.isDigit() }.take(2)
-                        customFlexInput = digits
-                        val parsed = digits.toIntOrNull() ?: 0
-                        customFlexibilityMinutes = parsed.coerceIn(0, 30)
-                      },
-                      prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp) },
-                      suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
-                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                      modifier = Modifier
-                        .width(74.dp)
-                        .testTag("custom_flexibility_input"),
-                      colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF0F172A),
-                        unfocusedContainerColor = Color(0xFF0F172A),
-                        focusedBorderColor = Color(0xFF06B6D4),
-                        unfocusedBorderColor = Color(0xFF1E2C45),
-                        focusedTextColor = Color(0xFFF8FAFC),
-                        unfocusedTextColor = Color(0xFFF8FAFC)
-                      ),
-                      shape = RoundedCornerShape(10.dp),
-                      singleLine = true,
-                      textStyle = TextStyle(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                      )
-                    )
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    // Stepper [+]
-                    Surface(
-                      onClick = { incrementFlexibility() },
-                      shape = CircleShape,
-                      color = Color(0xFF1E293B),
-                      border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
-                      modifier = Modifier
-                        .size(32.dp)
-                        .testTag("increment_flexibility_button")
-                    ) {
-                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
-                      }
-                    }
-                  }
-                }
-              }
-
-              // Card 2: BUFFER TIME Card
-              Surface(
-                modifier = Modifier
-                  .weight(1f)
-                  .heightIn(min = 124.dp)
-                  .clip(RoundedCornerShape(16.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
-                ) {
-                  // Row 1: Icon on Left
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Box(
-                      modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF10B981).copy(alpha = 0.15f)),
-                      contentAlignment = Alignment.Center
-                    ) {
-                      Icon(
-                        imageVector = Icons.Default.Timelapse,
-                        contentDescription = null,
-                        tint = Color(0xFF10B981),
-                        modifier = Modifier.size(15.dp)
-                      )
-                    }
-                  }
-
-                  Spacer(modifier = Modifier.height(8.dp))
-
-                  // Row 2: Full-Width Title (Zero Truncation)
-                  Text(
-                    text = "BUFFER TIME",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFFE2E8F0),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                  )
-
-                  Spacer(modifier = Modifier.height(10.dp))
-
-                  // Row 3: Stepper Control
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                  ) {
-                    // Minus Stepper [-]
-                    Surface(
-                      onClick = { decrementBuffer() },
-                      shape = CircleShape,
-                      color = Color(0xFF1E293B),
-                      border = BorderStroke(1.dp, Color(0xFF334155)),
-                      modifier = Modifier
-                        .size(32.dp)
-                        .testTag("decrement_buffer_button")
-                    ) {
-                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
-                      }
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    // Editable Numeric Display
-                    OutlinedTextField(
-                      value = bufferInput,
-                      onValueChange = { raw ->
-                        val digits = raw.filter { it.isDigit() }.take(2)
-                        bufferInput = digits
-                        val parsed = digits.toIntOrNull() ?: 0
-                        interTaskBufferMinutes = parsed.coerceIn(0, 30)
-                      },
-                      suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
-                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                      modifier = Modifier
-                        .width(74.dp)
-                        .testTag("custom_buffer_input"),
-                      colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF0F172A),
-                        unfocusedContainerColor = Color(0xFF0F172A),
-                        focusedBorderColor = Color(0xFF10B981),
-                        unfocusedBorderColor = Color(0xFF1E2C45),
-                        focusedTextColor = Color(0xFFF8FAFC),
-                        unfocusedTextColor = Color(0xFFF8FAFC)
-                      ),
-                      shape = RoundedCornerShape(10.dp),
-                      singleLine = true,
-                      textStyle = TextStyle(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                      )
-                    )
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    // Plus Stepper [+]
-                    Surface(
-                      onClick = { incrementBuffer() },
-                      shape = CircleShape,
-                      color = Color(0xFF1E293B),
-                      border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
-                      modifier = Modifier
-                        .size(32.dp)
-                        .testTag("increment_buffer_button")
-                    ) {
-                      Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
-                      }
-                    }
-                  }
-                }
-              }
-            }
           } else {
             // -----------------------------------------------------------
             // MODE 2: SPLIT TOGGLE IS ON (Dual Session Auto-Balancing Fluid Twin)
@@ -1676,18 +1578,28 @@ fun TaskModalBottomSheet(
                     onValueChange = { raw ->
                       val (clean, parsed) = sanitizeNumberInput(raw, 2)
                       totalPoolHoursInput = clean
-                      val newH = if (clean.isEmpty()) 1 else parsed.coerceIn(1, 12)
+                      val newH = parsed.coerceIn(0, 12)
                       totalPoolHours = newH
-                      // Auto-balance S2
+                      splitValidationError = null
                       val pool = newH * 60 + totalPoolMinutes
-                      val s1 = part1DurationHours * 60 + part1DurationMins
-                      val s2 = (pool - s1).coerceAtLeast(part2SafetyFloor)
-                      part2DurationHours = s2 / 60
-                      part2DurationMins = s2 % 60
+                      if (pool >= 2) {
+                        val currentS1 = part1DurationHours * 60 + part1DurationMins
+                        val newS1 = if (currentS1 <= 0) pool / 2 else currentS1.coerceIn(1, pool - 1)
+                        val newS2 = (pool - newS1).coerceAtLeast(1)
+                        part1DurationHours = newS1 / 60
+                        part1DurationMins = newS1 % 60
+                        part2DurationHours = newS2 / 60
+                        part2DurationMins = newS2 % 60
+                      } else {
+                        part1DurationHours = 0
+                        part1DurationMins = 0
+                        part2DurationHours = 0
+                        part2DurationMins = 0
+                      }
                     },
                     label = { Text("Total Hours") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).testTag("split_total_hours_input"),
                     colors = OutlinedTextFieldDefaults.colors(
                       focusedContainerColor = Color(0xFF0F141E),
                       unfocusedContainerColor = Color(0xFF0F141E),
@@ -1707,15 +1619,26 @@ fun TaskModalBottomSheet(
                       totalPoolMinutesInput = clean
                       val newM = parsed.coerceIn(0, 59)
                       totalPoolMinutes = newM
+                      splitValidationError = null
                       val pool = totalPoolHours * 60 + newM
-                      val s1 = part1DurationHours * 60 + part1DurationMins
-                      val s2 = (pool - s1).coerceAtLeast(part2SafetyFloor)
-                      part2DurationHours = s2 / 60
-                      part2DurationMins = s2 % 60
+                      if (pool >= 2) {
+                        val currentS1 = part1DurationHours * 60 + part1DurationMins
+                        val newS1 = if (currentS1 <= 0) pool / 2 else currentS1.coerceIn(1, pool - 1)
+                        val newS2 = (pool - newS1).coerceAtLeast(1)
+                        part1DurationHours = newS1 / 60
+                        part1DurationMins = newS1 % 60
+                        part2DurationHours = newS2 / 60
+                        part2DurationMins = newS2 % 60
+                      } else {
+                        part1DurationHours = 0
+                        part1DurationMins = 0
+                        part2DurationHours = 0
+                        part2DurationMins = 0
+                      }
                     },
                     label = { Text("Total Mins") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).testTag("split_total_mins_input"),
                     colors = OutlinedTextFieldDefaults.colors(
                       focusedContainerColor = Color(0xFF0F141E),
                       unfocusedContainerColor = Color(0xFF0F141E),
@@ -1731,6 +1654,25 @@ fun TaskModalBottomSheet(
               }
             }
 
+            if (splitValidationError != null) {
+              Spacer(modifier = Modifier.height(10.dp))
+              Surface(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(12.dp))
+                  .border(BorderStroke(1.dp, DangerRed.copy(alpha = 0.6f)), RoundedCornerShape(12.dp)),
+                color = DangerRed.copy(alpha = 0.14f)
+              ) {
+                Text(
+                  text = splitValidationError ?: "",
+                  color = Color(0xFFFCA5A5),
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+              }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // Connected Dual Session Cards
@@ -1738,6 +1680,8 @@ fun TaskModalBottomSheet(
             // Session 1 Card (Cyan Theme #38BDF8)
             DualSessionCard(
               sessionNumber = 1,
+              resetKey = isFluidTwinMode,
+              isEditingTwin = isEditingFluidTwin,
               accentColor = Color(0xFF38BDF8),
               title = part1Title,
               onTitleChange = { part1Title = it },
@@ -1750,18 +1694,26 @@ fun TaskModalBottomSheet(
               durationHours = part1DurationHours,
               durationMins = part1DurationMins,
               onDurationChange = { h, m ->
+                splitValidationError = null
                 val pool = totalPoolHours * 60 + totalPoolMinutes
-                val requestedS1 = (h * 60 + m).coerceAtLeast(part1SafetyFloor)
-                val maxS1 = (pool - part2SafetyFloor).coerceAtLeast(part1SafetyFloor)
-                val clampedS1 = requestedS1.coerceIn(part1SafetyFloor, maxS1)
-                part1DurationHours = clampedS1 / 60
-                part1DurationMins = clampedS1 % 60
-                val remainingS2 = pool - clampedS1
-                part2DurationHours = remainingS2 / 60
-                part2DurationMins = remainingS2 % 60
+                if (pool >= 2) {
+                  val requestedS1 = (h * 60 + m).coerceIn(1, pool - 1)
+                  part1DurationHours = requestedS1 / 60
+                  part1DurationMins = requestedS1 % 60
+                  val remainingS2 = (pool - requestedS1).coerceAtLeast(1)
+                  part2DurationHours = remainingS2 / 60
+                  part2DurationMins = remainingS2 % 60
+                } else {
+                  val total = (h * 60 + m).coerceAtLeast(0)
+                  part1DurationHours = total / 60
+                  part1DurationMins = total % 60
+                }
               },
               safetyFloor = part1SafetyFloor,
-              onSafetyFloorChange = { part1SafetyFloor = it },
+              onSafetyFloorChange = {
+                splitValidationError = null
+                part1SafetyFloor = it
+              },
               isVoiceEnabled = isVoiceEnabledS1,
               onIsVoiceEnabledChange = { isVoiceEnabledS1 = it },
               voiceMessage = part1VoiceMessage,
@@ -1788,6 +1740,8 @@ fun TaskModalBottomSheet(
             // Session 2 Card (Violet Theme #8B5CF6)
             DualSessionCard(
               sessionNumber = 2,
+              resetKey = isFluidTwinMode,
+              isEditingTwin = isEditingFluidTwin,
               accentColor = Color(0xFF8B5CF6),
               title = part2Title,
               onTitleChange = { part2Title = it },
@@ -1800,18 +1754,26 @@ fun TaskModalBottomSheet(
               durationHours = part2DurationHours,
               durationMins = part2DurationMins,
               onDurationChange = { h, m ->
+                splitValidationError = null
                 val pool = totalPoolHours * 60 + totalPoolMinutes
-                val requestedS2 = (h * 60 + m).coerceAtLeast(part2SafetyFloor)
-                val maxS2 = (pool - part1SafetyFloor).coerceAtLeast(part2SafetyFloor)
-                val clampedS2 = requestedS2.coerceIn(part2SafetyFloor, maxS2)
-                part2DurationHours = clampedS2 / 60
-                part2DurationMins = clampedS2 % 60
-                val remainingS1 = pool - clampedS2
-                part1DurationHours = remainingS1 / 60
-                part1DurationMins = remainingS1 % 60
+                if (pool >= 2) {
+                  val requestedS2 = (h * 60 + m).coerceIn(1, pool - 1)
+                  part2DurationHours = requestedS2 / 60
+                  part2DurationMins = requestedS2 % 60
+                  val remainingS1 = (pool - requestedS2).coerceAtLeast(1)
+                  part1DurationHours = remainingS1 / 60
+                  part1DurationMins = remainingS1 % 60
+                } else {
+                  val total = (h * 60 + m).coerceAtLeast(0)
+                  part2DurationHours = total / 60
+                  part2DurationMins = total % 60
+                }
               },
               safetyFloor = part2SafetyFloor,
-              onSafetyFloorChange = { part2SafetyFloor = it },
+              onSafetyFloorChange = {
+                splitValidationError = null
+                part2SafetyFloor = it
+              },
               isVoiceEnabled = isVoiceEnabledS2,
               onIsVoiceEnabledChange = { isVoiceEnabledS2 = it },
               voiceMessage = part2VoiceMessage,
@@ -1831,6 +1793,256 @@ fun TaskModalBottomSheet(
               },
               isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s2_tts"
             )
+
+            Spacer(modifier = Modifier.height(14.dp))
+          }
+
+          // ==============================================================
+          // UNIFIED LUXURY 2x2 ROW 1: [ FLEXIBLE ] & [ BUFFER TIME ]
+          // (Rendered for BOTH Single Dynamic Tasks and Split Fluid Twins)
+          // ==============================================================
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            // Card 1: FLEXIBLE Card
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 124.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+              color = Color(0xFF0A0F1D)
+            ) {
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(12.dp)
+              ) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.AccessTime,
+                      contentDescription = null,
+                      tint = Color(0xFF06B6D4),
+                      modifier = Modifier.size(15.dp)
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                  text = "FLEXIBLE",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFFE2E8F0),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.Center
+                ) {
+                  Surface(
+                    onClick = { decrementFlexibility() },
+                    shape = CircleShape,
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, Color(0xFF334155)),
+                    modifier = Modifier
+                      .size(32.dp)
+                      .testTag("decrement_flexibility_button")
+                  ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                      Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.width(4.dp))
+
+                  OutlinedTextField(
+                    value = customFlexInput,
+                    onValueChange = { raw ->
+                      val digits = raw.filter { it.isDigit() }.take(2)
+                      customFlexInput = digits
+                      val parsed = digits.toIntOrNull() ?: 0
+                      customFlexibilityMinutes = parsed.coerceIn(0, 30)
+                    },
+                    prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+                    suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier
+                      .width(74.dp)
+                      .testTag("custom_flexibility_input"),
+                    colors = OutlinedTextFieldDefaults.colors(
+                      focusedContainerColor = Color(0xFF0F172A),
+                      unfocusedContainerColor = Color(0xFF0F172A),
+                      focusedBorderColor = Color(0xFF06B6D4),
+                      unfocusedBorderColor = Color(0xFF1E2C45),
+                      focusedTextColor = Color(0xFFF8FAFC),
+                      unfocusedTextColor = Color(0xFFF8FAFC)
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true,
+                    textStyle = TextStyle(
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      textAlign = TextAlign.Center
+                    )
+                  )
+
+                  Spacer(modifier = Modifier.width(4.dp))
+
+                  Surface(
+                    onClick = { incrementFlexibility() },
+                    shape = CircleShape,
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
+                    modifier = Modifier
+                      .size(32.dp)
+                      .testTag("increment_flexibility_button")
+                  ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                      Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
+                    }
+                  }
+                }
+              }
+            }
+
+            // Card 2: BUFFER TIME Card
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 124.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
+              color = Color(0xFF0A0F1D)
+            ) {
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(12.dp)
+              ) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Timelapse,
+                      contentDescription = null,
+                      tint = Color(0xFF10B981),
+                      modifier = Modifier.size(15.dp)
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                  text = "BUFFER TIME",
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFFE2E8F0),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.Center
+                ) {
+                  Surface(
+                    onClick = { decrementBuffer() },
+                    shape = CircleShape,
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, Color(0xFF334155)),
+                    modifier = Modifier
+                      .size(32.dp)
+                      .testTag("decrement_buffer_button")
+                  ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                      Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.width(4.dp))
+
+                  OutlinedTextField(
+                    value = bufferInput,
+                    onValueChange = { raw ->
+                      val digits = raw.filter { it.isDigit() }.take(2)
+                      bufferInput = digits
+                      val parsed = digits.toIntOrNull() ?: 0
+                      interTaskBufferMinutes = parsed.coerceIn(0, 30)
+                    },
+                    suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier
+                      .width(74.dp)
+                      .testTag("custom_buffer_input"),
+                    colors = OutlinedTextFieldDefaults.colors(
+                      focusedContainerColor = Color(0xFF0F172A),
+                      unfocusedContainerColor = Color(0xFF0F172A),
+                      focusedBorderColor = Color(0xFF10B981),
+                      unfocusedBorderColor = Color(0xFF1E2C45),
+                      focusedTextColor = Color(0xFFF8FAFC),
+                      unfocusedTextColor = Color(0xFFF8FAFC)
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true,
+                    textStyle = TextStyle(
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      textAlign = TextAlign.Center
+                    )
+                  )
+
+                  Spacer(modifier = Modifier.width(4.dp))
+
+                  Surface(
+                    onClick = { incrementBuffer() },
+                    shape = CircleShape,
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
+                    modifier = Modifier
+                      .size(32.dp)
+                      .testTag("increment_buffer_button")
+                  ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                      Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                    }
+                  }
+                }
+              }
+            }
           }
 
           Spacer(modifier = Modifier.height(14.dp))
@@ -1901,31 +2113,59 @@ fun TaskModalBottomSheet(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Row 3: Ringtone Selector Control
-                Surface(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable {
-                      val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
-                        putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Task Sound")
-                        customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
-                      }
-                      ringtonePickerLauncher.launch(intent)
-                    },
-                  color = Color(0xFF0F172A)
+                // Row 3: Ringtone Selector Control + Play/Stop Preview Button
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  verticalAlignment = Alignment.CenterVertically
                 ) {
-                  Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
-                    Text(
-                      text = customRingtoneTitle,
-                      color = Color(0xFF06B6D4),
-                      fontSize = 10.sp,
-                      fontFamily = FontFamily.Monospace,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis
-                    )
+                  Surface(
+                    modifier = Modifier
+                      .weight(1f)
+                      .height(36.dp)
+                      .clip(RoundedCornerShape(8.dp))
+                      .clickable {
+                        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                          putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+                          putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Task Sound")
+                          customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
+                        }
+                        ringtonePickerLauncher.launch(intent)
+                      },
+                    color = Color(0xFF0F172A)
+                  ) {
+                    Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
+                      Text(
+                        text = customRingtoneTitle,
+                        color = Color(0xFF06B6D4),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                      )
+                    }
+                  }
+
+                  Surface(
+                    onClick = toggleTonePreview,
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF0F172A),
+                    border = BorderStroke(
+                      1.dp,
+                      if (isPlayingTonePreview) Color(0xFFEF4444).copy(alpha = 0.6f) else Color(0xFF06B6D4).copy(alpha = 0.4f)
+                    ),
+                    modifier = Modifier
+                      .size(36.dp)
+                      .testTag("task_ringtone_preview_button")
+                  ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                      Icon(
+                        imageVector = if (isPlayingTonePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        contentDescription = if (isPlayingTonePreview) "Stop Ringtone Preview" else "Play Ringtone Preview",
+                        tint = if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF06B6D4),
+                        modifier = Modifier.size(16.dp)
+                      )
+                    }
                   }
                 }
               }
@@ -2235,7 +2475,7 @@ fun TaskModalBottomSheet(
             color = Color(0xFFF8FAFC)
           )
           Text(
-            text = "13 FIXED CHRONOS DOMAINS",
+            text = "14 FIXED CHRONOS DOMAINS",
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
@@ -2270,9 +2510,6 @@ fun TaskModalBottomSheet(
                     )
                     .clickable {
                       selectedCategory = cat
-                      if (title.isBlank()) {
-                        title = "${cat.icon} ${cat.defaultName}"
-                      }
                       showCategoryGridModal = false
                     },
                   color = if (isSelected) Color(0xFF1E293B) else Color(0xFF0F141E)
@@ -2359,7 +2596,7 @@ fun TaskModalBottomSheet(
   if (showDeleteConfirmDialog && initialTask != null) {
     val isTwin = initialTask.isFluidTwin && initialTask.fluidTwinId != null
     val twinPartner = if (isTwin) {
-      allDynamicTasks.firstOrNull { it.fluidTwinId == initialTask.fluidTwinId && it.id != initialTask.id }
+      allDynamicTasks.firstOrNull { !it.isDeleted && it.fluidTwinId == initialTask.fluidTwinId && it.id != initialTask.id }
     } else null
 
     if (isTwin && twinPartner != null) {
@@ -2408,13 +2645,15 @@ fun TaskModalBottomSheet(
             ) {
               Text("Delete Both Parts", fontWeight = FontWeight.Bold)
             }
+            TextButton(
+              onClick = { showDeleteConfirmDialog = false },
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Text("Cancel", color = TextSecondary)
+            }
           }
         },
-        dismissButton = {
-          TextButton(onClick = { showDeleteConfirmDialog = false }, modifier = Modifier.fillMaxWidth()) {
-            Text("Cancel", color = TextSecondary)
-          }
-        },
+        dismissButton = null,
         containerColor = Color(0xFF121620),
         shape = RoundedCornerShape(24.dp)
       )
@@ -3978,6 +4217,8 @@ private fun AnchorEditSection(
 @Composable
 private fun DualSessionCard(
   sessionNumber: Int,
+  resetKey: Boolean,
+  isEditingTwin: Boolean,
   accentColor: Color,
   title: String,
   onTitleChange: (String) -> Unit,
@@ -3998,9 +4239,32 @@ private fun DualSessionCard(
   onTestVoice: () -> Unit,
   isSpeakingVoicePreview: Boolean = false
 ) {
-  var hoursInput by remember(durationHours) { mutableStateOf(durationHours.toString()) }
-  var minsInput by remember(durationMins) { mutableStateOf(durationMins.toString()) }
-  var safetyFloorInput by remember(safetyFloor) { mutableStateOf(safetyFloor.toString()) }
+  var hoursInput by remember(sessionNumber, resetKey) {
+    mutableStateOf(if (isEditingTwin && (durationHours > 0 || durationMins > 0)) durationHours.toString() else "")
+  }
+  var minsInput by remember(sessionNumber, resetKey) {
+    mutableStateOf(if (isEditingTwin && (durationHours > 0 || durationMins > 0)) durationMins.toString() else "")
+  }
+  var safetyFloorInput by remember(sessionNumber, resetKey) {
+    mutableStateOf(if (isEditingTwin && safetyFloor > 0) safetyFloor.toString() else "")
+  }
+
+  LaunchedEffect(durationHours, durationMins) {
+    val currentH = hoursInput.toIntOrNull() ?: 0
+    val currentM = minsInput.toIntOrNull() ?: 0
+    if (currentH != durationHours || currentM != durationMins) {
+      if (durationHours == 0 && durationMins == 0) {
+        hoursInput = ""
+        minsInput = ""
+      } else {
+        hoursInput = durationHours.toString()
+        minsInput = durationMins.toString()
+      }
+    }
+  }
+
+  val sessionDurationTotal = durationHours * 60 + durationMins
+  val isSafetyFloorExceeded = safetyFloor > 0 && safetyFloor > sessionDurationTotal
 
   Surface(
     modifier = Modifier
@@ -4048,7 +4312,7 @@ private fun DualSessionCard(
         value = title,
         onValueChange = onTitleChange,
         placeholder = { Text(if (sessionNumber == 1) "Morning Deep Work" else "Afternoon Synthesis", color = TextTertiary) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("session_${sessionNumber}_title_input"),
         colors = OutlinedTextFieldDefaults.colors(
           focusedContainerColor = Color(0xFF0F141E),
           unfocusedContainerColor = Color(0xFF0F141E),
@@ -4107,7 +4371,7 @@ private fun DualSessionCard(
           },
           label = { Text("Hours") },
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          modifier = Modifier.weight(1f),
+          modifier = Modifier.weight(1f).testTag("session_${sessionNumber}_hours_input"),
           colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = Color(0xFF0F141E),
             unfocusedContainerColor = Color(0xFF0F141E),
@@ -4129,7 +4393,7 @@ private fun DualSessionCard(
           },
           label = { Text("Minutes") },
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          modifier = Modifier.weight(1f),
+          modifier = Modifier.weight(1f).testTag("session_${sessionNumber}_mins_input"),
           colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = Color(0xFF0F141E),
             unfocusedContainerColor = Color(0xFF0F141E),
@@ -4147,22 +4411,33 @@ private fun DualSessionCard(
           onValueChange = { raw ->
             val (clean, parsed) = sanitizeNumberInput(raw, 3)
             safetyFloorInput = clean
-            val floor = if (clean.isEmpty()) 45 else parsed.coerceIn(15, 120)
+            val floor = parsed.coerceIn(0, 720)
             onSafetyFloorChange(floor)
           },
           label = { Text("🛡️ Safety") },
+          isError = isSafetyFloorExceeded,
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          modifier = Modifier.weight(1.1f),
+          modifier = Modifier.weight(1.1f).testTag("session_${sessionNumber}_safety_input"),
           colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = Color(0xFF0F141E),
             unfocusedContainerColor = Color(0xFF0F141E),
-            focusedBorderColor = Color(0xFF10B981),
-            unfocusedBorderColor = Color(0xFF1F2637),
+            focusedBorderColor = if (isSafetyFloorExceeded) DangerRed else Color(0xFF10B981),
+            unfocusedBorderColor = if (isSafetyFloorExceeded) DangerRed else Color(0xFF1F2637),
             focusedTextColor = Color(0xFFF8FAFC),
             unfocusedTextColor = Color(0xFFF8FAFC)
           ),
           shape = RoundedCornerShape(12.dp),
           singleLine = true
+        )
+      }
+
+      if (isSafetyFloorExceeded) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+          text = "Safety floor (${safetyFloor}m) exceeds Session $sessionNumber duration (${sessionDurationTotal}m)",
+          color = Color(0xFFFCA5A5),
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Medium
         )
       }
 

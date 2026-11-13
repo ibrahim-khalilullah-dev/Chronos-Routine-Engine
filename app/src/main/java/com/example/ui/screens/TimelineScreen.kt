@@ -492,7 +492,7 @@ fun TimelineScreen(
   taskToDeleteConfirm?.let { task ->
     val partnerTask = if (task.isFluidTwin && !task.fluidTwinId.isNullOrBlank()) {
       (scheduleResult.scheduledTasks + scheduleResult.overflowTasks).firstOrNull {
-        it.fluidTwinId == task.fluidTwinId && it.id != task.id
+        it.fluidTwinId == task.fluidTwinId && it.id != task.id && !it.isDeleted
       }
     } else null
 
@@ -589,16 +589,18 @@ fun TimelineScreen(
             ) {
               Text("Delete Both Parts", fontWeight = FontWeight.Bold)
             }
+
+            TextButton(
+              onClick = { taskToDeleteConfirm = null },
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("cancel_fluid_twin_dialog_button")
+            ) {
+              Text("Cancel", color = TextSecondary)
+            }
           }
         },
-        dismissButton = {
-          TextButton(
-            onClick = { taskToDeleteConfirm = null },
-            modifier = Modifier.testTag("cancel_fluid_twin_dialog_button")
-          ) {
-            Text("Cancel", color = TextSecondary)
-          }
-        },
+        dismissButton = null,
         containerColor = OneUiSurfaceElevated,
         shape = RoundedCornerShape(24.dp)
       )

@@ -272,4 +272,239 @@ class ExampleUnitTest {
     val t3 = result.validTasks[2]
     assertFalse(t3.isHighPriority)
   }
+
+  @Test
+  fun testZeroAndShortDurationDynamicTasksScheduleWithoutCrash() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Gap between Fajr (05:00-05:35 -> 335m) and Dhuhr (13:15 -> 795m)
+    val zeroSignalTask = RoutineTask(
+      id = "signal_0m",
+      title = "Medication Ping",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420, // 07:00 AM
+      durationMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val shortFlexTask = RoutineTask(
+      id = "short_5m",
+      title = "Quick Stretch",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 450, // 07:30 AM
+      durationMinutes = 5,
+      toleranceMinutes = 10,
+      customFlexibilityMinutes = 10,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val result = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(zeroSignalTask, shortFlexTask),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+
+    val scheduledZero = result.scheduledTasks.firstOrNull { it.id == "signal_0m" }
+    val scheduledShort = result.scheduledTasks.firstOrNull { it.id == "short_5m" }
+    assertNotNull("0-minute signal task should be scheduled", scheduledZero)
+    assertEquals(0, scheduledZero!!.durationMinutes)
+    assertEquals(420, scheduledZero.startTimeMinute)
+    assertNotNull("<15m task with tolerance should schedule cleanly", scheduledShort)
+    assertEquals(5, scheduledShort!!.durationMinutes)
+  }
+
+  @Test
+  fun testFluidTwinCustomShortSessionsScheduleCleanly() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    val twinId = "fluid_test1234"
+    val p1 = RoutineTask(
+      id = "${twinId}_p1",
+      title = "Twin Morning",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360, // 06:00 AM
+      durationMinutes = 25,  // < 45m custom duration
+      isFluidTwin = true,
+      fluidTwinId = twinId,
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 50,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val p2 = RoutineTask(
+      id = "${twinId}_p2",
+      title = "Twin Evening",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1120, // 06:40 PM
+      durationMinutes = 25,
+      isFluidTwin = true,
+      fluidTwinId = twinId,
+      fluidTwinPart = 2,
+      fluidTotalPoolMinutes = 50,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val result = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(p1, p2),
+      activeDay = RoutineDay.MONDAY
+    )
+
+    assertEquals(0, result.overflowTasks.size)
+    assertTrue(result.scheduledTasks.any { it.id == "${twinId}_p1" })
+    assertTrue(result.scheduledTasks.any { it.id == "${twinId}_p2" })
+  }
+
+  @Test
+  fun testConsoleParserCategoryRoundTripAndZeroDuration() {
+    val script = """
+      Signal Reminder | 0 | 07:00 | N | ALL | Y | Take vitamins | 0 | 0 | N | eating
+      Default Category Task | 30 | 09:00 | Y | Mon,Wed | N | Focus | 5 | 0 | Y
+    """.trimIndent()
+
+    val parsed = ConsoleParser.parse(script)
+    assertEquals(0, parsed.errorCount)
+    assertEquals(2, parsed.validTasks.size)
+
+    val t1 = parsed.validTasks[0]
+    assertEquals(0, t1.durationMinutes)
+    assertEquals("eating", t1.category)
+
+    val t2 = parsed.validTasks[1]
+    assertEquals("general", t2.category)
+
+    val exported = ConsoleParser.generateRoutineScript(
+      anchors = emptyList(),
+      dynamicTasks = parsed.validTasks,
+      sleepMinutes = 360,
+      bufferMinutes = 0
+    )
+    assertTrue(exported.contains("| eating"))
+    assertTrue(exported.contains("| general"))
+
+    val reparsed = ConsoleParser.parse(exported)
+    assertEquals(0, reparsed.errorCount)
+    assertEquals(2, reparsed.validTasks.size)
+    assertEquals("eating", reparsed.validTasks[0].category)
+    assertEquals(0, reparsed.validTasks[0].durationMinutes)
+  }
+
+  @Test
+  fun testConsoleParserV2TwinAnchorDynamicRoundTripAndSafetyFloorValidation() {
+    val script = """
+      ANCHOR | 2 | Fajr | 05:00 | 35 | Y | 8 | Y | ফজরের সময় হয়েছে। | Sat,Sun,Mon,Tue,Wed,Thu,Fri | N | 85
+      TWIN | 20 | Quick Sprint A | 07:00 | 10 | Part 1 go | Quick Sprint B | 14:00 | 10 | Part 2 go | Y | Mon,Wed | 5 | 2 | studying | 5 | 8 | Y | N | 90 | 40 | N
+      DYNAMIC | Voice Custom | 30 | 09:00 | Y | ALL | Y | Go now | 10 | 5 | Y | work | 65 | N
+    """.trimIndent()
+
+    val parsed = ConsoleParser.parse(script)
+    assertEquals(0, parsed.errorCount)
+    assertEquals(1, parsed.parsedAnchors.size)
+    assertEquals(3, parsed.validTasks.size)
+
+    val anchor2 = parsed.parsedAnchors[0]
+    assertEquals("anchor_slot_2", anchor2.id)
+    assertFalse(anchor2.isSoundAlertEnabled)
+    assertEquals(0.85f, anchor2.voiceVolume, 0.01f)
+
+    val twinP1 = parsed.validTasks[0]
+    val twinP2 = parsed.validTasks[1]
+    assertEquals("studying", twinP1.category)
+    assertEquals(5, twinP1.fluidSafetyFloorMinutes)
+    assertEquals(8, twinP2.fluidSafetyFloorMinutes)
+    assertTrue(twinP1.isVoiceEnabled)
+    assertFalse(twinP2.isVoiceEnabled)
+    assertEquals(0.90f, twinP1.voiceVolume, 0.01f)
+    assertEquals(0.40f, twinP2.voiceVolume, 0.01f)
+    assertFalse(twinP1.isSoundAlertEnabled)
+
+    val dyn = parsed.validTasks[2]
+    assertEquals(0.65f, dyn.voiceVolume, 0.01f)
+    assertFalse(dyn.isSoundAlertEnabled)
+
+    val exported = ConsoleParser.generateRoutineScript(
+      anchors = parsed.parsedAnchors,
+      dynamicTasks = parsed.validTasks,
+      sleepMinutes = 360,
+      bufferMinutes = 0
+    )
+    val reparsed = ConsoleParser.parse(exported)
+    assertEquals(0, reparsed.errorCount)
+    assertEquals(3, reparsed.validTasks.size)
+    assertEquals(5, reparsed.validTasks[0].fluidSafetyFloorMinutes)
+    assertEquals(8, reparsed.validTasks[1].fluidSafetyFloorMinutes)
+    assertFalse(reparsed.validTasks[1].isVoiceEnabled)
+    assertEquals(0.65f, reparsed.validTasks[2].voiceVolume, 0.01f)
+
+    // Invalid safety floor (> duration) should trigger diagnostic error
+    val invalidTwin = "TWIN | 20 | A | 07:00 | 10 | Go | B | 14:00 | 10 | Go | N | ALL | 0 | 0 | work | 15 | 5"
+    val invalidParsed = ConsoleParser.parse(invalidTwin)
+    assertTrue(invalidParsed.errorCount > 0)
+  }
+
+  @Test
+  fun testFluidTwinRespectsCustomSafetyFloorAndBufferWithoutHard45mFloor() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Gap between Maghrib (18:00-18:30 -> 1080..1110) and Isha (20:00-20:35 -> 1200..1235) is 90 minutes (1110..1200)
+    // Put a blocking 60m high priority task from 18:30 to 19:30 (1110..1170), leaving 30m (1170..1200)
+    val blocker = RoutineTask(
+      id = "blocker_1",
+      title = "Evening Blocker",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1110,
+      durationMinutes = 60,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    // Twin with P1=20m (1170..1190, floor=15, buffer=5) and P2=20m (06:00, floor=10, buffer=0)
+    // Remaining gap 1170..1200 = 30m. With 5m buffer needed before Isha, P1 gets 25m cap (>= 15m floor, fits 20m!).
+    val twinId = "fluid_floor_ok"
+    val p1 = RoutineTask(
+      id = "${twinId}_p1",
+      title = "Evening Twin",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1170,
+      durationMinutes = 20,
+      isFluidTwin = true,
+      fluidTwinId = twinId,
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 40,
+      fluidSafetyFloorMinutes = 15,
+      interTaskBufferMinutes = 5,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val p2 = RoutineTask(
+      id = "${twinId}_p2",
+      title = "Morning Twin",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360,
+      durationMinutes = 20,
+      isFluidTwin = true,
+      fluidTwinId = twinId,
+      fluidTwinPart = 2,
+      fluidTotalPoolMinutes = 40,
+      fluidSafetyFloorMinutes = 10,
+      interTaskBufferMinutes = 5,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val result = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(blocker, p1, p2),
+      activeDay = RoutineDay.MONDAY
+    )
+    assertEquals(0, result.overflowTasks.size)
+    assertTrue(result.scheduledTasks.any { it.id == p1.id && it.durationMinutes == 20 })
+    assertTrue(result.scheduledTasks.any { it.id == p2.id && it.durationMinutes == 20 })
+
+    // Now test high safety floor causing clean overflow instead of violating floor
+    val p1HighFloor = p1.copy(durationMinutes = 35, fluidTotalPoolMinutes = 55, fluidSafetyFloorMinutes = 30)
+    val overflowResult = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(blocker, p1HighFloor, p2.copy(fluidTotalPoolMinutes = 55)),
+      activeDay = RoutineDay.MONDAY
+    )
+    assertTrue(
+      "Twin exceeding available cap above its safety floor must not violate floor",
+      overflowResult.scheduledTasks.none { it.id == p1HighFloor.id && it.durationMinutes < 30 }
+    )
+  }
 }
+

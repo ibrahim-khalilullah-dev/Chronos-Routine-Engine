@@ -193,7 +193,7 @@
 - **Key Declarations:**
   - Permissions: `POST_NOTIFICATIONS`, `ACCESS_NOTIFICATION_POLICY` (DND), `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, `WAKE_LOCK`, `VIBRATE`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `RECEIVE_BOOT_COMPLETED`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
   - Application: `allowBackup="true"`, custom app icon and round icon, theme `@style/Theme.MyApplication`.
-  - Activity: `MainActivity` with `showWhenLocked="true"`, `turnScreenOn="true"`, and `LAUNCHER` intent-filter.
+  - Activity: `MainActivity` with standard lock-screen security (no `showWhenLocked`/`turnScreenOn`) and `LAUNCHER` intent-filter; lockscreen notifications remain visible via `RoutineAutomationService` (`VISIBILITY_PUBLIC`).
   - Service: `RoutineAutomationService` with `foregroundServiceType="mediaPlayback"`.
   - Receivers: `RoutineAlarmReceiver` (actions `ACTION_START_TASK`, `ACTION_END_TASK`, `ACTION_APPLY_DND`), `BootReceiver` (boot, update, and timezone events).
 
@@ -209,7 +209,7 @@
   - `RoutineTask`: Complete data model representing scheduled and unscheduled routine tasks.
     * Core fields: `id`, `title`, `type`, `slotNumber`, `startTimeMinute` (0..1439), `durationMinutes`, `selectedDays`, `isDeleted`, `deletedTimestamp`.
     * Telemetry & Voice: `voiceMessage`, `enableDnd`, `dndDelayMinutes` (0..25m), `enableHaptic`, `isVoiceEnabled`, `voiceVolume`, `isSoundAlertEnabled`, `customRingtoneUri`, `customNotificationTitle`, `customNotificationBody`.
-    * Fluid Twins: `isFluidTwin`, `fluidTwinId`, `fluidTwinPart` (1 or 2), `fluidTotalPoolMinutes`.
+    * Fluid Twins: `isFluidTwin`, `fluidTwinId`, `fluidTwinPart` (1 or 2), `fluidTotalPoolMinutes`, `fluidSafetyFloorMinutes`.
     * Flexibility & Splitting: `allowSplitting`, `isHighPriority`, `customFlexibilityMinutes` (0..30m), `toleranceMinutes`, `interTaskBufferMinutes` (0..30m).
     * Friday Slot 3 Overrides: `fridayTitle`, `fridayStartTimeMinute`, `fridayDurationMinutes`, `fridayVoiceMessage`.
     * Vacation & Pause: `isPausedTodayOnly`, `pausedUntilDateMillis`, `isPausedIndefinitely`.
@@ -239,7 +239,7 @@
 #### `SchedulerEngine.kt`
 - **Purpose:** Pure mathematical scheduling engine calculating gaps, placing dynamic tasks, managing fluid twins, and enforcing circadian anchor invariants.
 - **Key Invariants:**
-  - `MIN_FLUID_TWIN_MINUTES = 45`: Strict safety floor for any fluid twin session.
+  - `fluidSafetyFloorMinutes` (per-session): Optional minimum duration floor (`0`..session duration, 1m minimum for non-zero sessions), supporting `<45m` Fluid Twins down to 2m pools while respecting per-part rest buffers.
   - `MIN_ELASTIC_BUFFER_MINUTES = 15`: Safety floor for the Slot 5 elastic buffer.
   - **Zero Auto-Splitting Architecture:** Tasks are never fragmented or split automatically into chunks. If a dynamic task cannot fit into available circadian gaps (taking into account user flexibility tolerance), it is routed intact to the Overflow Pool for user inspection and manual rearrangement.
 - **Key Functions:**
@@ -252,9 +252,9 @@
 #### `ConsoleParser.kt`
 - **Purpose:** Grammatical bulk CLI interpreter converting plaintext monospace pipe scripts into strongly typed `RoutineTask` collections.
 - **Directives Supported:**
-  - `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message` (plus Friday overrides).
-  - `TWIN | TotalPool(m) | Part1Title | Part1Start | Part1Dur | Part1Voice | Part2Title | Part2Start | Part2Dur | Part2Voice | DND(Y/N) | Days | Flex | Rest`.
-  - `DYNAMIC | Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex | Rest` (and prefix-free equivalent).
+  - `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message | [FriOverrides] | [Days | Sound | VoiceVol]` (canonical `"anchor_slot_$slot"` IDs).
+  - `TWIN | TotalPool(m) | Part1Title | Part1Start | Part1Dur | Part1Voice | Part2Title | Part2Start | Part2Dur | Part2Voice | DND(Y/N) | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1VoiceYN | P2VoiceYN | P1Vol | P2Vol | Sound]`.
+  - `DYNAMIC | Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex | Rest | Priority | Category | [VoiceVol | Sound]` (and prefix-free equivalent).
 - **Pre-Packaged Routine (`SAMPLE_SNIPPET`):** Complete Bengali circadian schedule featuring the 7 immutable circadian prayer anchors, Saturday–Thursday focus routines, and Friday special routines.
 - **Diagnostics:** Emits `ConsoleLineDiagnostic` with precise line numbers and syntax validation messages for immediate visual feedback.
 
@@ -265,25 +265,25 @@
 #### `AutomationManager.kt`
 - **Purpose:** System-level automation coordinator for alarms, DND policy, audio telemetry, and power management.
 - **Key Capabilities:**
-  - `setAlarmClock()`: Schedules task alarms via `AlarmManager.setAlarmClock()`, using Android Alarm Clock Info to bypass Samsung One UI aggressive app sleep and Doze restrictions.
+  - `setAlarmClock()`: Schedules task start alarms and DND-enabled `ACTION_END_TASK` alarms via `AlarmManager.setAlarmClock()` to bypass Samsung One UI aggressive app sleep and Doze restrictions.
   - `scheduleDndAlarm(context, task, triggerMillis)`: Schedules a dedicated exact RTC alarm (`ACTION_APPLY_DND`) for tasks with delayed DND timers (`dndDelayMinutes > 0`), ensuring reliable execution even during deep Doze sleep.
-  - `cancelDndAlarm(context, task)`: Cancels pending delayed DND triggers when tasks end or are rescheduled.
+  - `cancelDndAlarm(context, task)` / `pendingIntent.cancel()`: Cancels pending alarms and DND triggers cleanly when tasks end or are rescheduled.
   - `calculateNextOccurrenceMillis(task, activeDay)`: Calculates the exact timestamp of the upcoming task occurrence, iterating forward up to 7 days to match `task.selectedDays`.
-  - `setDndMode(context, enable)`: Manages system DND using `NotificationManager.INTERRUPTION_FILTER_PRIORITY`, restoring previous system state on completion.
-  - `rescheduleAllAlarms(context)`: Re-registers all active anchors and dynamic task start/end alarms in `AlarmManager`.
+  - `setDndMode(context, enabled, taskId)` / `releaseDndIfHeldByTask()` / `hasZeroDelayFollowUpDndTask()`: Persists the active DND owner task ID synchronously (`commit()`), releases DND only for its owner, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.
+  - `rescheduleAllAlarms(context)`: Evaluates active tasks across a 7-day horizon and registers each task's earliest upcoming non-overflow occurrence in `AlarmManager` (also purging legacy `slot_1..7` alarms).
 
 #### `RoutineAutomationService.kt`
-- **Purpose:** Foreground service with `mediaPlayback` type providing lockscreen notifications, audio-ducking TTS voice briefings, and delayed DND triggers.
+- **Purpose:** Foreground service with `mediaPlayback` type providing lockscreen notifications, decoupled haptic/chime/TTS alerts, and task-owned DND transitions.
 - **Key Implementations:**
-  - Deep-Sleep Immune DND Engine: Replaced transient `Handler.postDelayed` timers with exact RTC `ACTION_APPLY_DND` wakeups dispatched directly to `RoutineAlarmReceiver`.
-  - Lockscreen Notification with Ending Times: Displays formatted completion times (`notificationDisplayBody`, e.g. `Ends at 10:45 AM`) for immediate visibility.
+  - Decoupled Alerts & Cancellable Delay: `enableHaptic`, `isSoundAlertEnabled`, and `isVoiceEnabled` execute independently with a cancellable `mainHandler` 1500ms delay between chime and TTS speech.
+  - Lockscreen Notification with Ending Times: Displays formatted completion times (`notificationDisplayBody`, e.g. `Ends at 10:45 AM`) with `VISIBILITY_PUBLIC`.
   - Audio Focus Ducking: Obtains `AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` so media volume gracefully lowers during voice briefings.
   - WakeLock Protection: Acquires a partial wake lock with a 3-minute safety limit.
   - State Broadcasting: Emits `ActiveAutomationState` to `RoutineViewModel` via a static `MutableStateFlow`.
 
 #### `RoutineAlarmReceiver.kt`
 - **Purpose:** `BroadcastReceiver` invoked by `AlarmManager` for `ACTION_START_TASK`, `ACTION_END_TASK`, and `ACTION_APPLY_DND`.
-- **Action:** Starts `RoutineAutomationService` on task start, engages Priority DND on `ACTION_APPLY_DND`, or dispatches stop intent on task conclusion.
+- **Action:** Starts `RoutineAutomationService` on task start, verifies task active/DND state in `RoutineRepository` and engages Priority DND directly via `AutomationManager.setDndMode()` + `RoutineAutomationService.onDndApplied()` on `ACTION_APPLY_DND` (without calling `startService()` in the background), and guards `ACTION_END_TASK` DND teardown against owner mismatch and zero-delay follow-ups.
 
 #### `BootReceiver.kt`
 - **Purpose:** System event receiver ensuring schedule persistence across device state transitions.
@@ -360,10 +360,10 @@ $$\text{Slot 5 Start} = \text{Slot 4 Start} + \text{Slot 4 Duration}$$
 $$\text{Slot 5 Duration} = \max\left(\text{Slot 6 Start} - \text{Slot 5 Start}, 15\right)$$
 
 ### 3. Communicating Vessels Fluid Twin Balancing & Absorption
-For linked twin sessions $S_1$ and $S_2$ with total pool $P$:
-$$D_1 + D_2 = P, \quad D_1 \ge 45\text{m}, \quad D_2 \ge 45\text{m}$$
+For linked twin sessions $S_1$ and $S_2$ with total pool $P$ and per-session safety floors $F_1, F_2 \ge 0$:
+$$D_1 + D_2 = P, \quad D_1 \ge \max(1, F_1), \quad D_2 \ge \max(1, F_2)$$
 When deleting one twin part via absorption:
-$$D_{\text{surviving}} = P, \quad \text{isFluidTwin} = \text{false}, \quad \text{fluidTwinId} = \text{null}$$
+$$D_{\text{surviving}} = P, \quad \text{isFluidTwin} = \text{false}, \quad \text{fluidTwinId} = \text{null}, \quad \text{fluidSafetyFloorMinutes} = 0$$
 
 ### 4. High Priority Anchor Wall Fence
 For any task where `isHighPriority = true`, its scheduled interval $[t_{\text{start}}, t_{\text{end}}]$ must satisfy:
