@@ -128,6 +128,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
 import com.example.model.TaskType
+import com.example.service.AutomationManager
 import com.example.ui.theme.AnchorGradientStart
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.ElasticGradientStart
@@ -215,7 +216,9 @@ data class FluidTwinSaveRequest(
   val part2SafetyFloorMinutes: Int = 0,
   val enableHaptic: Boolean = true,
   val dndDelayMinutes: Int = 0,
-  val category: String? = null
+  val category: String? = null,
+  val part1OriginalStartMinute: Int? = null,
+  val part2OriginalStartMinute: Int? = null
 )
 
 /**
@@ -334,14 +337,22 @@ fun TaskModalBottomSheet(
 
   // Single Task / Regular Anchor State (strictly reads initialTask?.startTimeMinute & durationMinutes)
   val initialRegularStart = initialTask?.startTimeMinute ?: 540
-  val initialRegularDuration = initialTask?.durationMinutes ?: 60
+  val birthStartMinute = remember(initialTask) {
+    initialTask?.originalStartTimeMinute ?: initialTask?.startTimeMinute ?: 540
+  }
+  var hasUserEditedStartTime by remember(initialTask) { mutableStateOf(false) }
+  val initialRegularDuration = initialTask?.durationMinutes ?: 0
   var title by remember(initialTask) { mutableStateOf(initialTask?.title ?: "") }
   var startHour by remember(initialTask) { mutableIntStateOf(initialRegularStart / 60) }
   var startMinute by remember(initialTask) { mutableIntStateOf(initialRegularStart % 60) }
   var durationHours by remember(initialTask) { mutableIntStateOf(initialRegularDuration / 60) }
   var durationMins by remember(initialTask) { mutableIntStateOf(initialRegularDuration % 60) }
-  var durationHoursInput by remember(initialTask) { mutableStateOf((initialRegularDuration / 60).toString()) }
-  var durationMinsInput by remember(initialTask) { mutableStateOf((initialRegularDuration % 60).toString()) }
+  var durationHoursInput by remember(initialTask) {
+    mutableStateOf(if (initialTask == null) "" else (initialRegularDuration / 60).toString())
+  }
+  var durationMinsInput by remember(initialTask) {
+    mutableStateOf(if (initialTask == null) "" else (initialRegularDuration % 60).toString())
+  }
   var toleranceMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.toleranceMinutes ?: 0) }
   var customFlexibilityMinutes by remember(initialTask) { mutableIntStateOf(initialTask?.customFlexibilityMinutes ?: 0) }
   var customFlexInput by remember(initialTask) { mutableStateOf((initialTask?.customFlexibilityMinutes ?: 0).toString()) }
@@ -396,6 +407,15 @@ fun TaskModalBottomSheet(
   var isVoiceEnabled by remember(initialTask) { mutableStateOf(initialTask?.isVoiceEnabled ?: true) }
   var voiceMessage by remember(initialTask) { mutableStateOf(initialTask?.voiceMessage ?: "") }
   var voiceVolume by remember(initialTask) { mutableFloatStateOf(initialTask?.voiceVolume ?: 1f) }
+
+  val p1BirthStart = remember(initialTask, resolvedP1Task) {
+    resolvedP1Task?.originalStartTimeMinute ?: resolvedP1Task?.startTimeMinute ?: initialRegularStart
+  }
+  val p2BirthStart = remember(initialTask, resolvedP2Task) {
+    resolvedP2Task?.originalStartTimeMinute ?: resolvedP2Task?.startTimeMinute ?: (14 * 60)
+  }
+  var hasUserEditedP1Start by remember(initialTask) { mutableStateOf(false) }
+  var hasUserEditedP2Start by remember(initialTask) { mutableStateOf(false) }
 
   // Dual Session 1 (Cyan Theme #38BDF8) - starts at 0/empty when creating or converting single task
   var part1Title by remember(initialTask) {
@@ -497,20 +517,16 @@ fun TaskModalBottomSheet(
   // TTS Engine Setup
   var ttsInstance by remember { mutableStateOf<TextToSpeech?>(null) }
   var isTtsReady by remember { mutableStateOf(false) }
+  var isBengaliVoiceReady by remember { mutableStateOf(true) }
   var isSpeakingVoicePreview by remember { mutableStateOf(false) }
   var activeVoiceUtteranceId by remember { mutableStateOf<String?>(null) }
 
   DisposableEffect(context) {
-    var instance: TextToSpeech? = null
-    instance = TextToSpeech(context) { status ->
-      if (status == TextToSpeech.SUCCESS) {
-        isTtsReady = true
-        try {
-          instance?.language = Locale.getDefault()
-        } catch (_: Exception) {}
-      }
-    }
-    instance.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+    var currentTts: TextToSpeech? = null
+    var triedGoogleTtsFallback = false
+    var disposed = false
+
+    val progressListener = object : UtteranceProgressListener() {
       override fun onStart(utteranceId: String?) {
         isSpeakingVoicePreview = true
         activeVoiceUtteranceId = utteranceId
@@ -533,14 +549,69 @@ fun TaskModalBottomSheet(
         isSpeakingVoicePreview = false
         activeVoiceUtteranceId = null
       }
-    })
-    ttsInstance = instance
+    }
+
+    fun createTts(enginePackage: String? = null) {
+      var created: TextToSpeech? = null
+      val listener = TextToSpeech.OnInitListener { status ->
+        if (disposed) {
+          try {
+            created?.shutdown()
+          } catch (_: Exception) {}
+          return@OnInitListener
+        }
+        val active = created ?: currentTts
+        if (status == TextToSpeech.SUCCESS && active != null) {
+          val bnAvailable = AutomationManager.isBengaliTtsAvailable(active)
+          if (!bnAvailable && !triedGoogleTtsFallback && AutomationManager.hasGoogleTtsEngine(context)) {
+            triedGoogleTtsFallback = true
+            try {
+              active.shutdown()
+            } catch (_: Exception) {}
+            createTts("com.google.android.tts")
+            return@OnInitListener
+          }
+          AutomationManager.applyTtsLanguage(active, "")
+          active.setOnUtteranceProgressListener(progressListener)
+          currentTts = active
+          ttsInstance = active
+          isBengaliVoiceReady = bnAvailable
+          isTtsReady = true
+        } else if (!triedGoogleTtsFallback && AutomationManager.hasGoogleTtsEngine(context)) {
+          triedGoogleTtsFallback = true
+          try {
+            active?.shutdown()
+          } catch (_: Exception) {}
+          createTts("com.google.android.tts")
+        } else {
+          isBengaliVoiceReady = false
+          isTtsReady = false
+        }
+      }
+      created = try {
+        if (enginePackage != null) {
+          TextToSpeech(context, listener, enginePackage)
+        } else {
+          TextToSpeech(context, listener)
+        }
+      } catch (_: Exception) {
+        null
+      }
+      if (created != null) {
+        created.setOnUtteranceProgressListener(progressListener)
+        currentTts = created
+        ttsInstance = created
+      }
+    }
+
+    createTts(null)
     onDispose {
+      disposed = true
       isSpeakingVoicePreview = false
       activeVoiceUtteranceId = null
       try {
-        instance?.stop()
-        instance?.shutdown()
+        currentTts?.stop()
+        currentTts?.shutdown()
       } catch (_: Exception) {}
       try {
         activeRingtone?.stop()
@@ -574,7 +645,7 @@ fun TaskModalBottomSheet(
 
   // Reliable Initial Snapshot Tracking
   val initialTitle = remember(initialTask) { initialTask?.title ?: "" }
-  val initialDuration = remember(initialTask) { initialTask?.durationMinutes ?: 60 }
+  val initialDuration = remember(initialTask) { initialTask?.durationMinutes ?: 0 }
   val initialStartMin = remember(initialTask) { initialTask?.startTimeMinute ?: 540 }
   val initialVoice = remember(initialTask) { initialTask?.voiceMessage ?: "" }
   val initialDnd = remember(initialTask) { initialTask?.enableDnd ?: false }
@@ -603,7 +674,7 @@ fun TaskModalBottomSheet(
         } else {
           title.isNotBlank() ||
             voiceMessage.isNotBlank() ||
-            (durationHoursInput != "1" && durationHoursInput.isNotBlank()) ||
+            (durationHours * 60 + durationMins) > 0 ||
             enableDnd ||
             !isSoundAlertEnabled ||
             isHighPriority ||
@@ -753,6 +824,8 @@ fun TaskModalBottomSheet(
         val totalPool = pool.coerceAtLeast(p1Dur + p2Dur)
         val p1Start = part1StartHour * 60 + part1StartMinute
         val p2Start = part2StartHour * 60 + part2StartMinute
+        val finalP1Start = if (isEditingFluidTwin && !hasUserEditedP1Start) p1BirthStart else p1Start
+        val finalP2Start = if (isEditingFluidTwin && !hasUserEditedP2Start) p2BirthStart else p2Start
         val masterTitle = selectedCategory.title
 
         onSaveFluidTwin(
@@ -760,11 +833,11 @@ fun TaskModalBottomSheet(
             title = masterTitle,
             totalPoolMinutes = totalPool,
             part1Title = part1Title.ifBlank { "${selectedCategory.title} (Part 1)" },
-            part1StartMinute = p1Start,
+            part1StartMinute = finalP1Start,
             part1Duration = p1Dur,
             part1VoiceMessage = part1VoiceMessage,
             part2Title = part2Title.ifBlank { "${selectedCategory.title} (Part 2)" },
-            part2StartMinute = p2Start,
+            part2StartMinute = finalP2Start,
             part2Duration = p2Dur,
             part2VoiceMessage = part2VoiceMessage,
             enableDnd = enableDnd,
@@ -787,13 +860,16 @@ fun TaskModalBottomSheet(
             part2SafetyFloorMinutes = part2SafetyFloor.coerceIn(0, p2Dur),
             enableHaptic = enableHaptic,
             dndDelayMinutes = dndDelayMinutes.coerceIn(0, 25),
-            category = selectedCategory.id
+            category = selectedCategory.id,
+            part1OriginalStartMinute = finalP1Start,
+            part2OriginalStartMinute = finalP2Start
           )
         )
       }
     } else {
       val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(0)
       val calculatedStart = startHour * 60 + startMinute
+      val finalStart = if (isEditing && !hasUserEditedStartTime) birthStartMinute else calculatedStart
       val actualTitle = title.ifBlank { "${selectedCategory.icon} ${selectedCategory.defaultName}" }
 
       val clampedBuffer = interTaskBufferMinutes.coerceIn(0, 30)
@@ -803,7 +879,8 @@ fun TaskModalBottomSheet(
         id = initialTask?.id ?: "dynamic_${UUID.randomUUID().toString().take(8)}",
         title = actualTitle,
         type = TaskType.DYNAMIC,
-        startTimeMinute = calculatedStart,
+        startTimeMinute = finalStart,
+        originalStartTimeMinute = finalStart,
         durationMinutes = calculatedDuration,
         voiceMessage = voiceMessage,
         enableDnd = enableDnd,
@@ -1065,6 +1142,7 @@ fun TaskModalBottomSheet(
                 isSpeakingVoicePreview = false
                 activeVoiceUtteranceId = null
               } else if (isTtsReady && voiceMessage.isNotBlank()) {
+                AutomationManager.applyTtsLanguage(ttsInstance, voiceMessage)
                 val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
                 ttsInstance?.speak(voiceMessage, TextToSpeech.QUEUE_FLUSH, params, "anchor_tts")
               }
@@ -1092,11 +1170,13 @@ fun TaskModalBottomSheet(
                 isSpeakingVoicePreview = false
                 activeVoiceUtteranceId = null
               } else if (isTtsReady && fridayVoiceMessage.isNotBlank()) {
+                AutomationManager.applyTtsLanguage(ttsInstance, fridayVoiceMessage)
                 val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
                 ttsInstance?.speak(fridayVoiceMessage, TextToSpeech.QUEUE_FLUSH, params, "friday_tts")
               }
             },
             isSpeakingVoicePreview = isSpeakingVoicePreview,
+            isBengaliVoiceMissing = isTtsReady && !isBengaliVoiceReady,
             voiceVolume = voiceVolume,
             onVoiceVolumeChange = { voiceVolume = it },
             enableDnd = enableDnd,
@@ -1249,6 +1329,15 @@ fun TaskModalBottomSheet(
                     fontFamily = FontFamily.Monospace,
                     color = Color(0xFF64748B)
                   )
+                  val displayedStartMin = startHour * 60 + startMinute
+                  if (isEditing && !isAnchor && !hasUserEditedStartTime && birthStartMinute != displayedStartMin) {
+                    Text(
+                      text = "Born: ${RoutineTask.formatTime(birthStartMinute)}",
+                      fontSize = 9.5.sp,
+                      fontFamily = FontFamily.Monospace,
+                      color = Color(0xFF38BDF8)
+                    )
+                  }
                 }
               }
 
@@ -1277,6 +1366,7 @@ fun TaskModalBottomSheet(
                       durationHoursInput = clean
                       durationHours = parsed.coerceIn(0, 12)
                     },
+                    placeholder = { Text("00", color = Color(0xFF475569)) },
                     suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth().testTag("duration_hours_input"),
@@ -1319,6 +1409,7 @@ fun TaskModalBottomSheet(
                       durationMinsInput = clean
                       durationMins = parsed.coerceIn(0, 59)
                     },
+                    placeholder = { Text("00", color = Color(0xFF475569)) },
                     suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth().testTag("duration_mins_input"),
@@ -1339,15 +1430,16 @@ fun TaskModalBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Dynamic Duration Badge Pill
+            // Dynamic Duration & Ending Time Badge Pill
             val currentTotalMins = durationHours * 60 + durationMins
+            val currentEndMinute = ((startHour * 60 + startMinute + currentTotalMins) % 1440 + 1440) % 1440
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
               Text(
-                text = "DURATION PREVIEW",
+                text = "ENDS • ${RoutineTask.formatTime(currentEndMinute)}",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
@@ -1446,6 +1538,7 @@ fun TaskModalBottomSheet(
                             activeVoiceUtteranceId = null
                           } else {
                             val msg = voiceMessage.ifBlank { "${title.ifBlank { "Task" }} starting now" }
+                            AutomationManager.applyTtsLanguage(ttsInstance, msg)
                             val params = Bundle().apply {
                               putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f))
                             }
@@ -1472,6 +1565,11 @@ fun TaskModalBottomSheet(
                     ),
                     shape = RoundedCornerShape(12.dp)
                   )
+
+                  if (isTtsReady && !isBengaliVoiceReady && AutomationManager.containsBengali(voiceMessage)) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    BengaliVoiceMissingWarningPill()
+                  }
 
                   Spacer(modifier = Modifier.height(10.dp))
 
@@ -1582,19 +1680,15 @@ fun TaskModalBottomSheet(
                       totalPoolHours = newH
                       splitValidationError = null
                       val pool = newH * 60 + totalPoolMinutes
-                      if (pool >= 2) {
-                        val currentS1 = part1DurationHours * 60 + part1DurationMins
-                        val newS1 = if (currentS1 <= 0) pool / 2 else currentS1.coerceIn(1, pool - 1)
+                      val s1 = part1DurationHours * 60 + part1DurationMins
+                      val s2 = part2DurationHours * 60 + part2DurationMins
+                      if ((s1 > 0 || s2 > 0) && pool >= 2) {
+                        val newS1 = if (s1 > 0) s1.coerceIn(1, pool - 1) else (pool - s2.coerceIn(1, pool - 1)).coerceAtLeast(1)
                         val newS2 = (pool - newS1).coerceAtLeast(1)
                         part1DurationHours = newS1 / 60
                         part1DurationMins = newS1 % 60
                         part2DurationHours = newS2 / 60
                         part2DurationMins = newS2 % 60
-                      } else {
-                        part1DurationHours = 0
-                        part1DurationMins = 0
-                        part2DurationHours = 0
-                        part2DurationMins = 0
                       }
                     },
                     label = { Text("Total Hours") },
@@ -1621,19 +1715,15 @@ fun TaskModalBottomSheet(
                       totalPoolMinutes = newM
                       splitValidationError = null
                       val pool = totalPoolHours * 60 + newM
-                      if (pool >= 2) {
-                        val currentS1 = part1DurationHours * 60 + part1DurationMins
-                        val newS1 = if (currentS1 <= 0) pool / 2 else currentS1.coerceIn(1, pool - 1)
+                      val s1 = part1DurationHours * 60 + part1DurationMins
+                      val s2 = part2DurationHours * 60 + part2DurationMins
+                      if ((s1 > 0 || s2 > 0) && pool >= 2) {
+                        val newS1 = if (s1 > 0) s1.coerceIn(1, pool - 1) else (pool - s2.coerceIn(1, pool - 1)).coerceAtLeast(1)
                         val newS2 = (pool - newS1).coerceAtLeast(1)
                         part1DurationHours = newS1 / 60
                         part1DurationMins = newS1 % 60
                         part2DurationHours = newS2 / 60
                         part2DurationMins = newS2 % 60
-                      } else {
-                        part1DurationHours = 0
-                        part1DurationMins = 0
-                        part2DurationHours = 0
-                        part2DurationMins = 0
                       }
                     },
                     label = { Text("Total Mins") },
@@ -1687,6 +1777,7 @@ fun TaskModalBottomSheet(
               onTitleChange = { part1Title = it },
               startHour = part1StartHour,
               startMinute = part1StartMinute,
+              birthStartMinute = if (isEditingFluidTwin && !hasUserEditedP1Start) p1BirthStart else null,
               onOpenClock = {
                 clockTarget = 1
                 showAnalogClockModal = true
@@ -1696,17 +1787,20 @@ fun TaskModalBottomSheet(
               onDurationChange = { h, m ->
                 splitValidationError = null
                 val pool = totalPoolHours * 60 + totalPoolMinutes
-                if (pool >= 2) {
-                  val requestedS1 = (h * 60 + m).coerceIn(1, pool - 1)
-                  part1DurationHours = requestedS1 / 60
-                  part1DurationMins = requestedS1 % 60
-                  val remainingS2 = (pool - requestedS1).coerceAtLeast(1)
+                val requested = (h * 60 + m).coerceAtLeast(0)
+                if (requested == 0) {
+                  part1DurationHours = 0
+                  part1DurationMins = 0
+                } else if (pool >= 2) {
+                  val clamped = requested.coerceIn(1, pool - 1)
+                  part1DurationHours = clamped / 60
+                  part1DurationMins = clamped % 60
+                  val remainingS2 = (pool - clamped).coerceAtLeast(1)
                   part2DurationHours = remainingS2 / 60
                   part2DurationMins = remainingS2 % 60
                 } else {
-                  val total = (h * 60 + m).coerceAtLeast(0)
-                  part1DurationHours = total / 60
-                  part1DurationMins = total % 60
+                  part1DurationHours = requested / 60
+                  part1DurationMins = requested % 60
                 }
               },
               safetyFloor = part1SafetyFloor,
@@ -1727,11 +1821,13 @@ fun TaskModalBottomSheet(
                   activeVoiceUtteranceId = null
                 } else {
                   val msg = part1VoiceMessage.ifBlank { "${part1Title.ifBlank { "Session 1" }} starting now" }
+                  AutomationManager.applyTtsLanguage(ttsInstance, msg)
                   val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolumeS1.coerceIn(0f, 1f)) }
                   ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s1_tts")
                 }
               },
-              isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s1_tts"
+              isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s1_tts",
+              isBengaliVoiceMissing = isTtsReady && !isBengaliVoiceReady
             )
 
             // Vertical Glowing Dashed Connector Line linking S1 and S2
@@ -1747,6 +1843,7 @@ fun TaskModalBottomSheet(
               onTitleChange = { part2Title = it },
               startHour = part2StartHour,
               startMinute = part2StartMinute,
+              birthStartMinute = if (isEditingFluidTwin && !hasUserEditedP2Start) p2BirthStart else null,
               onOpenClock = {
                 clockTarget = 2
                 showAnalogClockModal = true
@@ -1756,17 +1853,20 @@ fun TaskModalBottomSheet(
               onDurationChange = { h, m ->
                 splitValidationError = null
                 val pool = totalPoolHours * 60 + totalPoolMinutes
-                if (pool >= 2) {
-                  val requestedS2 = (h * 60 + m).coerceIn(1, pool - 1)
-                  part2DurationHours = requestedS2 / 60
-                  part2DurationMins = requestedS2 % 60
-                  val remainingS1 = (pool - requestedS2).coerceAtLeast(1)
+                val requested = (h * 60 + m).coerceAtLeast(0)
+                if (requested == 0) {
+                  part2DurationHours = 0
+                  part2DurationMins = 0
+                } else if (pool >= 2) {
+                  val clamped = requested.coerceIn(1, pool - 1)
+                  part2DurationHours = clamped / 60
+                  part2DurationMins = clamped % 60
+                  val remainingS1 = (pool - clamped).coerceAtLeast(1)
                   part1DurationHours = remainingS1 / 60
                   part1DurationMins = remainingS1 % 60
                 } else {
-                  val total = (h * 60 + m).coerceAtLeast(0)
-                  part2DurationHours = total / 60
-                  part2DurationMins = total % 60
+                  part2DurationHours = requested / 60
+                  part2DurationMins = requested % 60
                 }
               },
               safetyFloor = part2SafetyFloor,
@@ -1787,11 +1887,13 @@ fun TaskModalBottomSheet(
                   activeVoiceUtteranceId = null
                 } else {
                   val msg = part2VoiceMessage.ifBlank { "${part2Title.ifBlank { "Session 2" }} starting now" }
+                  AutomationManager.applyTtsLanguage(ttsInstance, msg)
                   val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolumeS2.coerceIn(0f, 1f)) }
                   ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s2_tts")
                 }
               },
-              isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s2_tts"
+              isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s2_tts",
+              isBengaliVoiceMissing = isTtsReady && !isBengaliVoiceReady
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -2570,10 +2672,16 @@ fun TaskModalBottomSheet(
       onConfirm = { h, m ->
         when (clockTarget) {
           1 -> {
+            if (h != part1StartHour || m != part1StartMinute) {
+              hasUserEditedP1Start = true
+            }
             part1StartHour = h
             part1StartMinute = m
           }
           2 -> {
+            if (h != part2StartHour || m != part2StartMinute) {
+              hasUserEditedP2Start = true
+            }
             part2StartHour = h
             part2StartMinute = m
           }
@@ -2582,6 +2690,9 @@ fun TaskModalBottomSheet(
             fridayStartMinute = m
           }
           else -> {
+            if (!isAnchor && (h != startHour || m != startMinute)) {
+              hasUserEditedStartTime = true
+            }
             startHour = h
             startMinute = m
           }
@@ -2818,6 +2929,7 @@ private fun AnchorEditSection(
   isVoiceEnabled: Boolean = true,
   onIsVoiceEnabledChange: (Boolean) -> Unit = {},
   isSpeakingVoicePreview: Boolean = false,
+  isBengaliVoiceMissing: Boolean = false,
   selectedDays: Set<RoutineDay>,
   onSelectedDaysChange: (Set<RoutineDay>) -> Unit
 ) {
@@ -3105,15 +3217,16 @@ private fun AnchorEditSection(
 
       Spacer(modifier = Modifier.height(10.dp))
 
-      // Friday Live Duration Preview Pill
+      // Friday Live Duration & Ending Time Preview Pill
       val totalFriMins = fridayDurationHours * 60 + fridayDurationMins
+      val friEndMinute = ((fridayStartHour * 60 + fridayStartMinute + totalFriMins) % 1440 + 1440) % 1440
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
         Text(
-          text = "FRIDAY DURATION PREVIEW",
+          text = "ENDS • ${RoutineTask.formatTime(friEndMinute)}",
           fontSize = 10.sp,
           fontWeight = FontWeight.Bold,
           fontFamily = FontFamily.Monospace,
@@ -3217,6 +3330,11 @@ private fun AnchorEditSection(
               ),
               shape = RoundedCornerShape(12.dp)
             )
+
+            if (isBengaliVoiceMissing && AutomationManager.containsBengali(fridayVoiceMessage)) {
+              Spacer(modifier = Modifier.height(8.dp))
+              BengaliVoiceMissingWarningPill()
+            }
 
             Spacer(modifier = Modifier.height(10.dp))
 
@@ -3463,15 +3581,16 @@ private fun AnchorEditSection(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Dynamic Duration Preview Pill
+        // Dynamic Duration & Ending Time Preview Pill
         val currentTotalMins = durationHours * 60 + durationMins
+        val regEndMinute = ((startHour * 60 + startMinute + currentTotalMins) % 1440 + 1440) % 1440
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
           Text(
-            text = "DURATION PREVIEW",
+            text = "ENDS • ${RoutineTask.formatTime(regEndMinute)}",
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
@@ -3798,6 +3917,11 @@ private fun AnchorEditSection(
               ),
               shape = RoundedCornerShape(12.dp)
             )
+
+            if (isBengaliVoiceMissing && AutomationManager.containsBengali(voiceMessage)) {
+              Spacer(modifier = Modifier.height(8.dp))
+              BengaliVoiceMissingWarningPill()
+            }
 
             Spacer(modifier = Modifier.height(10.dp))
 
@@ -4224,6 +4348,7 @@ private fun DualSessionCard(
   onTitleChange: (String) -> Unit,
   startHour: Int,
   startMinute: Int,
+  birthStartMinute: Int? = null,
   onOpenClock: () -> Unit,
   durationHours: Int,
   durationMins: Int,
@@ -4237,13 +4362,14 @@ private fun DualSessionCard(
   voiceVolume: Float,
   onVoiceVolumeChange: (Float) -> Unit,
   onTestVoice: () -> Unit,
-  isSpeakingVoicePreview: Boolean = false
+  isSpeakingVoicePreview: Boolean = false,
+  isBengaliVoiceMissing: Boolean = false
 ) {
   var hoursInput by remember(sessionNumber, resetKey) {
-    mutableStateOf(if (isEditingTwin && (durationHours > 0 || durationMins > 0)) durationHours.toString() else "")
+    mutableStateOf(if (isEditingTwin && durationHours > 0) durationHours.toString() else "")
   }
   var minsInput by remember(sessionNumber, resetKey) {
-    mutableStateOf(if (isEditingTwin && (durationHours > 0 || durationMins > 0)) durationMins.toString() else "")
+    mutableStateOf(if (isEditingTwin && durationMins > 0) durationMins.toString() else "")
   }
   var safetyFloorInput by remember(sessionNumber, resetKey) {
     mutableStateOf(if (isEditingTwin && safetyFloor > 0) safetyFloor.toString() else "")
@@ -4253,13 +4379,8 @@ private fun DualSessionCard(
     val currentH = hoursInput.toIntOrNull() ?: 0
     val currentM = minsInput.toIntOrNull() ?: 0
     if (currentH != durationHours || currentM != durationMins) {
-      if (durationHours == 0 && durationMins == 0) {
-        hoursInput = ""
-        minsInput = ""
-      } else {
-        hoursInput = durationHours.toString()
-        minsInput = durationMins.toString()
-      }
+      hoursInput = if (durationHours == 0) "" else durationHours.toString()
+      minsInput = if (durationMins == 0) "" else durationMins.toString()
     }
   }
 
@@ -4296,8 +4417,9 @@ private fun DualSessionCard(
           )
         }
 
+        val sessionEndMinute = ((startHour * 60 + startMinute + sessionDurationTotal) % 1440 + 1440) % 1440
         Text(
-          text = "${durationHours}h ${durationMins}m",
+          text = "${durationHours}h ${durationMins}m • → ${RoutineTask.formatTime(sessionEndMinute)}",
           fontSize = 13.sp,
           fontWeight = FontWeight.Bold,
           fontFamily = FontFamily.Monospace,
@@ -4344,12 +4466,23 @@ private fun DualSessionCard(
           Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text(
-              text = "Start: ${RoutineTask.formatTime(startHour * 60 + startMinute)}",
-              color = Color(0xFFF8FAFC),
-              fontSize = 13.sp,
-              fontWeight = FontWeight.SemiBold
-            )
+            Column {
+              Text(
+                text = "Start: ${RoutineTask.formatTime(startHour * 60 + startMinute)}",
+                color = Color(0xFFF8FAFC),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+              )
+              val displayedStart = startHour * 60 + startMinute
+              if (isEditingTwin && birthStartMinute != null && birthStartMinute != displayedStart) {
+                Text(
+                  text = "Born: ${RoutineTask.formatTime(birthStartMinute)}",
+                  fontSize = 9.5.sp,
+                  fontFamily = FontFamily.Monospace,
+                  color = Color(0xFF38BDF8)
+                )
+              }
+            }
           }
           Text(text = "Change 🕒", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
@@ -4370,6 +4503,7 @@ private fun DualSessionCard(
             onDurationChange(parsed.coerceIn(0, 12), durationMins)
           },
           label = { Text("Hours") },
+          placeholder = { Text("00", color = Color(0xFF475569)) },
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
           modifier = Modifier.weight(1f).testTag("session_${sessionNumber}_hours_input"),
           colors = OutlinedTextFieldDefaults.colors(
@@ -4392,6 +4526,7 @@ private fun DualSessionCard(
             onDurationChange(durationHours, parsed.coerceIn(0, 59))
           },
           label = { Text("Minutes") },
+          placeholder = { Text("00", color = Color(0xFF475569)) },
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
           modifier = Modifier.weight(1f).testTag("session_${sessionNumber}_mins_input"),
           colors = OutlinedTextFieldDefaults.colors(
@@ -4532,6 +4667,11 @@ private fun DualSessionCard(
               shape = RoundedCornerShape(12.dp)
             )
 
+            if (isBengaliVoiceMissing && AutomationManager.containsBengali(voiceMessage)) {
+              Spacer(modifier = Modifier.height(8.dp))
+              BengaliVoiceMissingWarningPill()
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
             // Volume Slider (0% - 100%)
@@ -4582,6 +4722,42 @@ private fun DualSessionCard(
         }
       }
     }
+  }
+}
+
+@Composable
+private fun BengaliVoiceMissingWarningPill() {
+  val context = LocalContext.current
+  Surface(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .border(BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)), RoundedCornerShape(10.dp))
+      .clickable {
+        try {
+          val installIntent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+          }
+          context.startActivity(installIntent)
+        } catch (_: Exception) {
+          try {
+            val settingsIntent = Intent("com.android.settings.TTS_SETTINGS").apply {
+              flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(settingsIntent)
+          } catch (_: Exception) {}
+        }
+      }
+      .testTag("bengali_tts_warning_pill"),
+    color = Color(0xFFF59E0B).copy(alpha = 0.14f)
+  ) {
+    Text(
+      text = "⚠️ বাংলা ভয়েস ডাটা নেই — ডাউনলোড করতে ট্যাপ করুন",
+      color = Color(0xFFFDE68A),
+      fontSize = 11.sp,
+      fontWeight = FontWeight.SemiBold,
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+    )
   }
 }
 

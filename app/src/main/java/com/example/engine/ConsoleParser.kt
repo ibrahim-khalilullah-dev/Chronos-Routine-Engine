@@ -477,6 +477,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           title = p1Title,
           type = TaskType.DYNAMIC,
           startTimeMinute = p1Start,
+          originalStartTimeMinute = p1Start,
           durationMinutes = p1Dur,
           voiceMessage = p1Voice,
           enableDnd = enableDnd,
@@ -504,6 +505,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           title = p2Title,
           type = TaskType.DYNAMIC,
           startTimeMinute = p2Start,
+          originalStartTimeMinute = p2Start,
           durationMinutes = p2Dur,
           voiceMessage = p2Voice,
           enableDnd = enableDnd,
@@ -693,6 +695,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         title = name,
         type = TaskType.DYNAMIC,
         startTimeMinute = startMinutes,
+        originalStartTimeMinute = startMinutes,
         durationMinutes = duration,
         voiceMessage = customMessage,
         enableDnd = enableDnd,
@@ -861,13 +864,6 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
     bufferMinutes: Int
   ): String {
     val sb = StringBuilder()
-    sb.appendLine("# ==============================================================")
-    sb.appendLine("# CHRONOS LIVE BACKUP ROUTINE SCRIPT")
-    sb.appendLine("# ==============================================================")
-    sb.appendLine("# SLEEP_MINUTES=$sleepMinutes")
-    sb.appendLine("# BUFFER_MINUTES=$bufferMinutes")
-    sb.appendLine()
-    sb.appendLine("# 1. THE 7 CIRCADIAN ANCHORS (Daily Fixed Boundaries)")
 
     val sortedAnchors = anchors.sortedBy { it.slotNumber ?: 0 }
     for (anchor in sortedAnchors) {
@@ -898,8 +894,6 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
 
     val activeDynamics = dynamicTasks.filter { !it.isDeleted }
     if (activeDynamics.isNotEmpty()) {
-      sb.appendLine()
-      sb.appendLine("# 2. DYNAMIC & FLUID TWIN ROUTINE TASKS")
       val exportedTwinIds = mutableSetOf<String>()
 
       for (task in activeDynamics) {
@@ -912,8 +906,8 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           if (p1 != null && p2 != null) {
             exportedTwinIds.add(twinId)
             val pool = p1.fluidTotalPoolMinutes ?: (p1.durationMinutes + p2.durationMinutes)
-            val p1Start = RoutineTask.formatTime24(p1.startTimeMinute)
-            val p2Start = RoutineTask.formatTime24(p2.startTimeMinute)
+            val p1Start = RoutineTask.formatTime24(p1.originalStartTimeMinute ?: p1.startTimeMinute)
+            val p2Start = RoutineTask.formatTime24(p2.originalStartTimeMinute ?: p2.startTimeMinute)
             val p1VoiceMsg = p1.voiceMessage.ifBlank { "${p1.title} starting now." }
             val p2VoiceMsg = p2.voiceMessage.ifBlank { "${p2.title} starting now." }
             val dndStr = if (p1.enableDnd) "Y" else "N"
@@ -940,7 +934,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
 
         val title = task.title
         val duration = task.durationMinutes
-        val timeStr = RoutineTask.formatTime24(task.startTimeMinute)
+        val timeStr = RoutineTask.formatTime24(task.originalStartTimeMinute ?: task.startTimeMinute)
         val dndStr = if (task.enableDnd) "Y" else "N"
         val daysStr = formatDaysToken(task.selectedDays)
         val voiceStr = if (task.isVoiceEnabled) "Y" else "N"

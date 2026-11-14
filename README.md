@@ -61,7 +61,8 @@ Slot 5 functions as a self-balancing mathematical shock absorber spanning from S
 ---
 
 ### 4. High Priority Anchor Wall Fence & Custom Flexibility 🛡️
-- **Anchor Fence Enforcement (`isHighPriority = true`):** Confines critical tasks strictly inside the inter-anchor gap enclosing their requested start time. If space is insufficient, Chronos diverts them safely into the **Overflow Pool** rather than permitting jarring timetable jumps across anchor walls ("timetable leaping").
+- **High Priority Anchor Wall Fence (`isHighPriority = true`):** Confines critical tasks strictly inside the inter-anchor gap enclosing their requested start time. If space is insufficient, Chronos diverts them safely into the **Overflow Pool** rather than permitting jarring timetable jumps across anchor walls ("timetable leaping").
+- **Birth/Original Time Auto-Return (`originalStartTimeMinute`):** Every dynamic and Fluid Twin task remembers its original birth start time across schedule displacements and non-time edits, automatically snapping back to its preferred slot as soon as blocking tasks are removed, paused, or deleted.
 - **Custom Schedule Flexibility (0 to 30m):** User-configurable compression allowance enabling tasks to cleanly fit into tight circadian windows without overflowing.
 - **Inter-Task Rest Buffer (0 to 30m):** Autonomous per-task rest buffer (default 0m; `0..5m` in 1m steps, `5..30m` in 5m steps) with zero global floor override.
 
@@ -92,6 +93,7 @@ Link two distinct routine sessions under a shared total duration pool (2m up to 
 
 ### 8. Lockscreen Notifications, Security & Decoupled Alerts 🔔
 - **Lock-Screen Privacy & Visibility:** Lockscreen notifications (`VISIBILITY_PUBLIC`) prominently display exact task completion times (e.g., `Ends at 10:45 AM`), while opening the Chronos UI from a locked device always respects the device PIN/biometric lock.
+- **Smart Bengali & English TTS Routing:** Automatically detects Bengali Unicode (`\u0980..\u09FF`) vs. English announcements, switches TTS language/voice dynamically (`bn-BD` / `bn-IN` / `en-US`), falls back to Google TTS (`com.google.android.tts`) when the default engine lacks Bengali support, and provides a 1-tap voice-pack install prompt if offline Bengali TTS data is missing.
 - **Decoupled Alert Channels:** Haptic vibration (`enableHaptic`), notification chimes (`isSoundAlertEnabled`, with in-studio Play/Stop ringtone preview), and audio-ducked `TextToSpeech` voice briefings (`isVoiceEnabled`, using a cancellable 1500ms delay when chimes are active) operate independently.
 
 ---
@@ -124,7 +126,7 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 - **`ANCHOR` Directive:** `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Message | [FriTitle | FriStart | FriDur | FriMsg] | [Days | Sound(Y/N) | VoiceVol(0-100)]`.
 - **`TWIN` Directive:** `TWIN | TotalPool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND(Y/N) | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1Voice(Y/N) | P2Voice(Y/N) | P1Vol | P2Vol | Sound]`.
 - **`DYNAMIC` Directive (v2):** `Task Name | Dur(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex(0-30) | Rest(0-30) | Priority(Y/N) | Category | [VoiceVol(0-100) | Sound(Y/N)]`.
-- **Spacious 540dp Studio Layout:** High-contrast AMOLED obsidian dark styling (`#0B0E14`), hairline border (`#1E293B`), synchronized line-numbered gutter (24dp), and header-integrated **"Backup"** action button.
+- **Spacious 540dp Studio Layout & Clean Headerless Backup:** High-contrast AMOLED obsidian dark styling (`#0B0E14`), hairline border (`#1E293B`), synchronized line-numbered gutter (24dp), and a header-integrated **"Backup"** button that exports purely live `ANCHOR`, `TWIN`, and dynamic lines using each task's birth start time (zero `#` comments or blank separator lines).
 - **One UI Active Metrics Row:** Real-time diagnostic cards tracking `Total Tasks`, `Anchors`, `Priority`, and `Syntax Status (Valid/Errors)`.
 - **Collapsible Error Accordion:** Clean chip-style error reporting preventing layout explosion during active typing.
 - **Dual Schedule Actions:** Gradient Cyan-to-Indigo `[ Append Tasks ]` and Gradient Amber-to-Red `[ Replace All ]`.
@@ -133,8 +135,9 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 
 ### 13. Streamlined Task Studio & Dual-Session Voice Architecture 🎙️
 - **Header Quick-Pill Ergonomics & Mutual Exclusivity:** Direct header-integrated `Priority` and `Split` interactive toggle pills use `AnimatedVisibility` mutual exclusivity—enabling `Priority` smoothly hides `Split`, and engaging `Split` cleanly hides `Priority`—preventing conflicting scheduling invariants.
+- **Compact Ending Time Previews & `00` Duration Defaults:** New dynamic tasks start cleanly with `00` hour/minute placeholders; compact `ENDS • <time>` and `"Born: <time>"` indicators keep ending times and original birth times visible at a glance.
 - **Unified Studio Controls & Ringtone Preview:** `Category` selector, `FLEXIBLE` & `BUFFER TIME` row, `TASK ALERTS` (with Play/Stop ringtone preview), `AUTO DND`, and `RECURRENCE SCHEDULE` render uniformly across both Single Dynamic Tasks and Split (Fluid Twin) sessions, using a 2-row anti-clipping widget hierarchy (`heightIn(min = 124.dp)`).
-- **Full Dual-Session Voice Studio:** Both Session 1 and Session 2 inside Split mode feature independent voice ON/OFF switches, custom per-session Safety Floors, collapsible speech message inputs, interactive Play/Stop TTS preview toggles, and 0%–100% volume sliders, matching single dynamic tasks and all 7 circadian anchors.
+- **Full Dual-Session Voice Studio & Split Typing Safety:** Both Session 1 and Session 2 inside Split mode feature independent voice ON/OFF switches, custom per-session Safety Floors, collapsible speech message inputs, interactive Play/Stop TTS preview toggles, and 0%–100% volume sliders, while preserving manual empty/zero editing without jarring `pool / 2` auto-fills or mid-keystroke snap-backs.
 - **Zero Auto-Splitting Architecture:** Tasks fit intact within available circadian gaps or cleanly route to the Overflow Pool without unexpected fragmentation.
 
 ---

@@ -283,7 +283,13 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               val canonicalTask = if (task.slotNumber != null) {
                 anchors.firstOrNull { it.slotNumber == task.slotNumber } ?: task
               } else {
-                task
+                val saved = dynamicTasks.firstOrNull { it.id == task.id }
+                task.copy(
+                  originalStartTimeMinute = task.originalStartTimeMinute
+                    ?: saved?.originalStartTimeMinute
+                    ?: saved?.startTimeMinute
+                    ?: task.startTimeMinute
+                )
               }
               editingTask = canonicalTask
               isModalOpen = true

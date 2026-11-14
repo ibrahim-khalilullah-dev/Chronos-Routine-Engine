@@ -507,6 +507,7 @@ class RoutineRepository(context: Context) {
         if (t.pausedUntilDateMillis != null) put("pausedUntilDateMillis", t.pausedUntilDateMillis)
         put("isPausedTodayOnly", t.isPausedTodayOnly)
         put("dndDelayMinutes", t.dndDelayMinutes)
+        if (t.originalStartTimeMinute != null) put("originalStartTimeMinute", t.originalStartTimeMinute)
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -573,7 +574,8 @@ class RoutineRepository(context: Context) {
         isPausedIndefinitely = obj.optBoolean("isPausedIndefinitely", false),
         pausedUntilDateMillis = if (obj.has("pausedUntilDateMillis")) obj.getLong("pausedUntilDateMillis") else null,
         isPausedTodayOnly = obj.optBoolean("isPausedTodayOnly", false),
-        dndDelayMinutes = obj.optInt("dndDelayMinutes", 0).coerceIn(0, 25)
+        dndDelayMinutes = obj.optInt("dndDelayMinutes", 0).coerceIn(0, 25),
+        originalStartTimeMinute = if (obj.has("originalStartTimeMinute")) obj.getInt("originalStartTimeMinute") else null
       )
       list.add(task)
     }

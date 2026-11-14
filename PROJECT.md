@@ -191,7 +191,7 @@
 #### `/app/src/main/AndroidManifest.xml`
 - **Purpose:** Core Android application manifest declaring permissions, activities, services, receivers, and hardware capabilities.
 - **Key Declarations:**
-  - Permissions: `POST_NOTIFICATIONS`, `ACCESS_NOTIFICATION_POLICY` (DND), `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, `WAKE_LOCK`, `VIBRATE`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `RECEIVE_BOOT_COMPLETED`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`.
+  - Permissions & Queries: `POST_NOTIFICATIONS`, `ACCESS_NOTIFICATION_POLICY` (DND), `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, `WAKE_LOCK`, `VIBRATE`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `RECEIVE_BOOT_COMPLETED`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, plus `<queries>` for `android.intent.action.TTS_SERVICE` enabling Android 11+ TTS engine & Bengali voice-pack discovery.
   - Application: `allowBackup="true"`, custom app icon and round icon, theme `@style/Theme.MyApplication`.
   - Activity: `MainActivity` with standard lock-screen security (no `showWhenLocked`/`turnScreenOn`) and `LAUNCHER` intent-filter; lockscreen notifications remain visible via `RoutineAutomationService` (`VISIBILITY_PUBLIC`).
   - Service: `RoutineAutomationService` with `foregroundServiceType="mediaPlayback"`.
@@ -207,7 +207,7 @@
   - `RoutineDay`: Days of the week (`SATURDAY` through `FRIDAY`), helper functions `fromString()`, `allDays()`, and `today()` mapping from `java.util.Calendar`.
   - `TaskType`: `ANCHOR_SLEEP` (Slot 1), `ANCHOR_STANDARD` (Slots 2, 3, 4, 6, 7), `ANCHOR_ELASTIC` (Slot 5), `DYNAMIC` (user-created tasks).
   - `RoutineTask`: Complete data model representing scheduled and unscheduled routine tasks.
-    * Core fields: `id`, `title`, `type`, `slotNumber`, `startTimeMinute` (0..1439), `durationMinutes`, `selectedDays`, `isDeleted`, `deletedTimestamp`.
+    * Core fields: `id`, `title`, `type`, `slotNumber`, `startTimeMinute` (0..1439), `originalStartTimeMinute` (nullable birth time preserved across displacements), `durationMinutes`, `selectedDays`, `isDeleted`, `deletedTimestamp`.
     * Telemetry & Voice: `voiceMessage`, `enableDnd`, `dndDelayMinutes` (0..25m), `enableHaptic`, `isVoiceEnabled`, `voiceVolume`, `isSoundAlertEnabled`, `customRingtoneUri`, `customNotificationTitle`, `customNotificationBody`.
     * Fluid Twins: `isFluidTwin`, `fluidTwinId`, `fluidTwinPart` (1 or 2), `fluidTotalPoolMinutes`, `fluidSafetyFloorMinutes`.
     * Flexibility & Splitting: `allowSplitting`, `isHighPriority`, `customFlexibilityMinutes` (0..30m), `toleranceMinutes`, `interTaskBufferMinutes` (0..30m).
@@ -247,7 +247,7 @@
   - `calculateAnchors(anchors, sleepDurationMinutes)`: Evaluates dynamic dependencies. Automatically updates Slot 1 bedtime when Slot 2 wake-up moves (with full modulo 1440 midnight-crossing safety), and recalibrates Slot 5 duration when Slot 4 or Slot 6 moves.
   - `adjustAnchor(anchors, slotNumber, deltaMinutes, sleepDurationMinutes)`: Quick-adjusts any anchor by ±5m increments and cascades recalculation.
   - `findAvailableGaps(committedTasks, interTaskBufferMinutes)`: Computes unallocated 24-hour time slots taking into account individual inter-task rest buffers.
-  - `scheduleDay(anchors, dynamicTasks, activeDay, interTaskBufferMinutes)`: Primary scheduling pipeline handling Friday Jumu'ah swapping, fluid twin balancing, high-priority anchor wall fencing, schedule flexibility tolerance, and unfragmented overflow handling.
+  - `scheduleDay(anchors, dynamicTasks, activeDay, interTaskBufferMinutes)`: Primary scheduling pipeline handling Friday Jumu'ah swapping, fluid twin balancing, high-priority anchor wall fencing, schedule flexibility tolerance, unfragmented overflow handling, and **Birth-Time Auto-Return** (sorting and placing around `originalStartTimeMinute ?: startTimeMinute` and preserving `originalStartTimeMinute` on all scheduled & overflow copies so displaced tasks automatically return to their birth slot when blocking tasks clear).
 
 #### `ConsoleParser.kt`
 - **Purpose:** Grammatical bulk CLI interpreter converting plaintext monospace pipe scripts into strongly typed `RoutineTask` collections.
@@ -255,6 +255,7 @@
   - `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message | [FriOverrides] | [Days | Sound | VoiceVol]` (canonical `"anchor_slot_$slot"` IDs).
   - `TWIN | TotalPool(m) | Part1Title | Part1Start | Part1Dur | Part1Voice | Part2Title | Part2Start | Part2Dur | Part2Voice | DND(Y/N) | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1VoiceYN | P2VoiceYN | P1Vol | P2Vol | Sound]`.
   - `DYNAMIC | Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex | Rest | Priority | Category | [VoiceVol | Sound]` (and prefix-free equivalent).
+- **Clean Headerless Backup Export (`generateRoutineScript()`):** Outputs purely live `ANCHOR`, `TWIN`, and `DYNAMIC` directives with zero `#` comment headers or blank separator lines, exporting `originalStartTimeMinute ?: startTimeMinute` while `parse()` retains backward-compatible handling for legacy `# SLEEP_MINUTES=` / `# BUFFER_MINUTES=` headers and populates `originalStartTimeMinute` on parsed tasks.
 - **Pre-Packaged Routine (`SAMPLE_SNIPPET`):** Complete Bengali circadian schedule featuring the 7 immutable circadian prayer anchors, Saturday–Thursday focus routines, and Friday special routines.
 - **Diagnostics:** Emits `ConsoleLineDiagnostic` with precise line numbers and syntax validation messages for immediate visual feedback.
 
@@ -270,12 +271,14 @@
   - `cancelDndAlarm(context, task)` / `pendingIntent.cancel()`: Cancels pending alarms and DND triggers cleanly when tasks end or are rescheduled.
   - `calculateNextOccurrenceMillis(task, activeDay)`: Calculates the exact timestamp of the upcoming task occurrence, iterating forward up to 7 days to match `task.selectedDays`.
   - `setDndMode(context, enabled, taskId)` / `releaseDndIfHeldByTask()` / `hasZeroDelayFollowUpDndTask()`: Persists the active DND owner task ID synchronously (`commit()`), releases DND only for its owner, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.
+  - `containsBengali()` / `isBengaliTtsAvailable()` / `applyTtsLanguage()` / `hasGoogleTtsEngine()`: Detects Bengali Unicode (`\u0980..\u09FF`) in announcements, dynamically switches `TextToSpeech` between `bn-BD`/`bn-IN` (with offline Bengali voice selection) and English (`en-US`), and provides Google TTS (`"com.google.android.tts"`) discovery.
   - `rescheduleAllAlarms(context)`: Evaluates active tasks across a 7-day horizon and registers each task's earliest upcoming non-overflow occurrence in `AlarmManager` (also purging legacy `slot_1..7` alarms).
 
 #### `RoutineAutomationService.kt`
 - **Purpose:** Foreground service with `mediaPlayback` type providing lockscreen notifications, decoupled haptic/chime/TTS alerts, and task-owned DND transitions.
 - **Key Implementations:**
   - Decoupled Alerts & Cancellable Delay: `enableHaptic`, `isSoundAlertEnabled`, and `isVoiceEnabled` execute independently with a cancellable `mainHandler` 1500ms delay between chime and TTS speech.
+  - Smart Bengali/English TTS & Google Engine Fallback: Calls `AutomationManager.applyTtsLanguage()` before every utterance and automatically falls back to `"com.google.android.tts"` if the default TTS engine lacks Bengali voice support or fails initialization.
   - Lockscreen Notification with Ending Times: Displays formatted completion times (`notificationDisplayBody`, e.g. `Ends at 10:45 AM`) with `VISIBILITY_PUBLIC`.
   - Audio Focus Ducking: Obtains `AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` so media volume gracefully lowers during voice briefings.
   - WakeLock Protection: Acquires a partial wake lock with a 3-minute safety limit.
@@ -317,8 +320,9 @@
 - **Mutually Exclusive Header Pills:** Houses `Priority` (`AnimatedVisibility(visible = !isFluidTwinMode)`) and `Split` (`AnimatedVisibility(visible = !isHighPriority)`) interactive header pills so High Priority anchor-fencing and Fluid Twin splitting remain strictly mutually exclusive.
 - **Anti-Clipping 2x2 Widget Hierarchy:** Standardizes Row 1 (`FLEXIBLE` & `BUFFER TIME`) and Row 2 (`TASK ALERTS` & `AUTO DND`) to uniform `heightIn(min = 124.dp)` squircle cards (`#0A0F1D`, `12.dp` padding) using a 2-row header layout (Row 1: 28dp icon + optional Switch; Row 2: full-width `11.sp` monospace title with `TextOverflow.Ellipsis`; Row 3: stepper/control). `FLEXIBLE` (0–30m in ±5m steps) and `BUFFER TIME` (0–30m precision scale: `0..5` in 1m steps, `5..30` in 5m steps) treat `0` as disabled with no redundant switches.
 - **Unified Hardware Integration & Recurrence:** `TASK ALERTS`, `AUTO DND`, and `RECURRENCE SCHEDULE` render outside the single-vs-split branch so Split (Fluid Twin) sessions share the exact same hardware alert, DND, and weekly recurrence controls as single dynamic tasks.
-- **Dual-Session Voice Studio (`DualSessionCard`):** Both Session 1 and Session 2 include independent voice ON/OFF switches (`isVoiceEnabledS1`/`S2`), collapsible custom voice message fields, interactive Play/Stop TTS preview toggles tracked per utterance ID (`"s1_tts"`, `"s2_tts"`) via `UtteranceProgressListener`, and 0%–100% volume sliders (`voiceVolumeS1`/`S2`).
-- **Live Interactive `UtteranceProgressListener` TTS Briefing Player:** Tracks active speech playback (`isSpeakingVoicePreview` & `activeVoiceUtteranceId`) across Dynamic Tasks, Fluid Twins, and Circadian Anchors (including Friday Jumu'ah mode), toggling the preview button seamlessly between emerald Play (`Icons.Default.PlayArrow`) and crimson Stop (`Icons.Default.Stop`) with immediate `ttsInstance?.stop()` cancellation and clean disposal.
+- **Dual-Session Voice Studio & Split Typing Safety (`DualSessionCard`):** Both Session 1 and Session 2 include independent voice ON/OFF switches (`isVoiceEnabledS1`/`S2`), collapsible custom voice message fields, interactive Play/Stop TTS preview toggles tracked per utterance ID (`"s1_tts"`, `"s2_tts"`) via `UtteranceProgressListener`, and 0%–100% volume sliders (`voiceVolumeS1`/`S2`). Changing Total Pool leaves empty Session 1/2 inputs untouched (no `pool / 2` auto-fill) and clearing a session duration does not snap back to `1` mid-typing (`triggerSave()` validates `>= 1m`).
+- **Birth Time, `00` Duration Default & Ending Time Previews:** New single dynamic tasks default to `0h 0m` (`"00"` placeholder); duration previews display compact `ENDS • <time>` badges (`• → <time>` on Twin cards); displaced tasks preserve `originalStartTimeMinute` across non-time edits and display a `"Born: <time>"` indicator until explicitly changed in the clock picker.
+- **Live Interactive `UtteranceProgressListener` TTS Briefing Player & Bengali Voice Prompt:** Tracks active speech playback (`isSpeakingVoicePreview` & `activeVoiceUtteranceId`) across Dynamic Tasks, Fluid Twins, and Circadian Anchors (including Friday Jumu'ah mode), applies smart Bengali/English `applyTtsLanguage()` routing with `"com.google.android.tts"` fallback, and renders an actionable missing-Bengali-voice warning pill (`ACTION_INSTALL_TTS_DATA`) when Bengali text is entered without an installed voice pack.
 
 #### `AnchorEditBottomSheet.kt` (`ui/components/`)
 - **Purpose:** Dedicated modal editor for fine-tuning circadian anchor properties and hardware automations.

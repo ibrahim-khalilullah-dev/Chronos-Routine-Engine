@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +22,7 @@ import com.example.model.RoutineTask
 import com.example.model.TaskType
 import com.example.receiver.RoutineAlarmReceiver
 import java.util.Calendar
+import java.util.Locale
 
 object AutomationManager {
 
@@ -79,6 +81,104 @@ object AutomationManager {
     val clamped = volume.coerceIn(0.0f, 1.0f)
     return Bundle().apply {
       putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, clamped)
+    }
+  }
+
+  private val bengaliTtsLocales: List<Locale> = listOf(
+    Locale.forLanguageTag("bn-BD"),
+    Locale.forLanguageTag("bn-IN"),
+    Locale("bn")
+  )
+
+  fun containsBengali(text: String): Boolean {
+    return text.any { it in '\u0980'..'\u09FF' }
+  }
+
+  fun isBengaliTtsAvailable(tts: TextToSpeech?): Boolean {
+    if (tts == null) return false
+    return try {
+      val localeAvailable = bengaliTtsLocales.any { locale ->
+        val res = tts.isLanguageAvailable(locale)
+        res >= TextToSpeech.LANG_AVAILABLE
+      }
+      if (localeAvailable) return true
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        val voices = tts.voices
+        voices?.any { voice ->
+          voice.locale?.language.equals("bn", ignoreCase = true) &&
+            !voice.isNetworkConnectionRequired
+        } == true
+      } else {
+        false
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun applyTtsLanguage(tts: TextToSpeech?, text: String): Boolean {
+    if (tts == null) return false
+    return try {
+      if (containsBengali(text)) {
+        val matchedLocale = bengaliTtsLocales.firstOrNull { locale ->
+          tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
+        }
+        if (matchedLocale != null) {
+          tts.language = matchedLocale
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val matchingVoice = tts.voices?.firstOrNull { voice ->
+              voice.locale?.language.equals("bn", ignoreCase = true) && !voice.isNetworkConnectionRequired
+            } ?: tts.voices?.firstOrNull { voice ->
+              voice.locale?.language.equals("bn", ignoreCase = true)
+            }
+            if (matchingVoice != null) {
+              tts.voice = matchingVoice
+            }
+          }
+          true
+        } else {
+          tts.language = Locale.forLanguageTag("bn-BD")
+          false
+        }
+      } else {
+        val englishCandidates = listOf(Locale.US, Locale.ENGLISH, Locale.getDefault())
+        val matchedEnglish = englishCandidates.firstOrNull { locale ->
+          tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
+        } ?: Locale.US
+        tts.language = matchedEnglish
+        true
+      }
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  fun hasGoogleTtsEngine(context: Context): Boolean {
+    val googlePkg = "com.google.android.tts"
+    val pm = context.packageManager ?: return false
+    try {
+      val ttsIntent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE)
+      val services = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        pm.queryIntentServices(ttsIntent, PackageManager.ResolveInfoFlags.of(0L))
+      } else {
+        @Suppress("DEPRECATION")
+        pm.queryIntentServices(ttsIntent, 0)
+      }
+      if (services.any { it.serviceInfo?.packageName == googlePkg }) {
+        return true
+      }
+    } catch (_: Exception) {}
+
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        pm.getPackageInfo(googlePkg, PackageManager.PackageInfoFlags.of(0L))
+      } else {
+        @Suppress("DEPRECATION")
+        pm.getPackageInfo(googlePkg, 0)
+      }
+      true
+    } catch (_: Exception) {
+      false
     }
   }
 

@@ -388,6 +388,7 @@ fun ChronosArchitectureGuideSheet(
           Text(
             text = "Chronos introduces rigid compartmentalization rules to prevent timetable drift:\n\n" +
               "• High Priority Anchor Wall Fence: When marked High Priority (isHighPriority = true), a task is strictly confined to the inter-anchor gap enclosing its preferred start time. If space is insufficient, it moves to the Overflow Pool rather than jumping across anchor walls into unrelated time zones.\n" +
+              "• Birth-Time Auto-Return: Displaced dynamic and Fluid Twin tasks preserve their original birth start time and automatically snap back to their preferred slot once blocking tasks are removed or paused.\n" +
               "• Custom Flexibility (0 to 30m): User-defined tolerance margin allows tasks to gently compress their duration to fit into tight circadian gaps without overflowing.\n" +
               "• Inter-Task Rest Buffer (0 to 30m, default 0m): Enforces an optional per-task cognitive cool-down buffer after scheduled tasks.",
             color = TextSecondary,
@@ -436,7 +437,7 @@ fun ChronosArchitectureGuideSheet(
             text = "Engineered specifically for complete immunity against aggressive OEM task killers (such as Samsung One UI Device Care deep sleep):\n\n" +
               "• AlarmManager.setAlarmClock: Start alarms and DND-enabled end alarms use system clock alarm architecture, scheduling the earliest upcoming non-overflow occurrence over a 7-day horizon.\n" +
               "• Task-Owned Priority DND & Overlap Guard: Tracks the active DND owner task ID synchronously, rejects delayed DND triggers for paused or deleted tasks, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.\n" +
-              "• Decoupled Alerts & Audio Ducking: Sound chimes, haptic vibration, and TTS voice briefings run independently with a cancellable 1500ms chime-before-voice delay and transient audio ducking while keeping app access protected behind your device lock.\n" +
+              "• Smart Bengali/English TTS & Audio Ducking: Sound chimes, haptic vibration, and TTS voice briefings run independently with a cancellable 1500ms delay, dynamic bn-BD/en-US language switching, Google TTS fallback, and transient audio ducking while keeping app access protected behind your device lock.\n" +
               "• 4-Tier Offline Vault: Routines automatically persist to chronos_vault.json across external, public documents, and internal storage, enabling zero-click restoration on fresh reinstallation.",
             color = TextSecondary,
             fontSize = 12.sp,
@@ -508,7 +509,7 @@ fun ChronosArchitectureGuideSheet(
           Spacer(modifier = Modifier.height(8.dp))
 
           Text(
-            text = "Ghost Autocomplete: The terminal predicts upcoming syntax fields as you type. Tap the ghost bar to complete without syntax error.",
+            text = "Ghost Autocomplete & Clean Backups: The terminal predicts upcoming syntax fields as you type, and one-tap Backup exports purely live ANCHOR, TWIN, and dynamic lines using each task's birth start time with zero comment clutter.",
             color = TextTertiary,
             fontSize = 11.sp,
             lineHeight = 15.sp

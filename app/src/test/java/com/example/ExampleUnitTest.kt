@@ -506,5 +506,147 @@ class ExampleUnitTest {
       overflowResult.scheduledTasks.none { it.id == p1HighFloor.id && it.durationMinutes < 30 }
     )
   }
+
+  @Test
+  fun testSchedulerBirthTimeAutoReturnWhenBlockerRemoved() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Fajr ends at 05:35 AM (335m). Place blocker at 335..395 so birthStart=335 has no earlier gap and must shift to >= 395.
+    val blocker = RoutineTask(
+      id = "hp_blocker",
+      title = "Blocking Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 335, // 05:35 AM
+      durationMinutes = 60,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val displacedTask = RoutineTask(
+      id = "birth_task",
+      title = "Deep Reading",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 335, // Born at 05:35 AM
+      originalStartTimeMinute = 335,
+      durationMinutes = 45,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val withBlocker = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(blocker, displacedTask),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val pushed = withBlocker.scheduledTasks.firstOrNull { it.id == "birth_task" }
+    assertNotNull(pushed)
+    assertTrue("Task should be pushed past blocker", pushed!!.startTimeMinute >= 395)
+    assertEquals("Birth start time must be preserved on scheduled copy", 335, pushed.originalStartTimeMinute)
+
+    // Remove blocker and reschedule using the displaced task (whose startTimeMinute reflects pushed time)
+    val withoutBlocker = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(pushed),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val returned = withoutBlocker.scheduledTasks.firstOrNull { it.id == "birth_task" }
+    assertNotNull(returned)
+    assertEquals("Task must snap back to its birth time when blocker is removed", 335, returned!!.startTimeMinute)
+    assertEquals(335, returned.originalStartTimeMinute)
+  }
+
+  @Test
+  fun testFluidTwinBirthTimePreservedAcrossDisplacement() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    val twinId = "fluid_birth_test"
+    // Dhuhr is 13:15-13:50 (795..830) Sat-Thu, but Friday Jumu'ah is 12:30-14:30 (750..870).
+    // Birth at 12:40 PM (760m, 30m) is displaced on Friday, then snaps back to 760m on Saturday.
+    val p1 = RoutineTask(
+      id = "${twinId}_p1",
+      title = "Twin A",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 760,
+      originalStartTimeMinute = 760,
+      durationMinutes = 30,
+      isFluidTwin = true,
+      fluidTwinId = twinId,
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 60,
+      selectedDays = RoutineDay.allDays()
+    )
+    val p2 = RoutineTask(
+      id = "${twinId}_p2",
+      title = "Twin B",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1120, // 06:40 PM
+      originalStartTimeMinute = 1120,
+      durationMinutes = 30,
+      isFluidTwin = true,
+      fluidTwinId = twinId,
+      fluidTwinPart = 2,
+      fluidTotalPoolMinutes = 60,
+      selectedDays = RoutineDay.allDays()
+    )
+
+    val fridaySchedule = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(p1, p2),
+      activeDay = RoutineDay.FRIDAY
+    )
+    val displacedP1 = fridaySchedule.scheduledTasks.first { it.id == "${twinId}_p1" }
+    assertTrue("Friday Jumu'ah should displace 12:40 PM twin", displacedP1.startTimeMinute != 760)
+    assertEquals(760, displacedP1.originalStartTimeMinute)
+
+    val saturdaySchedule = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(displacedP1, p2),
+      activeDay = RoutineDay.SATURDAY
+    )
+    val returnedP1 = saturdaySchedule.scheduledTasks.first { it.id == "${twinId}_p1" }
+    assertEquals("Fluid Twin must snap back to birth time on Saturday", 760, returnedP1.startTimeMinute)
+    assertEquals(760, returnedP1.originalStartTimeMinute)
+  }
+
+  @Test
+  fun testGenerateRoutineScriptIsHeaderlessAndExportsBirthTimes() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    val shiftedDynamic = RoutineTask(
+      id = "shifted_dyn",
+      title = "Birth Export Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 720, // Currently displaced to 12:00
+      originalStartTimeMinute = 600, // Born at 10:00
+      durationMinutes = 45,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val exported = ConsoleParser.generateRoutineScript(
+      anchors = anchors,
+      dynamicTasks = listOf(shiftedDynamic),
+      sleepMinutes = 360,
+      bufferMinutes = 0
+    )
+
+    val lines = exported.lines()
+    assertTrue("Exported script should not be empty", lines.isNotEmpty())
+    assertFalse("Exported script must not contain # comment lines", lines.any { it.trimStart().startsWith("#") })
+    assertFalse("Exported script must not contain blank lines", lines.any { it.isBlank() })
+    assertTrue("Dynamic task line must export birth time 10:00", exported.contains("Birth Export Task | 45 | 10:00"))
+
+    val reparsed = ConsoleParser.parse(exported)
+    assertEquals(0, reparsed.errorCount)
+    assertEquals(7, reparsed.parsedAnchors.size)
+    val reparsedTask = reparsed.validTasks.first { it.title == "Birth Export Task" }
+    assertEquals(600, reparsedTask.startTimeMinute)
+    assertEquals(600, reparsedTask.originalStartTimeMinute)
+  }
+
+  @Test
+  fun testAutomationManagerContainsBengaliDetection() {
+    assertTrue(com.example.service.AutomationManager.containsBengali("ফজরের সময় হয়েছে।"))
+    assertTrue(com.example.service.AutomationManager.containsBengali("Morning ফজর"))
+    assertFalse(com.example.service.AutomationManager.containsBengali("Deep Work Session 123!"))
+    assertFalse(com.example.service.AutomationManager.containsBengali(""))
+  }
 }
+
 

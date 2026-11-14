@@ -559,8 +559,9 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun saveDynamicTask(task: RoutineTask) {
     viewModelScope.launch {
       scheduleMutex.withLock {
+        val birthStart = task.originalStartTimeMinute ?: task.startTimeMinute
         val list = _dynamicTasks.value.filter { it.id != task.id && it.parentTaskId != task.id }.toMutableList()
-        list.add(task.copy(isDeleted = false, deletedTimestamp = null))
+        list.add(task.copy(originalStartTimeMinute = birthStart, isDeleted = false, deletedTimestamp = null))
         _dynamicTasks.value = list
         repository.saveDynamicTasks(list)
         if (!task.enableDnd || task.isCurrentlyPaused()) {
@@ -589,6 +590,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           title = actualP1Title,
           type = TaskType.DYNAMIC,
           startTimeMinute = request.part1StartMinute,
+          originalStartTimeMinute = request.part1OriginalStartMinute ?: request.part1StartMinute,
           durationMinutes = p1Dur,
           voiceMessage = request.part1VoiceMessage.ifBlank { "$actualP1Title starting now." },
           enableDnd = request.enableDnd,
@@ -620,6 +622,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           title = actualP2Title,
           type = TaskType.DYNAMIC,
           startTimeMinute = request.part2StartMinute,
+          originalStartTimeMinute = request.part2OriginalStartMinute ?: request.part2StartMinute,
           durationMinutes = p2Dur,
           voiceMessage = request.part2VoiceMessage.ifBlank { "$actualP2Title starting now." },
           enableDnd = request.enableDnd,
@@ -841,14 +844,17 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           repository.saveAnchors(recalculated)
         }
 
+        val normalizedNewTasks = newTasks.map {
+          it.copy(originalStartTimeMinute = it.originalStartTimeMinute ?: it.startTimeMinute)
+        }
         val list = if (replaceExisting) {
           _dynamicTasks.value.forEach {
             AutomationManager.cancelTaskAlarms(getApplication(), it.id)
             AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
           }
-          newTasks
+          normalizedNewTasks
         } else {
-          _dynamicTasks.value.filter { !it.isDeleted } + newTasks
+          _dynamicTasks.value.filter { !it.isDeleted } + normalizedNewTasks
         }
         _dynamicTasks.value = list
         repository.saveDynamicTasks(list)

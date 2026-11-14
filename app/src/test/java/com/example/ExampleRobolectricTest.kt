@@ -673,4 +673,34 @@ class ExampleRobolectricTest {
     // Should not set active DND owner when task is paused
     assertEquals(null, AutomationManager.getActiveDndTaskId(context))
   }
+
+  @Test
+  fun `repository persists and restores originalStartTimeMinute accurately`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val task = RoutineTask(
+      id = "birth_persist_1",
+      title = "Birth Time Persisted",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 660,
+      originalStartTimeMinute = 600,
+      durationMinutes = 40
+    )
+    repo.saveDynamicTasks(listOf(task))
+    val loaded = repo.getDynamicTasks().first { it.id == "birth_persist_1" }
+    assertEquals(660, loaded.startTimeMinute)
+    assertEquals(600, loaded.originalStartTimeMinute)
+  }
+
+  @Test
+  fun `automationManager tts helpers handle null and context safely`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    assertFalse(AutomationManager.isBengaliTtsAvailable(null))
+    assertFalse(AutomationManager.applyTtsLanguage(null, "ফজরের সময় হয়েছে।"))
+    assertFalse(AutomationManager.applyTtsLanguage(null, "English Briefing"))
+    // Should execute cleanly without throwing under Robolectric PackageManager
+    AutomationManager.hasGoogleTtsEngine(context)
+    assertTrue(true)
+  }
 }
+

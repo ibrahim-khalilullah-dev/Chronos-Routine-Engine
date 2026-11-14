@@ -92,6 +92,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   private var audioManager: AudioManager? = null
   private var audioFocusRequest: AudioFocusRequest? = null
   private var isTtsReady = false
+  private var triedGoogleTtsFallback = false
   private var pendingSpeechText: String? = null
   private var activeTaskId: String? = null
   private var currentDndApplied = false
@@ -333,7 +334,23 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   override fun onInit(status: Int) {
     if (status == TextToSpeech.SUCCESS) {
       try {
-        tts?.language = Locale.getDefault()
+        val pending = pendingSpeechText
+        if (pending != null &&
+          AutomationManager.containsBengali(pending) &&
+          !AutomationManager.isBengaliTtsAvailable(tts) &&
+          !triedGoogleTtsFallback &&
+          AutomationManager.hasGoogleTtsEngine(this)
+        ) {
+          triedGoogleTtsFallback = true
+          isTtsReady = false
+          try {
+            tts?.shutdown()
+          } catch (_: Exception) {}
+          tts = TextToSpeech(this, this, "com.google.android.tts")
+          return
+        }
+
+        AutomationManager.applyTtsLanguage(tts, pending ?: "")
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
           override fun onStart(utteranceId: String?) {
             _serviceState.value = _serviceState.value.copy(isSpeaking = true)
@@ -353,7 +370,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
         })
         isTtsReady = true
         if (isVoiceEnabled) {
-          pendingSpeechText?.let {
+          pending?.let {
             speakMessage(it)
             pendingSpeechText = null
           }
@@ -364,6 +381,17 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
         releaseWakeLock()
       }
     } else {
+      if (!triedGoogleTtsFallback && AutomationManager.hasGoogleTtsEngine(this)) {
+        triedGoogleTtsFallback = true
+        isTtsReady = false
+        try {
+          tts?.shutdown()
+        } catch (_: Exception) {}
+        try {
+          tts = TextToSpeech(this, this, "com.google.android.tts")
+          return
+        } catch (_: Exception) {}
+      }
       isTtsReady = false
       abandonTransientAudioFocus()
       releaseWakeLock()
@@ -373,6 +401,21 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   private fun speakMessage(text: String) {
     if (!isVoiceEnabled) return
     try {
+      if (AutomationManager.containsBengali(text) &&
+        !AutomationManager.isBengaliTtsAvailable(tts) &&
+        !triedGoogleTtsFallback &&
+        AutomationManager.hasGoogleTtsEngine(this)
+      ) {
+        triedGoogleTtsFallback = true
+        isTtsReady = false
+        pendingSpeechText = text
+        try {
+          tts?.shutdown()
+        } catch (_: Exception) {}
+        tts = TextToSpeech(this, this, "com.google.android.tts")
+        return
+      }
+      AutomationManager.applyTtsLanguage(tts, text)
       requestTransientAudioFocus()
       val params = AutomationManager.createTtsVolumeParams(voiceVolume)
       tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "chronos_voice_${System.currentTimeMillis()}")
