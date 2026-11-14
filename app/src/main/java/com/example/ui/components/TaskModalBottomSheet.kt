@@ -1062,7 +1062,7 @@ fun TaskModalBottomSheet(
                   )
                 }
               } else {
-                AnimatedVisibility(visible = !isHighPriority) {
+                AnimatedVisibility(visible = !isEditing && !isHighPriority) {
                   Surface(
                     modifier = Modifier
                       .clip(RoundedCornerShape(8.dp))
@@ -1278,6 +1278,8 @@ fun TaskModalBottomSheet(
             Spacer(modifier = Modifier.height(14.dp))
 
             // 3-Box Start Time & Duration Matrix
+            val singleHoursFocusRequester = remember { FocusRequester() }
+            val singleMinsFocusRequester = remember { FocusRequester() }
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1286,6 +1288,7 @@ fun TaskModalBottomSheet(
               Surface(
                 modifier = Modifier
                   .weight(1.3f)
+                  .heightIn(min = 68.dp)
                   .clip(RoundedCornerShape(14.dp))
                   .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
                   .clickable {
@@ -1295,7 +1298,13 @@ fun TaskModalBottomSheet(
                   .testTag("open_time_picker_button"),
                 color = Color(0xFF0A0F1D)
               ) {
-                Column(modifier = Modifier.padding(10.dp)) {
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 68.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                  verticalArrangement = Arrangement.SpaceBetween
+                ) {
                   Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1316,27 +1325,24 @@ fun TaskModalBottomSheet(
                       modifier = Modifier.size(13.dp)
                     )
                   }
-                  Spacer(modifier = Modifier.height(6.dp))
-                  Text(
-                    text = RoutineTask.formatTime(startHour * 60 + startMinute),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFF8FAFC)
-                  )
-                  Text(
-                    text = String.format(Locale.US, "%02d:%02d 24h", startHour, startMinute),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF64748B)
-                  )
-                  val displayedStartMin = startHour * 60 + startMinute
-                  if (isEditing && !isAnchor && !hasUserEditedStartTime && birthStartMinute != displayedStartMin) {
+                  Column {
                     Text(
-                      text = "Born: ${RoutineTask.formatTime(birthStartMinute)}",
-                      fontSize = 9.5.sp,
-                      fontFamily = FontFamily.Monospace,
-                      color = Color(0xFF38BDF8)
+                      text = RoutineTask.formatTime(startHour * 60 + startMinute),
+                      fontSize = 15.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFFF8FAFC),
+                      maxLines = 1
                     )
+                    val displayedStartMin = startHour * 60 + startMinute
+                    if (isEditing && !isAnchor && !hasUserEditedStartTime && birthStartMinute != displayedStartMin) {
+                      Text(
+                        text = "Born: ${RoutineTask.formatTime(birthStartMinute)}",
+                        fontSize = 9.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF38BDF8),
+                        maxLines = 1
+                      )
+                    }
                   }
                 }
               }
@@ -1345,11 +1351,19 @@ fun TaskModalBottomSheet(
               Surface(
                 modifier = Modifier
                   .weight(1f)
+                  .heightIn(min = 68.dp)
                   .clip(RoundedCornerShape(14.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+                  .clickable { singleHoursFocusRequester.requestFocus() },
                 color = Color(0xFF0A0F1D)
               ) {
-                Column(modifier = Modifier.padding(10.dp)) {
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 68.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                  verticalArrangement = Arrangement.SpaceBetween
+                ) {
                   Text(
                     text = "HOURS",
                     fontSize = 9.sp,
@@ -1358,28 +1372,49 @@ fun TaskModalBottomSheet(
                     letterSpacing = 0.5.sp,
                     color = Color(0xFF94A3B8)
                   )
-                  Spacer(modifier = Modifier.height(4.dp))
-                  OutlinedTextField(
+                  BasicTextField(
                     value = durationHoursInput,
                     onValueChange = { raw ->
                       val (clean, parsed) = sanitizeNumberInput(raw, 2)
                       durationHoursInput = clean
                       durationHours = parsed.coerceIn(0, 12)
                     },
-                    placeholder = { Text("00", color = Color(0xFF475569)) },
-                    suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
+                    singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth().testTag("duration_hours_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color.Transparent,
-                      unfocusedContainerColor = Color.Transparent,
-                      focusedBorderColor = Color(0xFF06B6D4),
-                      unfocusedBorderColor = Color.Transparent,
-                      focusedTextColor = Color(0xFFF8FAFC),
-                      unfocusedTextColor = Color(0xFFF8FAFC)
+                    textStyle = TextStyle(
+                      color = Color(0xFFF8FAFC),
+                      fontSize = 16.sp,
+                      fontWeight = FontWeight.Bold
                     ),
-                    shape = RoundedCornerShape(8.dp),
-                    singleLine = true
+                    cursorBrush = SolidColor(Color(0xFF06B6D4)),
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .focusRequester(singleHoursFocusRequester)
+                      .testTag("duration_hours_input"),
+                    decorationBox = { innerTextField ->
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                      ) {
+                        Box(contentAlignment = Alignment.CenterStart) {
+                          if (durationHoursInput.isEmpty()) {
+                            Text(
+                              text = "00",
+                              fontSize = 16.sp,
+                              fontWeight = FontWeight.Bold,
+                              color = Color(0xFF475569)
+                            )
+                          }
+                          innerTextField()
+                        }
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                          text = "h",
+                          fontSize = 12.sp,
+                          color = Color(0xFF64748B)
+                        )
+                      }
+                    }
                   )
                 }
               }
@@ -1388,11 +1423,19 @@ fun TaskModalBottomSheet(
               Surface(
                 modifier = Modifier
                   .weight(1f)
+                  .heightIn(min = 68.dp)
                   .clip(RoundedCornerShape(14.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+                  .clickable { singleMinsFocusRequester.requestFocus() },
                 color = Color(0xFF0A0F1D)
               ) {
-                Column(modifier = Modifier.padding(10.dp)) {
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 68.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                  verticalArrangement = Arrangement.SpaceBetween
+                ) {
                   Text(
                     text = "MINS",
                     fontSize = 9.sp,
@@ -1401,28 +1444,49 @@ fun TaskModalBottomSheet(
                     letterSpacing = 0.5.sp,
                     color = Color(0xFF94A3B8)
                   )
-                  Spacer(modifier = Modifier.height(4.dp))
-                  OutlinedTextField(
+                  BasicTextField(
                     value = durationMinsInput,
                     onValueChange = { raw ->
                       val (clean, parsed) = sanitizeNumberInput(raw, 2)
                       durationMinsInput = clean
                       durationMins = parsed.coerceIn(0, 59)
                     },
-                    placeholder = { Text("00", color = Color(0xFF475569)) },
-                    suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
+                    singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth().testTag("duration_mins_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color.Transparent,
-                      unfocusedContainerColor = Color.Transparent,
-                      focusedBorderColor = Color(0xFF06B6D4),
-                      unfocusedBorderColor = Color.Transparent,
-                      focusedTextColor = Color(0xFFF8FAFC),
-                      unfocusedTextColor = Color(0xFFF8FAFC)
+                    textStyle = TextStyle(
+                      color = Color(0xFFF8FAFC),
+                      fontSize = 16.sp,
+                      fontWeight = FontWeight.Bold
                     ),
-                    shape = RoundedCornerShape(8.dp),
-                    singleLine = true
+                    cursorBrush = SolidColor(Color(0xFF06B6D4)),
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .focusRequester(singleMinsFocusRequester)
+                      .testTag("duration_mins_input"),
+                    decorationBox = { innerTextField ->
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                      ) {
+                        Box(contentAlignment = Alignment.CenterStart) {
+                          if (durationMinsInput.isEmpty()) {
+                            Text(
+                              text = "00",
+                              fontSize = 16.sp,
+                              fontWeight = FontWeight.Bold,
+                              color = Color(0xFF475569)
+                            )
+                          }
+                          innerTextField()
+                        }
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                          text = "m",
+                          fontSize = 12.sp,
+                          color = Color(0xFF64748B)
+                        )
+                      }
+                    }
                   )
                 }
               }
@@ -1430,7 +1494,7 @@ fun TaskModalBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Dynamic Duration & Ending Time Badge Pill
+            // Ending Time Preview Row
             val currentTotalMins = durationHours * 60 + durationMins
             val currentEndMinute = ((startHour * 60 + startMinute + currentTotalMins) % 1440 + 1440) % 1440
             Row(
@@ -1439,7 +1503,7 @@ fun TaskModalBottomSheet(
               verticalAlignment = Alignment.CenterVertically
             ) {
               Text(
-                text = "ENDS • ${RoutineTask.formatTime(currentEndMinute)}",
+                text = "ENDING TIME",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
@@ -1453,7 +1517,7 @@ fun TaskModalBottomSheet(
                   .padding(horizontal = 8.dp, vertical = 3.dp)
               ) {
                 Text(
-                  text = "${durationHours}h ${durationMins}m ($currentTotalMins mins total)",
+                  text = RoutineTask.formatTime(currentEndMinute),
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   fontFamily = FontFamily.Monospace,
@@ -3079,6 +3143,8 @@ private fun AnchorEditSection(
       Spacer(modifier = Modifier.height(14.dp))
 
       // Friday 3-Box Start Time & Duration Matrix
+      val friHoursFocusRequester = remember { FocusRequester() }
+      val friMinsFocusRequester = remember { FocusRequester() }
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -3087,13 +3153,20 @@ private fun AnchorEditSection(
         Surface(
           modifier = Modifier
             .weight(1.3f)
+            .heightIn(min = 68.dp)
             .clip(RoundedCornerShape(14.dp))
             .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
             .clickable { onOpenFridayClock() }
             .testTag("open_friday_time_picker_button"),
           color = Color(0xFF0A0F1D)
         ) {
-          Column(modifier = Modifier.padding(10.dp)) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(min = 68.dp)
+              .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+          ) {
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.SpaceBetween,
@@ -3111,21 +3184,15 @@ private fun AnchorEditSection(
                 imageVector = Icons.Default.Schedule,
                 contentDescription = null,
                 tint = Color(0xFF10B981),
-                modifier = Modifier.size(14.dp)
+                modifier = Modifier.size(13.dp)
               )
             }
-            Spacer(modifier = Modifier.height(6.dp))
             Text(
               text = RoutineTask.formatTime(fridayStartHour * 60 + fridayStartMinute),
-              fontSize = 17.sp,
+              fontSize = 15.sp,
               fontWeight = FontWeight.Bold,
-              color = Color(0xFFF8FAFC)
-            )
-            Text(
-              text = "24h: ${String.format(Locale.US, "%02d:%02d", fridayStartHour, fridayStartMinute)} • Tap to dial",
-              fontSize = 9.sp,
-              fontFamily = FontFamily.Monospace,
-              color = Color(0xFF64748B)
+              color = Color(0xFFF8FAFC),
+              maxLines = 1
             )
           }
         }
@@ -3134,11 +3201,19 @@ private fun AnchorEditSection(
         Surface(
           modifier = Modifier
             .weight(1f)
+            .heightIn(min = 68.dp)
             .clip(RoundedCornerShape(14.dp))
-            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+            .clickable { friHoursFocusRequester.requestFocus() },
           color = Color(0xFF0A0F1D)
         ) {
-          Column(modifier = Modifier.padding(10.dp)) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(min = 68.dp)
+              .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+          ) {
             Text(
               text = "HOURS",
               fontSize = 9.sp,
@@ -3147,27 +3222,49 @@ private fun AnchorEditSection(
               letterSpacing = 0.5.sp,
               color = Color(0xFF94A3B8)
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            OutlinedTextField(
+            BasicTextField(
               value = friHoursInput,
               onValueChange = { raw ->
                 val (clean, parsed) = sanitizeNumberInput(raw, 2)
                 friHoursInput = clean
                 onFridayDurationHoursChange(parsed.coerceIn(0, 12))
               },
-              suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
+              singleLine = true,
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              modifier = Modifier.fillMaxWidth().testTag("friday_duration_hours_input"),
-              colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-                focusedBorderColor = Color(0xFF10B981),
-                unfocusedBorderColor = Color.Transparent,
-                focusedTextColor = Color(0xFFF8FAFC),
-                unfocusedTextColor = Color(0xFFF8FAFC)
+              textStyle = TextStyle(
+                color = Color(0xFFF8FAFC),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
               ),
-              shape = RoundedCornerShape(8.dp),
-              singleLine = true
+              cursorBrush = SolidColor(Color(0xFF10B981)),
+              modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(friHoursFocusRequester)
+                .testTag("friday_duration_hours_input"),
+              decorationBox = { innerTextField ->
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(contentAlignment = Alignment.CenterStart) {
+                    if (friHoursInput.isEmpty()) {
+                      Text(
+                        text = "00",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF475569)
+                      )
+                    }
+                    innerTextField()
+                  }
+                  Spacer(modifier = Modifier.width(3.dp))
+                  Text(
+                    text = "h",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                  )
+                }
+              }
             )
           }
         }
@@ -3176,11 +3273,19 @@ private fun AnchorEditSection(
         Surface(
           modifier = Modifier
             .weight(1f)
+            .heightIn(min = 68.dp)
             .clip(RoundedCornerShape(14.dp))
-            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+            .clickable { friMinsFocusRequester.requestFocus() },
           color = Color(0xFF0A0F1D)
         ) {
-          Column(modifier = Modifier.padding(10.dp)) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(min = 68.dp)
+              .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+          ) {
             Text(
               text = "MINS",
               fontSize = 9.sp,
@@ -3189,27 +3294,49 @@ private fun AnchorEditSection(
               letterSpacing = 0.5.sp,
               color = Color(0xFF94A3B8)
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            OutlinedTextField(
+            BasicTextField(
               value = friMinsInput,
               onValueChange = { raw ->
                 val (clean, parsed) = sanitizeNumberInput(raw, 2)
                 friMinsInput = clean
                 onFridayDurationMinsChange(parsed.coerceIn(0, 59))
               },
-              suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
+              singleLine = true,
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              modifier = Modifier.fillMaxWidth().testTag("friday_duration_mins_input"),
-              colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-                focusedBorderColor = Color(0xFF10B981),
-                unfocusedBorderColor = Color.Transparent,
-                focusedTextColor = Color(0xFFF8FAFC),
-                unfocusedTextColor = Color(0xFFF8FAFC)
+              textStyle = TextStyle(
+                color = Color(0xFFF8FAFC),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
               ),
-              shape = RoundedCornerShape(8.dp),
-              singleLine = true
+              cursorBrush = SolidColor(Color(0xFF10B981)),
+              modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(friMinsFocusRequester)
+                .testTag("friday_duration_mins_input"),
+              decorationBox = { innerTextField ->
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(contentAlignment = Alignment.CenterStart) {
+                    if (friMinsInput.isEmpty()) {
+                      Text(
+                        text = "00",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF475569)
+                      )
+                    }
+                    innerTextField()
+                  }
+                  Spacer(modifier = Modifier.width(3.dp))
+                  Text(
+                    text = "m",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                  )
+                }
+              }
             )
           }
         }
@@ -3217,7 +3344,7 @@ private fun AnchorEditSection(
 
       Spacer(modifier = Modifier.height(10.dp))
 
-      // Friday Live Duration & Ending Time Preview Pill
+      // Friday Ending Time Preview Row
       val totalFriMins = fridayDurationHours * 60 + fridayDurationMins
       val friEndMinute = ((fridayStartHour * 60 + fridayStartMinute + totalFriMins) % 1440 + 1440) % 1440
       Row(
@@ -3226,7 +3353,7 @@ private fun AnchorEditSection(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Text(
-          text = "ENDS • ${RoutineTask.formatTime(friEndMinute)}",
+          text = "ENDING TIME",
           fontSize = 10.sp,
           fontWeight = FontWeight.Bold,
           fontFamily = FontFamily.Monospace,
@@ -3240,7 +3367,7 @@ private fun AnchorEditSection(
             .padding(horizontal = 8.dp, vertical = 3.dp)
         ) {
           Text(
-            text = "${fridayDurationHours}h ${fridayDurationMins}m ($totalFriMins mins total)",
+            text = RoutineTask.formatTime(friEndMinute),
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
@@ -3443,6 +3570,8 @@ private fun AnchorEditSection(
         Spacer(modifier = Modifier.height(14.dp))
 
         // Standard 3-Box Start Time & Duration Matrix
+        val anchorHoursFocusRequester = remember { FocusRequester() }
+        val anchorMinsFocusRequester = remember { FocusRequester() }
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -3451,13 +3580,20 @@ private fun AnchorEditSection(
           Surface(
             modifier = Modifier
               .weight(1.3f)
+              .heightIn(min = 68.dp)
               .clip(RoundedCornerShape(14.dp))
               .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
               .clickable { onOpenClock() }
               .testTag("open_time_picker_button"),
             color = Color(0xFF0A0F1D)
           ) {
-            Column(modifier = Modifier.padding(10.dp)) {
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 68.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+              verticalArrangement = Arrangement.SpaceBetween
+            ) {
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -3475,21 +3611,15 @@ private fun AnchorEditSection(
                   imageVector = Icons.Default.Schedule,
                   contentDescription = null,
                   tint = accentColor,
-                  modifier = Modifier.size(14.dp)
+                  modifier = Modifier.size(13.dp)
                 )
               }
-              Spacer(modifier = Modifier.height(6.dp))
               Text(
                 text = RoutineTask.formatTime(startHour * 60 + startMinute),
-                fontSize = 17.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFFF8FAFC)
-              )
-              Text(
-                text = "24h: ${String.format(Locale.US, "%02d:%02d", startHour, startMinute)} • Tap to dial",
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-                color = Color(0xFF64748B)
+                color = Color(0xFFF8FAFC),
+                maxLines = 1
               )
             }
           }
@@ -3498,11 +3628,19 @@ private fun AnchorEditSection(
           Surface(
             modifier = Modifier
               .weight(1f)
+              .heightIn(min = 68.dp)
               .clip(RoundedCornerShape(14.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+              .clickable { anchorHoursFocusRequester.requestFocus() },
             color = Color(0xFF0A0F1D)
           ) {
-            Column(modifier = Modifier.padding(10.dp)) {
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 68.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+              verticalArrangement = Arrangement.SpaceBetween
+            ) {
               Text(
                 text = "HOURS",
                 fontSize = 9.sp,
@@ -3511,27 +3649,49 @@ private fun AnchorEditSection(
                 letterSpacing = 0.5.sp,
                 color = Color(0xFF94A3B8)
               )
-              Spacer(modifier = Modifier.height(4.dp))
-              OutlinedTextField(
+              BasicTextField(
                 value = hoursInput,
                 onValueChange = { raw ->
                   val (clean, parsed) = sanitizeNumberInput(raw, 2)
                   hoursInput = clean
                   onDurationHoursChange(parsed.coerceIn(0, 12))
                 },
-                suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
+                singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth().testTag("duration_hours_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                  focusedContainerColor = Color.Transparent,
-                  unfocusedContainerColor = Color.Transparent,
-                  focusedBorderColor = accentColor,
-                  unfocusedBorderColor = Color.Transparent,
-                  focusedTextColor = Color(0xFFF8FAFC),
-                  unfocusedTextColor = Color(0xFFF8FAFC)
+                textStyle = TextStyle(
+                  color = Color(0xFFF8FAFC),
+                  fontSize = 16.sp,
+                  fontWeight = FontWeight.Bold
                 ),
-                shape = RoundedCornerShape(8.dp),
-                singleLine = true
+                cursorBrush = SolidColor(accentColor),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .focusRequester(anchorHoursFocusRequester)
+                  .testTag("duration_hours_input"),
+                decorationBox = { innerTextField ->
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Box(contentAlignment = Alignment.CenterStart) {
+                      if (hoursInput.isEmpty()) {
+                        Text(
+                          text = "00",
+                          fontSize = 16.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = Color(0xFF475569)
+                        )
+                      }
+                      innerTextField()
+                    }
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                      text = "h",
+                      fontSize = 12.sp,
+                      color = Color(0xFF64748B)
+                    )
+                  }
+                }
               )
             }
           }
@@ -3540,11 +3700,19 @@ private fun AnchorEditSection(
           Surface(
             modifier = Modifier
               .weight(1f)
+              .heightIn(min = 68.dp)
               .clip(RoundedCornerShape(14.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
+              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
+              .clickable { anchorMinsFocusRequester.requestFocus() },
             color = Color(0xFF0A0F1D)
           ) {
-            Column(modifier = Modifier.padding(10.dp)) {
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 68.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+              verticalArrangement = Arrangement.SpaceBetween
+            ) {
               Text(
                 text = "MINS",
                 fontSize = 9.sp,
@@ -3553,27 +3721,49 @@ private fun AnchorEditSection(
                 letterSpacing = 0.5.sp,
                 color = Color(0xFF94A3B8)
               )
-              Spacer(modifier = Modifier.height(4.dp))
-              OutlinedTextField(
+              BasicTextField(
                 value = minsInput,
                 onValueChange = { raw ->
                   val (clean, parsed) = sanitizeNumberInput(raw, 2)
                   minsInput = clean
                   onDurationMinsChange(parsed.coerceIn(0, 59))
                 },
-                suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
+                singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth().testTag("duration_mins_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                  focusedContainerColor = Color.Transparent,
-                  unfocusedContainerColor = Color.Transparent,
-                  focusedBorderColor = accentColor,
-                  unfocusedBorderColor = Color.Transparent,
-                  focusedTextColor = Color(0xFFF8FAFC),
-                  unfocusedTextColor = Color(0xFFF8FAFC)
+                textStyle = TextStyle(
+                  color = Color(0xFFF8FAFC),
+                  fontSize = 16.sp,
+                  fontWeight = FontWeight.Bold
                 ),
-                shape = RoundedCornerShape(8.dp),
-                singleLine = true
+                cursorBrush = SolidColor(accentColor),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .focusRequester(anchorMinsFocusRequester)
+                  .testTag("duration_mins_input"),
+                decorationBox = { innerTextField ->
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Box(contentAlignment = Alignment.CenterStart) {
+                      if (minsInput.isEmpty()) {
+                        Text(
+                          text = "00",
+                          fontSize = 16.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = Color(0xFF475569)
+                        )
+                      }
+                      innerTextField()
+                    }
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                      text = "m",
+                      fontSize = 12.sp,
+                      color = Color(0xFF64748B)
+                    )
+                  }
+                }
               )
             }
           }
@@ -3581,7 +3771,7 @@ private fun AnchorEditSection(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Dynamic Duration & Ending Time Preview Pill
+        // Ending Time Preview Row
         val currentTotalMins = durationHours * 60 + durationMins
         val regEndMinute = ((startHour * 60 + startMinute + currentTotalMins) % 1440 + 1440) % 1440
         Row(
@@ -3590,7 +3780,7 @@ private fun AnchorEditSection(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Text(
-            text = "ENDS • ${RoutineTask.formatTime(regEndMinute)}",
+            text = "ENDING TIME",
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace,
@@ -3604,7 +3794,7 @@ private fun AnchorEditSection(
               .padding(horizontal = 8.dp, vertical = 3.dp)
           ) {
             Text(
-              text = "${durationHours}h ${durationMins}m ($currentTotalMins mins total)",
+              text = RoutineTask.formatTime(regEndMinute),
               fontSize = 11.sp,
               fontWeight = FontWeight.Bold,
               fontFamily = FontFamily.Monospace,
