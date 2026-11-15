@@ -647,6 +647,39 @@ class ExampleUnitTest {
     assertFalse(com.example.service.AutomationManager.containsBengali("Deep Work Session 123!"))
     assertFalse(com.example.service.AutomationManager.containsBengali(""))
   }
+
+  @Test
+  fun testAutomationManagerVoicePresetsAndFallback() {
+    val presets = com.example.service.AutomationManager.VOICE_PRESETS
+    assertEquals(12, presets.size)
+    assertEquals(
+      listOf(
+        "natural_female", "calm_female", "sweet_melodic_female", "executive_female", "night_sanctuary_female",
+        "teen_girl", "cheerful_kid_girl", "teen_boy",
+        "deep_male", "crisp_male", "mentor_male", "neutral_studio"
+      ),
+      presets.map { it.id }
+    )
+    assertEquals(5, presets.count { it.category == "female" })
+    assertEquals(3, presets.count { it.category == "youth" })
+    assertEquals(4, presets.count { it.category == "male" })
+    assertTrue(
+      "Each preset should have a non-blank label, description, and defaultSampleText",
+      presets.all { it.label.isNotBlank() && it.description.isNotBlank() && it.defaultSampleText.isNotBlank() }
+    )
+
+    val teenBoy = com.example.service.AutomationManager.getVoicePreset("teen_boy")
+    assertEquals("youth", teenBoy.category)
+    assertEquals("male", teenBoy.preferredGender)
+    assertEquals(1.34f, teenBoy.nativeMalePitch ?: 0f, 0.001f)
+
+    val deepMale = com.example.service.AutomationManager.getVoicePreset("deep_male")
+    assertEquals("deep_male", deepMale.id)
+    assertEquals("male", deepMale.preferredGender)
+
+    val fallback = com.example.service.AutomationManager.getVoicePreset("nonexistent_preset")
+    assertEquals("natural_female", fallback.id)
+  }
 }
 
 

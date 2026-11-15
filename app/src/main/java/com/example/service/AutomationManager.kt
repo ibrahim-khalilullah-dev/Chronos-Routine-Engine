@@ -116,23 +116,223 @@ object AutomationManager {
     }
   }
 
-  fun applyTtsLanguage(tts: TextToSpeech?, text: String): Boolean {
+  data class VoicePreset(
+    val id: String,
+    val label: String,
+    val emoji: String,
+    val description: String,
+    val category: String,
+    val preferredGender: String,
+    val pitch: Float,
+    val nativeMalePitch: Float? = null,
+    val speechRate: Float,
+    val defaultSampleText: String
+  )
+
+  val VOICE_PRESETS: List<VoicePreset> = listOf(
+    // Female Collection
+    VoicePreset(
+      id = "natural_female",
+      label = "Natural Female",
+      emoji = "🌸",
+      description = "Warm, clear & balanced studio voice",
+      category = "female",
+      preferredGender = "female",
+      pitch = 1.04f,
+      speechRate = 0.98f,
+      defaultSampleText = "স্বাগতম! আপনার নির্ধারিত রুটিন কাজ শুরু করার সময় হয়েছে।"
+    ),
+    VoicePreset(
+      id = "calm_female",
+      label = "Calm Soft Female",
+      emoji = "🌙",
+      description = "Soft, gentle & unhurried cadence",
+      category = "female",
+      preferredGender = "female",
+      pitch = 1.10f,
+      speechRate = 0.88f,
+      defaultSampleText = "শান্ত মনে আপনার পরবর্তী কাজটি এখনই শুরু করুন।"
+    ),
+    VoicePreset(
+      id = "sweet_melodic_female",
+      label = "Sweet Melodic Female",
+      emoji = "✨",
+      description = "Bright, friendly & uplifting tone",
+      category = "female",
+      preferredGender = "female",
+      pitch = 1.18f,
+      speechRate = 1.02f,
+      defaultSampleText = "নতুন সেশনের সময় হয়ে গেছে, মনোযোগ দিয়ে শুরু করুন।"
+    ),
+    VoicePreset(
+      id = "executive_female",
+      label = "Crisp Executive Female",
+      emoji = "💼",
+      description = "Articulate, confident & focused pace",
+      category = "female",
+      preferredGender = "female",
+      pitch = 0.98f,
+      speechRate = 1.07f,
+      defaultSampleText = "আপনার ফোকাস টাইম শুরু হয়েছে, এখন কাজ শুরু করুন।"
+    ),
+    VoicePreset(
+      id = "night_sanctuary_female",
+      label = "Night Sanctuary Female",
+      emoji = "🕯️",
+      description = "Extra soft, slow & peaceful bedtime tone",
+      category = "female",
+      preferredGender = "female",
+      pitch = 1.06f,
+      speechRate = 0.80f,
+      defaultSampleText = "রাতের বিশ্রামের সময় হয়েছে, সারাদিনের কাজ গুছিয়ে নিন।"
+    ),
+    // Youth 10–15 yrs Collection
+    VoicePreset(
+      id = "teen_girl",
+      label = "Young Girl (10–15 yrs)",
+      emoji = "🎀",
+      description = "Light, bright & youthful girl voice",
+      category = "youth",
+      preferredGender = "female",
+      pitch = 1.36f,
+      speechRate = 1.05f,
+      defaultSampleText = "হ্যালো! আপনার রুটিনের নতুন কাজ শুরু করার সময় হয়েছে।"
+    ),
+    VoicePreset(
+      id = "cheerful_kid_girl",
+      label = "Sweet Kid Girl (10–12 yrs)",
+      emoji = "🦋",
+      description = "Airy, cheerful & sweet young girl tone",
+      category = "youth",
+      preferredGender = "female",
+      pitch = 1.48f,
+      speechRate = 1.08f,
+      defaultSampleText = "সময় হয়ে গেছে! এখন সুন্দরভাবে কাজটি শুরু করা যাক।"
+    ),
+    VoicePreset(
+      id = "teen_boy",
+      label = "Young Boy (10–15 yrs)",
+      emoji = "🧢",
+      description = "Clear, lively & youthful boy voice",
+      category = "youth",
+      preferredGender = "male",
+      pitch = 1.14f,
+      nativeMalePitch = 1.34f,
+      speechRate = 1.05f,
+      defaultSampleText = "হ্যালো! এখন আপনার নির্ধারিত রুটিন সেশন শুরু করার সময়।"
+    ),
+    // Male & Studio Collection
+    VoicePreset(
+      id = "deep_male",
+      label = "Deep Calm Male",
+      emoji = "🎙️",
+      description = "Rich, resonant & commanding baritone",
+      category = "male",
+      preferredGender = "male",
+      pitch = 0.74f,
+      nativeMalePitch = 0.88f,
+      speechRate = 0.93f,
+      defaultSampleText = "এখন আপনার নির্ধারিত গুরুত্বপূর্ণ কাজ শুরু করার সময় হয়েছে।"
+    ),
+    VoicePreset(
+      id = "crisp_male",
+      label = "Crisp Focus Male",
+      emoji = "⚡",
+      description = "Energetic, articulate & brisk delivery",
+      category = "male",
+      preferredGender = "male",
+      pitch = 0.83f,
+      nativeMalePitch = 0.97f,
+      speechRate = 1.04f,
+      defaultSampleText = "সময় হয়ে গেছে, পূর্ণ মনোযোগে কাজটি শুরু করুন।"
+    ),
+    VoicePreset(
+      id = "mentor_male",
+      label = "Warm Mentor Male",
+      emoji = "📖",
+      description = "Steady, wise & unhurried narrator",
+      category = "male",
+      preferredGender = "male",
+      pitch = 0.78f,
+      nativeMalePitch = 0.92f,
+      speechRate = 0.86f,
+      defaultSampleText = "ধীরস্থিরভাবে আপনার পরবর্তী রুটিন ধাপটি শুরু করুন।"
+    ),
+    VoicePreset(
+      id = "neutral_studio",
+      label = "Neutral Studio",
+      emoji = "🎧",
+      description = "Balanced default reference tone",
+      category = "male",
+      preferredGender = "neutral",
+      pitch = 1.0f,
+      speechRate = 1.0f,
+      defaultSampleText = "আপনার রুটিন অ্যালার্ট এখন সক্রিয় হয়েছে।"
+    )
+  )
+
+  fun getVoicePreset(id: String?): VoicePreset {
+    return VOICE_PRESETS.firstOrNull { it.id == id } ?: VOICE_PRESETS.first()
+  }
+
+  private fun matchesPreferredGender(voiceName: String, preferredGender: String): Boolean {
+    val lower = voiceName.lowercase(Locale.ROOT)
+    val isFemale = lower.contains("female") ||
+      lower.contains("woman") ||
+      lower.contains("bnf") ||
+      lower.contains("bdf") ||
+      lower.contains("sfg") ||
+      lower.contains("tpf") ||
+      lower.contains("iob")
+    val isMale = !lower.contains("female") &&
+      !lower.contains("woman") &&
+      (lower.contains("male") ||
+        lower.contains("man") ||
+        lower.contains("bnm") ||
+        lower.contains("bdm") ||
+        lower.contains("tpm") ||
+        lower.contains("iom") ||
+        lower.contains("sfs") ||
+        lower.contains("bnc"))
+    return when (preferredGender) {
+      "female" -> isFemale
+      "male" -> isMale
+      else -> false
+    }
+  }
+
+  fun applyTtsLanguage(
+    tts: TextToSpeech?,
+    text: String,
+    voicePresetId: String = "natural_female"
+  ): Boolean {
     if (tts == null) return false
     return try {
-      if (containsBengali(text)) {
+      val preset = getVoicePreset(voicePresetId)
+      var selectedDistinctMaleVoice = false
+      val languageOk = if (containsBengali(text)) {
         val matchedLocale = bengaliTtsLocales.firstOrNull { locale ->
           tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
         }
         if (matchedLocale != null) {
           tts.language = matchedLocale
           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val matchingVoice = tts.voices?.firstOrNull { voice ->
-              voice.locale?.language.equals("bn", ignoreCase = true) && !voice.isNetworkConnectionRequired
-            } ?: tts.voices?.firstOrNull { voice ->
+            val bnVoices = tts.voices?.filter { voice ->
               voice.locale?.language.equals("bn", ignoreCase = true)
+            }.orEmpty()
+            val matchingVoice = if (preset.preferredGender != "neutral") {
+              bnVoices.firstOrNull { !it.isNetworkConnectionRequired && matchesPreferredGender(it.name, preset.preferredGender) }
+                ?: bnVoices.firstOrNull { matchesPreferredGender(it.name, preset.preferredGender) }
+                ?: bnVoices.firstOrNull { !it.isNetworkConnectionRequired }
+                ?: bnVoices.firstOrNull()
+            } else {
+              bnVoices.firstOrNull { !it.isNetworkConnectionRequired } ?: bnVoices.firstOrNull()
             }
             if (matchingVoice != null) {
               tts.voice = matchingVoice
+              if (preset.preferredGender == "male" && matchesPreferredGender(matchingVoice.name, "male")) {
+                selectedDistinctMaleVoice = true
+              }
             }
           }
           true
@@ -146,8 +346,34 @@ object AutomationManager {
           tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
         } ?: Locale.US
         tts.language = matchedEnglish
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+          val enVoices = tts.voices?.filter { voice ->
+            voice.locale?.language.equals("en", ignoreCase = true)
+          }.orEmpty()
+          val matchingVoice = if (preset.preferredGender != "neutral") {
+            enVoices.firstOrNull { !it.isNetworkConnectionRequired && matchesPreferredGender(it.name, preset.preferredGender) }
+              ?: enVoices.firstOrNull { matchesPreferredGender(it.name, preset.preferredGender) }
+          } else {
+            null
+          }
+          if (matchingVoice != null) {
+            tts.voice = matchingVoice
+            if (preset.preferredGender == "male" && matchesPreferredGender(matchingVoice.name, "male")) {
+              selectedDistinctMaleVoice = true
+            }
+          }
+        }
         true
       }
+
+      val effectivePitch = if (preset.preferredGender == "male" && selectedDistinctMaleVoice) {
+        preset.nativeMalePitch ?: (preset.pitch + 0.14f).coerceAtMost(0.98f)
+      } else {
+        preset.pitch
+      }
+      tts.setPitch(effectivePitch)
+      tts.setSpeechRate(preset.speechRate)
+      languageOk
     } catch (_: Exception) {
       false
     }

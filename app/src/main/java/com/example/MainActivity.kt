@@ -132,6 +132,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
   val deletedTasks by viewModel.deletedTasks.collectAsState()
   val currentMinute by viewModel.currentMinute.collectAsState()
   val taskRatingHistory by viewModel.taskRatingHistory.collectAsState()
+  val voicePresetId by viewModel.voicePresetId.collectAsState()
 
   // Modal Sheet State
   var isModalOpen by remember { mutableStateOf(false) }
@@ -372,7 +373,9 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             onResumeTask = { id, isAnchor, slot ->
               viewModel.resumeTask(id, isAnchor, slot)
             },
-            taskRatingHistory = taskRatingHistory
+            taskRatingHistory = taskRatingHistory,
+            selectedVoicePresetId = voicePresetId,
+            onSelectVoicePreset = { viewModel.updateVoicePreset(it) }
           )
         }
 
@@ -615,7 +618,8 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           },
           onDeleteTwinBoth = { twinId ->
             viewModel.deleteBothFluidTwinParts(twinId)
-          }
+          },
+          activeVoicePresetId = voicePresetId
         )
       }
 

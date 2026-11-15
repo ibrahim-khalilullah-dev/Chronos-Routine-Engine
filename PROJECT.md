@@ -68,12 +68,12 @@
 |  Screens:                                                              |
 |    ├── TimelineScreen.kt        (Stable task.id recycling, 60/120 FPS) |
 |    ├── AutomationCenterScreen.kt(Hardware telemetry & diagnostics)     |
-|    ├── SettingsScreen.kt        (24h Donut dial, 90d ratings, pause)   |
+|    ├── SettingsScreen.kt        (24h Donut dial, Voice Persona Studio, pause)|
 |    ├── ConsoleTerminalScreen.kt (540dp Obsidian Studio, 1-click Copy, metrics)|
 |    └── TrashBinScreen.kt        (Soft-delete bin & 30-day purge)       |
 |                                                                        |
 |  Sheets & Components:                                                  |
-|    ├── TaskModalBottomSheet.kt  (Header Priority/Split pills, unified voice) |
+|    ├── TaskModalBottomSheet.kt  (Unified Obsidian studio, Priority/Split, TTS)|
 |    ├── AnchorEditBottomSheet.kt (Circadian fine-tuner, voice toggle switch)  |
 |    ├── ChronosArchitectureGuideSheet.kt (In-app broadsheet doc)        |
 |    └── OneUiCards.kt            (Anchor/Dynamic/Overflow cards)        |
@@ -222,13 +222,13 @@
 #### `RoutineRepository.kt`
 - **Purpose:** Central data repository managing active routines, persistence in `SharedPreferences`, and multi-tier offline disk backups.
 - **Key Responsibilities:**
-  - Fast Memory-Mapped Storage: Stores JSON arrays for anchors (`key_anchors_json`), dynamic tasks (`key_dynamic_tasks_json`), ratings (`key_task_rating_history_json`), and preferences in private `SharedPreferences`.
+  - Fast Memory-Mapped Storage: Stores JSON arrays for anchors (`key_anchors_json`), dynamic tasks (`key_dynamic_tasks_json`), ratings (`key_task_rating_history_json`), voice persona (`key_voice_preset_id`), and preferences in private `SharedPreferences`.
   - 4-Tier Offline Vault (`chronos_vault.json`):
     1. App external files directory (`context.getExternalFilesDir(null)/ChronosBackup/`).
     2. Shared public Documents directory (`/storage/emulated/0/Documents/ChronosBackup/`).
     3. Fallback app external documents directory (`context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)/ChronosBackup/`).
     4. Private internal storage (`context.filesDir/ChronosBackup/`).
-  - Zero-Click Auto-Restore (`checkAndAutoRestoreVault()`): Automatically scans for an existing vault on app launch; if preferences are empty or missing, restores all anchors, dynamic tasks, ratings, and sleep/buffer settings without user intervention.
+  - Zero-Click Auto-Restore (`checkAndAutoRestoreVault()`): Automatically scans for an existing vault on app launch; if preferences are empty or missing, restores all anchors, dynamic tasks, ratings, `voicePresetId`, and sleep/buffer settings without user intervention.
   - Soft-Delete Management: `softDeleteTask()`, `restoreTask()`, `purgeTaskPermanently()`, `purgeAllDeletedTasks()`, and auto-purging tasks older than 30 days (`PURGE_THRESHOLD_MILLIS`).
   - Quantified Self Retention: `recordTaskRating()` and `getTaskRatingHistory()` managing 90-day rating records with rolling expiration.
 
@@ -271,14 +271,14 @@
   - `cancelDndAlarm(context, task)` / `pendingIntent.cancel()`: Cancels pending alarms and DND triggers cleanly when tasks end or are rescheduled.
   - `calculateNextOccurrenceMillis(task, activeDay)`: Calculates the exact timestamp of the upcoming task occurrence, iterating forward up to 7 days to match `task.selectedDays`.
   - `setDndMode(context, enabled, taskId)` / `releaseDndIfHeldByTask()` / `hasZeroDelayFollowUpDndTask()`: Persists the active DND owner task ID synchronously (`commit()`), releases DND only for its owner, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.
-  - `containsBengali()` / `isBengaliTtsAvailable()` / `applyTtsLanguage()` / `hasGoogleTtsEngine()`: Detects Bengali Unicode (`\u0980..\u09FF`) in announcements, dynamically switches `TextToSpeech` between `bn-BD`/`bn-IN` (with offline Bengali voice selection) and English (`en-US`), and provides Google TTS (`"com.google.android.tts"`) discovery.
+  - `VOICE_PRESETS` & 12 Bilingual Voice Personas: Defines 12 free offline bilingual BN/EN personas across Female (5: `natural_female`, `calm_female`, `sweet_melodic_female`, `executive_female`, `night_sanctuary_female`), Youth 10–15y (3: `teen_girl`, `cheerful_kid_girl`, `teen_boy`), and Male & Studio (4: `deep_male`, `crisp_male`, `mentor_male`, `neutral_studio`) via `VoicePreset` + `getVoicePreset()`, including `category`, `nativeMalePitch`, and `defaultSampleText`. `containsBengali()` / `isBengaliTtsAvailable()` / `applyTtsLanguage(tts, text, voicePresetId)` detect Bengali Unicode (`\u0980..\u09FF`), select matching `bn-BD`/`bn-IN` or `en-US` voices by preferred gender, apply smart `nativeMalePitch` compensation when native male voices are selected alongside pitch/speech-rate tuning, and provide Google TTS (`"com.google.android.tts"`) discovery.
   - `rescheduleAllAlarms(context)`: Evaluates active tasks across a 7-day horizon and registers each task's earliest upcoming non-overflow occurrence in `AlarmManager` (also purging legacy `slot_1..7` alarms).
 
 #### `RoutineAutomationService.kt`
 - **Purpose:** Foreground service with `mediaPlayback` type providing lockscreen notifications, decoupled haptic/chime/TTS alerts, and task-owned DND transitions.
 - **Key Implementations:**
   - Decoupled Alerts & Cancellable Delay: `enableHaptic`, `isSoundAlertEnabled`, and `isVoiceEnabled` execute independently with a cancellable `mainHandler` 1500ms delay between chime and TTS speech.
-  - Smart Bengali/English TTS & Google Engine Fallback: Calls `AutomationManager.applyTtsLanguage()` before every utterance and automatically falls back to `"com.google.android.tts"` if the default TTS engine lacks Bengali voice support or fails initialization.
+  - Smart Bilingual TTS & Voice Persona Playback: Reads the user's persisted `getVoicePresetId()` from `RoutineRepository`, passes it to `AutomationManager.applyTtsLanguage()` in `onInit()` and `speakMessage()`, and automatically falls back to `"com.google.android.tts"` if the default TTS engine lacks Bengali voice support or fails initialization.
   - Lockscreen Notification with Ending Times: Displays formatted completion times (`notificationDisplayBody`, e.g. `Ends at 10:45 AM`) with `VISIBILITY_PUBLIC`.
   - Audio Focus Ducking: Obtains `AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` so media volume gracefully lowers during voice briefings.
   - WakeLock Protection: Acquires a partial wake lock with a 3-minute safety limit.
@@ -306,6 +306,7 @@
 - **Key Implementations:**
   - Concurrency: Uses Kotlin `Mutex` (`scheduleMutex`) to ensure scheduling re-computations and repository mutations are strictly serialized without race conditions.
   - Midnight Rollover Monitor: Autonomous date observer in `viewModelScope` that triggers automatic day-switch to `RoutineDay.today()` at 00:00 midnight.
+  - Voice Persona State: Exposes reactive `voicePresetId: StateFlow<String>` synchronized on repository refresh and updated via `updateVoicePreset(presetId)`.
   - Fluid Twin Persistence & Absorption Engine:
     * `saveFluidTwin(...)`: Persists linked twin parts with shared hardware alerts, DND, recurrence days, flexibility, rest buffer, and independent per-session voice toggles/volumes (`part1IsVoiceEnabled`, `part2IsVoiceEnabled`, `part1VoiceVolume`, `part2VoiceVolume`).
     * `deleteBothFluidTwinParts(twinId)`: Moves both linked twin parts to the Trash Bin.
@@ -316,13 +317,13 @@
 - **Stability & Matrix Alignment:** Completely removed `Modifier.animateContentSize()` from `AnchorSlotCard`, `DynamicTaskCard`, and `OverflowTaskCard` container roots to eliminate infinite remeasure loops during fast scrolls. Displays concise flexibility (`±Xm`) and zero-floor rest buffer badges seamlessly synchronized with the task studio.
 
 #### `TaskModalBottomSheet.kt` (`ui/components/`)
-- **Purpose:** Full-featured creation and editing bottom sheet for Dynamic Tasks, Fluid Twin pairs, and Circadian Anchors.
+- **Purpose:** Full-featured creation and editing bottom sheet for Dynamic Tasks, Fluid Twin pairs, and all 7 Circadian Anchors with unified Obsidian Luxury Studio parity.
+- **Unified Obsidian Glass Architecture & Clean Anchors:** Normal Tasks, Split Twins (`DualSessionCard`), and all 7 Anchors share the same obsidian glass gradient (`#101727` → `#0A0E18`), recessed `#070B13` wells, `LuxuryTimeDurationRow`, `LuxuryBottomSummaryRow` (`ENDING TIME` / `TARGET SLEEP QUOTA`), `LuxuryVoiceStudioCard` (M3 1.4.0 custom `16.dp` glowing circular thumb & `4.dp` track), and `LuxuryHardwareGrid` (`TASK ALERTS` + `AUTO DND`). Redundant Slot 1 `"REVERSE BEDTIME CALCULATION"` and Slot 5 `"ACCORDION BUFFER GUARANTEE"` info cards are removed, header titles apply `weight(1f)` + `TextOverflow.Ellipsis`, and bottom scroll clearance is `112.dp`.
 - **Mutually Exclusive Header Pills & Edit Guard:** Houses `Priority` (`AnimatedVisibility(visible = !isFluidTwinMode)`) and `Split` (`AnimatedVisibility(visible = !isEditing && !isHighPriority)`) interactive header pills so High Priority anchor-fencing and Fluid Twin splitting remain mutually exclusive during creation, while existing single tasks keep `Priority` editable without converting into Split mode and existing Fluid Twins display a static `TWIN` badge.
-- **Anti-Clipping 2x2 Widget Hierarchy:** Standardizes Row 1 (`FLEXIBLE` & `BUFFER TIME`) and Row 2 (`TASK ALERTS` & `AUTO DND`) to uniform `heightIn(min = 124.dp)` squircle cards (`#0A0F1D`, `12.dp` padding) using a 2-row header layout (Row 1: 28dp icon + optional Switch; Row 2: full-width `11.sp` monospace title with `TextOverflow.Ellipsis`; Row 3: stepper/control). `FLEXIBLE` (0–30m in ±5m steps) and `BUFFER TIME` (0–30m precision scale: `0..5` in 1m steps, `5..30` in 5m steps) treat `0` as disabled with no redundant switches.
-- **Unified Hardware Integration & Recurrence:** `TASK ALERTS`, `AUTO DND`, and `RECURRENCE SCHEDULE` render outside the single-vs-split branch so Split (Fluid Twin) sessions share the exact same hardware alert, DND, and weekly recurrence controls as single dynamic tasks.
+- **Anti-Clipping 2x2 Widget Hierarchy:** Standardizes Row 1 (`FLEXIBLE` & `BUFFER TIME`) and Row 2 (`TASK ALERTS` & `AUTO DND`) to uniform `heightIn(min = 124.dp)` squircle cards (`#0A0F1D`/`#101727` studio framing, `36.dp` recessed `#070B13` value pills, `30.dp` `-`/`+` glass buttons). `FLEXIBLE` (0–30m in ±5m steps) and `BUFFER TIME` (0–30m precision scale: `0..5` in 1m steps, `5..30` in 5m steps) treat `0` as disabled with no redundant switches.
+- **Unified Hardware Integration & Recurrence:** `TASK ALERTS`, `AUTO DND`, and `RECURRENCE SCHEDULE` render uniformly across Single Dynamic Tasks, Split (Fluid Twin) sessions, and Circadian Anchors while preserving all existing `testTag`s.
 - **Dual-Session Voice Studio & Split Typing Safety (`DualSessionCard`):** Both Session 1 and Session 2 include independent voice ON/OFF switches (`isVoiceEnabledS1`/`S2`), collapsible custom voice message fields, interactive Play/Stop TTS preview toggles tracked per utterance ID (`"s1_tts"`, `"s2_tts"`) via `UtteranceProgressListener`, and 0%–100% volume sliders (`voiceVolumeS1`/`S2`). Changing Total Pool leaves empty Session 1/2 inputs untouched (no `pool / 2` auto-fill) and clearing a session duration does not snap back to `1` mid-typing (`triggerSave()` validates `>= 1m`).
-- **Compact 3-Box Matrix, `00` Default & Ending Time Pill:** Single dynamic tasks and Anchor Regular/Friday editors use uniform `heightIn(min = 68.dp)` cards with clean 12h `START TIME` (`"Born: <time>"` only when displaced), compact `BasicTextField` `HOURS`/`MINS` inputs (`"00"` placeholder), and an `"ENDING TIME"` row with the formatted completion time inside the right-hand glowing pill.
-- **Live Interactive `UtteranceProgressListener` TTS Briefing Player & Bengali Voice Prompt:** Tracks active speech playback (`isSpeakingVoicePreview` & `activeVoiceUtteranceId`) across Dynamic Tasks, Fluid Twins, and Circadian Anchors (including Friday Jumu'ah mode), applies smart Bengali/English `applyTtsLanguage()` routing with `"com.google.android.tts"` fallback, and renders an actionable missing-Bengali-voice warning pill (`ACTION_INSTALL_TTS_DATA`) when Bengali text is entered without an installed voice pack.
+- **Live Interactive `UtteranceProgressListener` TTS Briefing Player & Voice Persona Sync:** Accepts `activeVoicePresetId` and wires it to all 6 `AutomationManager.applyTtsLanguage()` preview sites across Dynamic Tasks, Fluid Twins, and Anchors (including Friday Jumu'ah mode), with `"com.google.android.tts"` fallback and missing-Bengali-voice install prompt (`ACTION_INSTALL_TTS_DATA`).
 
 #### `AnchorEditBottomSheet.kt` (`ui/components/`)
 - **Purpose:** Dedicated modal editor for fine-tuning circadian anchor properties and hardware automations.
@@ -339,7 +340,7 @@
 - **Features:** Cleaned Quick Action Bar highlighting the glowing cyan "Template" button, flex-safe Real-Time Syntax Validation Card (`weight(1f, fill = false)` with non-wrapping line count), and gradient action buttons.
 
 #### `SettingsScreen.kt` (`ui/screens/`)
-- **Features:** 24-Hour Circadian Donut Dial, 3-Mode Task Pause & Vacation Engine, Quantified Self 90-day history with category accordions.
+- **Features:** 24-Hour Circadian Donut Dial, collapsible **Voice Persona Studio** dropdown (`voice_dropdown_trigger`, custom BN/EN test field `voice_persona_test_input` with auto language detection, category filter chips `All (12)` / `Female (5)` / `Youth 10–15y (3)` / `Male & Studio (4)`, 12 selectable voice rows with live Play/Stop preview buttons + `"com.google.android.tts"` fallback, and `Confirm Voice Persona?` `AlertDialog`), 3-Mode Task Pause & Vacation Engine, and Quantified Self 90-day history with category accordions.
 
 #### `AutomationCenterScreen.kt` (`ui/screens/`)
 - **Features:** Hardware telemetry dashboard, DND permission status, battery optimization whitelist helper, and TTS voice preview.

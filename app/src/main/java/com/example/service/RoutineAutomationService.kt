@@ -24,6 +24,7 @@ import androidx.compose.runtime.Immutable
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.data.RoutineRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -350,7 +351,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
           return
         }
 
-        AutomationManager.applyTtsLanguage(tts, pending ?: "")
+        val presetId = RoutineRepository(applicationContext).getVoicePresetId()
+        AutomationManager.applyTtsLanguage(tts, pending ?: "", presetId)
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
           override fun onStart(utteranceId: String?) {
             _serviceState.value = _serviceState.value.copy(isSpeaking = true)
@@ -415,7 +417,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this, "com.google.android.tts")
         return
       }
-      AutomationManager.applyTtsLanguage(tts, text)
+      val presetId = RoutineRepository(applicationContext).getVoicePresetId()
+      AutomationManager.applyTtsLanguage(tts, text, presetId)
       requestTransientAudioFocus()
       val params = AutomationManager.createTtsVolumeParams(voiceVolume)
       tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "chronos_voice_${System.currentTimeMillis()}")

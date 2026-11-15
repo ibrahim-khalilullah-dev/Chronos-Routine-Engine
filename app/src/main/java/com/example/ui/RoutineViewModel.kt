@@ -64,6 +64,9 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   private val _sortMode = MutableStateFlow(repository.getSortMode())
   val sortMode: StateFlow<TimelineSortMode> = _sortMode.asStateFlow()
 
+  private val _voicePresetId = MutableStateFlow(repository.getVoicePresetId())
+  val voicePresetId: StateFlow<String> = _voicePresetId.asStateFlow()
+
   private val _sleepDurationMinutes = MutableStateFlow(repository.getSleepDurationMinutes())
   val sleepDurationMinutes: StateFlow<Int> = _sleepDurationMinutes.asStateFlow()
 
@@ -158,6 +161,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     _deletedTasks.value = repository.getDeletedTasks()
     _activeDay.value = repository.getActiveDay()
     _sortMode.value = repository.getSortMode()
+    _voicePresetId.value = repository.getVoicePresetId()
     val history = repository.getTaskRatingHistory()
     _taskRatingHistory.value = history
     for (r in history) {
@@ -334,6 +338,12 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun updateBufferMinutes(minutes: Int) {
     _bufferMinutes.value = minutes.coerceIn(0, 30)
     repository.setBufferMinutes(_bufferMinutes.value)
+  }
+
+  fun updateVoicePreset(presetId: String) {
+    val resolved = AutomationManager.getVoicePreset(presetId).id
+    _voicePresetId.value = resolved
+    repository.setVoicePresetId(resolved)
   }
 
   fun pauseTask(

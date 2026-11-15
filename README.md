@@ -91,9 +91,10 @@ Link two distinct routine sessions under a shared total duration pool (2m up to 
 
 ---
 
-### 8. Lockscreen Notifications, Security & Decoupled Alerts 🔔
+### 8. Lockscreen Notifications, Security & 12-Persona Bilingual TTS 🔔
 - **Lock-Screen Privacy & Visibility:** Lockscreen notifications (`VISIBILITY_PUBLIC`) prominently display exact task completion times (e.g., `Ends at 10:45 AM`), while opening the Chronos UI from a locked device always respects the device PIN/biometric lock.
-- **Smart Bengali & English TTS Routing:** Automatically detects Bengali Unicode (`\u0980..\u09FF`) vs. English announcements, switches TTS language/voice dynamically (`bn-BD` / `bn-IN` / `en-US`), falls back to Google TTS (`com.google.android.tts`) when the default engine lacks Bengali support, and provides a 1-tap voice-pack install prompt if offline Bengali TTS data is missing.
+- **12-Option Bilingual Dropdown Voice Persona Studio:** Choose from 12 completely free offline bilingual Bengali & English voice profiles in **Settings** via a sleek collapsible dropdown (`Female (5)`, `Youth 10–15y (3)` boy & girl voices, `Male & Studio (4)`), complete with a custom BN/EN live test input (auto-detecting language with ready-made per-persona sample phrases), instant Play/Stop previews, a confirmation dialog before applying changes, and automatic persistence across `SharedPreferences` and `chronos_vault.json`.
+- **Smart Bengali & English TTS Routing:** Automatically detects Bengali Unicode (`\u0980..\u09FF`) vs. English announcements, switches TTS language/voice dynamically (`bn-BD` / `bn-IN` / `en-US`), applies native male pitch compensation (`nativeMalePitch`), falls back to Google TTS (`com.google.android.tts`) when the default engine lacks Bengali support, and provides a 1-tap voice-pack install prompt if offline Bengali TTS data is missing.
 - **Decoupled Alert Channels:** Haptic vibration (`enableHaptic`), notification chimes (`isSoundAlertEnabled`, with in-studio Play/Stop ringtone preview), and audio-ducked `TextToSpeech` voice briefings (`isVoiceEnabled`, using a cancellable 1500ms delay when chimes are active) operate independently.
 
 ---
@@ -133,11 +134,12 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 
 ---
 
-### 13. Streamlined Task Studio & Dual-Session Voice Architecture 🎙️
+### 13. Unified Obsidian Task Studio & Dual-Session Voice Architecture 🎙️
+- **Unified Luxury Parity Across All Modes:** Normal Tasks, Fluid Twin Split sessions, and all 7 Circadian Anchors share one cohesive Samsung One UI 8.5 Obsidian Studio aesthetic (`#101727` → `#0A0E18` glass gradient cards, `#070B13` recessed time/duration wells, glowing Material 3 custom `16.dp` circular slider thumbs, `36.dp` stepper badges, and streamlined Slot 1 / Slot 5 editors free of redundant description clutter).
 - **Header Quick-Pill Ergonomics & Mutual Exclusivity:** Direct header-integrated `Priority` and `Split` interactive toggle pills use `AnimatedVisibility` mutual exclusivity during task creation—enabling `Priority` smoothly hides `Split`, and engaging `Split` cleanly hides `Priority`—while editing an existing single task hides `Split` and keeps `Priority` editable.
-- **Compact 3-Box Matrix, `00` Defaults & Ending Time Pill:** Uniform `68.dp` `START TIME`, `HOURS`, and `MINS` cards use sleek `BasicTextField` inputs (`00` placeholders), `"Born: <time>"` markers when displaced, and a dedicated `"ENDING TIME"` row with the formatted completion time inside the glowing right-hand pill.
-- **Unified Studio Controls & Ringtone Preview:** `Category` selector, `FLEXIBLE` & `BUFFER TIME` row, `TASK ALERTS` (with Play/Stop ringtone preview), `AUTO DND`, and `RECURRENCE SCHEDULE` render uniformly across both Single Dynamic Tasks and Split (Fluid Twin) sessions, using a 2-row anti-clipping widget hierarchy (`heightIn(min = 124.dp)`).
-- **Full Dual-Session Voice Studio & Split Typing Safety:** Both Session 1 and Session 2 inside Split mode feature independent voice ON/OFF switches, custom per-session Safety Floors, collapsible speech message inputs, interactive Play/Stop TTS preview toggles, and 0%–100% volume sliders, while preserving manual empty/zero editing without jarring `pool / 2` auto-fills or mid-keystroke snap-backs.
+- **Compact 3-Box Matrix, `00` Defaults & Ending Time Pill:** Uniform `68.dp` `START TIME`, `HOURS`, and `MINS` cards use sleek `BasicTextField` inputs (`00` placeholders), `"Born: <time>"` markers when displaced, and a dedicated `"ENDING TIME"` (or `"TARGET SLEEP QUOTA"` for Slot 1) row with the formatted value inside the glowing right-hand pill.
+- **Unified Hardware Grid & Ringtone Preview:** `Category` selector, `FLEXIBLE` & `BUFFER TIME` row, `TASK ALERTS` (with Play/Stop ringtone preview), `AUTO DND`, and `RECURRENCE SCHEDULE` render uniformly across Single Dynamic Tasks, Split Twins, and Anchors.
+- **Full Dual-Session Voice Studio & Split Typing Safety:** Both Session 1 and Session 2 inside Split mode feature independent voice ON/OFF switches, custom per-session Safety Floors, collapsible speech message inputs, interactive Play/Stop TTS preview toggles synced to the active Settings Voice Persona, and 0%–100% volume sliders, while preserving manual empty/zero editing without jarring `pool / 2` auto-fills or mid-keystroke snap-backs.
 - **Zero Auto-Splitting Architecture:** Tasks fit intact within available circadian gaps or cleanly route to the Overflow Pool without unexpected fragmentation.
 
 ---

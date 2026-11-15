@@ -415,6 +415,7 @@ class ExampleRobolectricTest {
       durationMinutes = 45
     )
     repo.saveDynamicTasks(listOf(testTask))
+    Thread.sleep(300)
 
     // Clear preferences to simulate fresh reinstall after uninstall
     val prefs = context.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
@@ -698,9 +699,49 @@ class ExampleRobolectricTest {
     assertFalse(AutomationManager.isBengaliTtsAvailable(null))
     assertFalse(AutomationManager.applyTtsLanguage(null, "ফজরের সময় হয়েছে।"))
     assertFalse(AutomationManager.applyTtsLanguage(null, "English Briefing"))
+    assertEquals(12, AutomationManager.VOICE_PRESETS.size)
+    AutomationManager.VOICE_PRESETS.forEach { preset ->
+      assertFalse(AutomationManager.applyTtsLanguage(null, preset.defaultSampleText, preset.id))
+      assertFalse(AutomationManager.applyTtsLanguage(null, "English Briefing", preset.id))
+    }
     // Should execute cleanly without throwing under Robolectric PackageManager
     AutomationManager.hasGoogleTtsEngine(context)
     assertTrue(true)
+  }
+
+  @Test
+  fun `repository persists voicePresetId and restores from vault on fresh install`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val prefs = context.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
+    prefs.edit().clear().commit()
+
+    val repo = RoutineRepository(context)
+    assertEquals("natural_female", repo.getVoicePresetId())
+
+    repo.setVoicePresetId("deep_male")
+    assertEquals("deep_male", repo.getVoicePresetId())
+    Thread.sleep(250)
+
+    // Simulate fresh install where SharedPreferences are empty and Tier-1 vault holds "crisp_male"
+    val tier1Dir = java.io.File(context.getExternalFilesDir(null), "ChronosBackup").apply { mkdirs() }
+    val tier1File = java.io.File(tier1Dir, "chronos_vault.json")
+    try {
+      val vaultJson = org.json.JSONObject().apply {
+        put("anchors", org.json.JSONArray())
+        put("dynamicTasks", org.json.JSONArray())
+        put("sleepDurationMinutes", 420)
+        put("bufferMinutes", 0)
+        put("voicePresetId", "crisp_male")
+      }
+      tier1File.writeText(vaultJson.toString())
+
+      prefs.edit().clear().commit()
+      val restored = repo.checkAndAutoRestoreVault()
+      assertTrue("Vault restore should succeed when prefs are cleared", restored)
+      assertEquals("crisp_male", repo.getVoicePresetId())
+    } finally {
+      tier1File.delete()
+    }
   }
 }
 

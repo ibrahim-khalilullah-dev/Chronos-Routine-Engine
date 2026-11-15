@@ -437,8 +437,8 @@ fun ChronosArchitectureGuideSheet(
             text = "Engineered specifically for complete immunity against aggressive OEM task killers (such as Samsung One UI Device Care deep sleep):\n\n" +
               "• AlarmManager.setAlarmClock: Start alarms and DND-enabled end alarms use system clock alarm architecture, scheduling the earliest upcoming non-overflow occurrence over a 7-day horizon.\n" +
               "• Task-Owned Priority DND & Overlap Guard: Tracks the active DND owner task ID synchronously, rejects delayed DND triggers for paused or deleted tasks, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.\n" +
-              "• Smart Bengali/English TTS & Audio Ducking: Sound chimes, haptic vibration, and TTS voice briefings run independently with a cancellable 1500ms delay, dynamic bn-BD/en-US language switching, Google TTS fallback, and transient audio ducking while keeping app access protected behind your device lock.\n" +
-              "• 4-Tier Offline Vault: Routines automatically persist to chronos_vault.json across external, public documents, and internal storage, enabling zero-click restoration on fresh reinstallation.",
+              "• 12-Persona Bilingual TTS & Audio Ducking: Sound chimes, haptic vibration, and TTS voice briefings run independently with a cancellable 1500ms delay, dynamic bn-BD/en-US language switching, Google TTS fallback, and transient audio ducking. Choose between 12 free offline bilingual BN/EN voice personas across Female (5), Youth 10–15y (3), and Male & Studio (4) categories in Settings via a collapsible dropdown with custom BN/EN test text and confirmation dialog, while keeping app access protected behind your device lock.\n" +
+              "• 4-Tier Offline Vault: Routines and your active Voice Persona automatically persist to chronos_vault.json across external, public documents, and internal storage, enabling zero-click restoration on fresh reinstallation.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp

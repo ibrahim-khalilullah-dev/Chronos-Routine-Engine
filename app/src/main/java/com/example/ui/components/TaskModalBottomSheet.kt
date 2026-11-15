@@ -258,7 +258,8 @@ fun TaskModalBottomSheet(
   slot2StartMinute: Int = 300,
   allDynamicTasks: List<RoutineTask> = emptyList(),
   onAbsorbTwin: ((taskToDeleteId: String, partnerTaskId: String) -> Unit)? = null,
-  onDeleteTwinBoth: ((twinId: String) -> Unit)? = null
+  onDeleteTwinBoth: ((twinId: String) -> Unit)? = null,
+  activeVoicePresetId: String = "natural_female"
 ) {
   val context = LocalContext.current
   val haptic = LocalHapticFeedback.current
@@ -571,7 +572,7 @@ fun TaskModalBottomSheet(
             createTts("com.google.android.tts")
             return@OnInitListener
           }
-          AutomationManager.applyTtsLanguage(active, "")
+          AutomationManager.applyTtsLanguage(active, "", activeVoicePresetId)
           active.setOnUtteranceProgressListener(progressListener)
           currentTts = active
           ttsInstance = active
@@ -935,7 +936,7 @@ fun TaskModalBottomSheet(
             .nestedScroll(consumeNestedScrollConnection)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 6.dp)
-            .padding(bottom = 96.dp) // Room for sticky bottom bar
+            .padding(bottom = 112.dp) // Room for sticky bottom bar
         ) {
           // Plain, static, non-draggable visual indicator pill
           Box(
@@ -954,7 +955,10 @@ fun TaskModalBottomSheet(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
             IconButton(
               onClick = handleDismissRequest,
               modifier = Modifier.size(38.dp).testTag("dismiss_modal_button")
@@ -966,7 +970,7 @@ fun TaskModalBottomSheet(
               )
             }
             Spacer(modifier = Modifier.width(6.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
               Text(
                 text = when {
                   isSlot1 -> "Slot 1: Reverse Sleep Settings"
@@ -977,7 +981,9 @@ fun TaskModalBottomSheet(
                 },
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
               )
               Text(
                 text = "GALAXY ONE UI ENGINE",
@@ -989,6 +995,8 @@ fun TaskModalBottomSheet(
               )
             }
           }
+
+          Spacer(modifier = Modifier.width(8.dp))
 
           if (isAnchor) {
             // Subtle Glowing Badge for Anchors
@@ -1142,7 +1150,7 @@ fun TaskModalBottomSheet(
                 isSpeakingVoicePreview = false
                 activeVoiceUtteranceId = null
               } else if (isTtsReady && voiceMessage.isNotBlank()) {
-                AutomationManager.applyTtsLanguage(ttsInstance, voiceMessage)
+                AutomationManager.applyTtsLanguage(ttsInstance, voiceMessage, activeVoicePresetId)
                 val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
                 ttsInstance?.speak(voiceMessage, TextToSpeech.QUEUE_FLUSH, params, "anchor_tts")
               }
@@ -1170,7 +1178,7 @@ fun TaskModalBottomSheet(
                 isSpeakingVoicePreview = false
                 activeVoiceUtteranceId = null
               } else if (isTtsReady && fridayVoiceMessage.isNotBlank()) {
-                AutomationManager.applyTtsLanguage(ttsInstance, fridayVoiceMessage)
+                AutomationManager.applyTtsLanguage(ttsInstance, fridayVoiceMessage, activeVoicePresetId)
                 val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
                 ttsInstance?.speak(fridayVoiceMessage, TextToSpeech.QUEUE_FLUSH, params, "friday_tts")
               }
@@ -1278,404 +1286,82 @@ fun TaskModalBottomSheet(
             Spacer(modifier = Modifier.height(14.dp))
 
             // 3-Box Start Time & Duration Matrix
-            val singleHoursFocusRequester = remember { FocusRequester() }
-            val singleMinsFocusRequester = remember { FocusRequester() }
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              // Start Time Box
-              Surface(
-                modifier = Modifier
-                  .weight(1.3f)
-                  .heightIn(min = 68.dp)
-                  .clip(RoundedCornerShape(14.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-                  .clickable {
-                    clockTarget = 0
-                    showAnalogClockModal = true
-                  }
-                  .testTag("open_time_picker_button"),
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 68.dp)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                  verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Text(
-                      text = "START TIME",
-                      fontSize = 9.sp,
-                      fontWeight = FontWeight.Bold,
-                      fontFamily = FontFamily.Monospace,
-                      letterSpacing = 0.5.sp,
-                      color = Color(0xFF94A3B8)
-                    )
-                    Icon(
-                      imageVector = Icons.Default.Schedule,
-                      contentDescription = null,
-                      tint = Color(0xFF06B6D4),
-                      modifier = Modifier.size(13.dp)
-                    )
-                  }
-                  Column {
-                    Text(
-                      text = RoutineTask.formatTime(startHour * 60 + startMinute),
-                      fontSize = 15.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFFF8FAFC),
-                      maxLines = 1
-                    )
-                    val displayedStartMin = startHour * 60 + startMinute
-                    if (isEditing && !isAnchor && !hasUserEditedStartTime && birthStartMinute != displayedStartMin) {
-                      Text(
-                        text = "Born: ${RoutineTask.formatTime(birthStartMinute)}",
-                        fontSize = 9.5.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF38BDF8),
-                        maxLines = 1
-                      )
-                    }
-                  }
-                }
-              }
-
-              // Duration Hours Box
-              Surface(
-                modifier = Modifier
-                  .weight(1f)
-                  .heightIn(min = 68.dp)
-                  .clip(RoundedCornerShape(14.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-                  .clickable { singleHoursFocusRequester.requestFocus() },
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 68.dp)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                  verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                  Text(
-                    text = "HOURS",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 0.5.sp,
-                    color = Color(0xFF94A3B8)
-                  )
-                  BasicTextField(
-                    value = durationHoursInput,
-                    onValueChange = { raw ->
-                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                      durationHoursInput = clean
-                      durationHours = parsed.coerceIn(0, 12)
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    textStyle = TextStyle(
-                      color = Color(0xFFF8FAFC),
-                      fontSize = 16.sp,
-                      fontWeight = FontWeight.Bold
-                    ),
-                    cursorBrush = SolidColor(Color(0xFF06B6D4)),
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .focusRequester(singleHoursFocusRequester)
-                      .testTag("duration_hours_input"),
-                    decorationBox = { innerTextField ->
-                      Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                      ) {
-                        Box(contentAlignment = Alignment.CenterStart) {
-                          if (durationHoursInput.isEmpty()) {
-                            Text(
-                              text = "00",
-                              fontSize = 16.sp,
-                              fontWeight = FontWeight.Bold,
-                              color = Color(0xFF475569)
-                            )
-                          }
-                          innerTextField()
-                        }
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                          text = "h",
-                          fontSize = 12.sp,
-                          color = Color(0xFF64748B)
-                        )
-                      }
-                    }
-                  )
-                }
-              }
-
-              // Duration Minutes Box
-              Surface(
-                modifier = Modifier
-                  .weight(1f)
-                  .heightIn(min = 68.dp)
-                  .clip(RoundedCornerShape(14.dp))
-                  .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-                  .clickable { singleMinsFocusRequester.requestFocus() },
-                color = Color(0xFF0A0F1D)
-              ) {
-                Column(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 68.dp)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                  verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                  Text(
-                    text = "MINS",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 0.5.sp,
-                    color = Color(0xFF94A3B8)
-                  )
-                  BasicTextField(
-                    value = durationMinsInput,
-                    onValueChange = { raw ->
-                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                      durationMinsInput = clean
-                      durationMins = parsed.coerceIn(0, 59)
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    textStyle = TextStyle(
-                      color = Color(0xFFF8FAFC),
-                      fontSize = 16.sp,
-                      fontWeight = FontWeight.Bold
-                    ),
-                    cursorBrush = SolidColor(Color(0xFF06B6D4)),
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .focusRequester(singleMinsFocusRequester)
-                      .testTag("duration_mins_input"),
-                    decorationBox = { innerTextField ->
-                      Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                      ) {
-                        Box(contentAlignment = Alignment.CenterStart) {
-                          if (durationMinsInput.isEmpty()) {
-                            Text(
-                              text = "00",
-                              fontSize = 16.sp,
-                              fontWeight = FontWeight.Bold,
-                              color = Color(0xFF475569)
-                            )
-                          }
-                          innerTextField()
-                        }
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                          text = "m",
-                          fontSize = 12.sp,
-                          color = Color(0xFF64748B)
-                        )
-                      }
-                    }
-                  )
-                }
-              }
-            }
+            LuxuryTimeDurationRow(
+              accentColor = Color(0xFF06B6D4),
+              hoursValue = durationHoursInput,
+              onHoursValueChange = { raw ->
+                val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                durationHoursInput = clean
+                durationHours = parsed.coerceIn(0, 12)
+              },
+              hoursTestTag = "duration_hours_input",
+              minsValue = durationMinsInput,
+              onMinsValueChange = { raw ->
+                val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                durationMinsInput = clean
+                durationMins = parsed.coerceIn(0, 59)
+              },
+              minsTestTag = "duration_mins_input",
+              showStartTime = true,
+              startLabel = "START TIME",
+              startTimeMinute = startHour * 60 + startMinute,
+              birthStartMinute = if (isEditing && !isAnchor && !hasUserEditedStartTime) birthStartMinute else null,
+              onOpenClock = {
+                clockTarget = 0
+                showAnalogClockModal = true
+              },
+              startTimeTestTag = "open_time_picker_button"
+            )
 
             Spacer(modifier = Modifier.height(10.dp))
 
             // Ending Time Preview Row
             val currentTotalMins = durationHours * 60 + durationMins
             val currentEndMinute = ((startHour * 60 + startMinute + currentTotalMins) % 1440 + 1440) % 1440
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = "ENDING TIME",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = Color(0xFF64748B)
-              )
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(8.dp))
-                  .background(Color(0xFF06B6D4).copy(alpha = 0.12f))
-                  .border(BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.3f)), RoundedCornerShape(8.dp))
-                  .padding(horizontal = 8.dp, vertical = 3.dp)
-              ) {
-                Text(
-                  text = RoutineTask.formatTime(currentEndMinute),
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  color = Color(0xFF22D3EE)
-                )
-              }
-            }
+            LuxuryBottomSummaryRow(
+              label = "ENDING TIME",
+              valueText = RoutineTask.formatTime(currentEndMinute),
+              accentColor = Color(0xFF06B6D4),
+              badgeTextColor = Color(0xFF22D3EE)
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
             // ==============================================================
             // 3. VOICE ANNOUNCEMENT STUDIO CARD
             // ==============================================================
-            Surface(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(18.dp)),
-              color = Color(0xFF0A0F1D)
-            ) {
-              Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                      modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF10B981).copy(alpha = 0.15f)),
-                      contentAlignment = Alignment.Center
-                    ) {
-                      Icon(
-                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                        contentDescription = null,
-                        tint = Color(0xFF10B981),
-                        modifier = Modifier.size(16.dp)
-                      )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                      Text(
-                        text = "Voice Announcement",
-                        color = Color(0xFFF8FAFC),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                      )
-                      Text(
-                        text = "Hardware speech synthesis at start trigger",
-                        color = Color(0xFF64748B),
-                        fontSize = 10.sp
-                      )
-                    }
+            LuxuryVoiceStudioCard(
+              title = "Voice Announcement",
+              subtitle = "Hardware speech synthesis at start trigger",
+              accentColor = Color(0xFF10B981),
+              playTint = Color(0xFF10B981),
+              isVoiceEnabled = isVoiceEnabled,
+              onIsVoiceEnabledChange = { isVoiceEnabled = it },
+              switchTestTag = null,
+              voiceMessage = voiceMessage,
+              onVoiceMessageChange = { voiceMessage = it },
+              placeholderText = "e.g. Focus sprint starting now",
+              messageTestTag = "voice_message_input",
+              onTestVoice = {
+                if (isSpeakingVoicePreview) {
+                  ttsInstance?.stop()
+                  isSpeakingVoicePreview = false
+                  activeVoiceUtteranceId = null
+                } else {
+                  val msg = voiceMessage.ifBlank { "${title.ifBlank { "Task" }} starting now" }
+                  AutomationManager.applyTtsLanguage(ttsInstance, msg, activeVoicePresetId)
+                  val params = Bundle().apply {
+                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f))
                   }
-
-                  Switch(
-                    checked = isVoiceEnabled,
-                    onCheckedChange = { isVoiceEnabled = it },
-                    colors = SwitchDefaults.colors(
-                      checkedThumbColor = Color.White,
-                      checkedTrackColor = Color(0xFF10B981),
-                      uncheckedThumbColor = Color(0xFF94A3B8),
-                      uncheckedTrackColor = Color(0xFF1E2C45)
-                    )
-                  )
+                  ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "voice_test_preview")
                 }
-
-                if (isVoiceEnabled) {
-                  Spacer(modifier = Modifier.height(12.dp))
-                  OutlinedTextField(
-                    value = voiceMessage,
-                    onValueChange = { voiceMessage = it },
-                    placeholder = { Text("e.g. Focus sprint starting now", color = Color(0xFF475569)) },
-                    trailingIcon = {
-                      IconButton(
-                        onClick = {
-                          if (isSpeakingVoicePreview) {
-                            ttsInstance?.stop()
-                            isSpeakingVoicePreview = false
-                            activeVoiceUtteranceId = null
-                          } else {
-                            val msg = voiceMessage.ifBlank { "${title.ifBlank { "Task" }} starting now" }
-                            AutomationManager.applyTtsLanguage(ttsInstance, msg)
-                            val params = Bundle().apply {
-                              putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f))
-                            }
-                            ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "voice_test_preview")
-                          }
-                        },
-                        modifier = Modifier.testTag("test_voice_button")
-                      ) {
-                        Icon(
-                          imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
-                          contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Voice",
-                          tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else Color(0xFF10B981)
-                        )
-                      }
-                    },
-                    modifier = Modifier.fillMaxWidth().testTag("voice_message_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F172A),
-                      unfocusedContainerColor = Color(0xFF0F172A),
-                      focusedBorderColor = Color(0xFF10B981),
-                      unfocusedBorderColor = Color(0xFF1E2C45),
-                      focusedTextColor = Color(0xFFF8FAFC),
-                      unfocusedTextColor = Color(0xFFF8FAFC)
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                  )
-
-                  if (isTtsReady && !isBengaliVoiceReady && AutomationManager.containsBengali(voiceMessage)) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    BengaliVoiceMissingWarningPill()
-                  }
-
-                  Spacer(modifier = Modifier.height(10.dp))
-
-                  // Volume Slider
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Icon(
-                      imageVector = Icons.AutoMirrored.Filled.VolumeMute,
-                      contentDescription = null,
-                      tint = Color(0xFF64748B),
-                      modifier = Modifier.size(16.dp)
-                    )
-                    Slider(
-                      value = voiceVolume,
-                      onValueChange = { voiceVolume = it },
-                      valueRange = 0f..1f,
-                      modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                      colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF10B981),
-                        activeTrackColor = Color(0xFF10B981),
-                        inactiveTrackColor = Color(0xFF1E2C45)
-                      )
-                    )
-                    Icon(
-                      imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                      contentDescription = null,
-                      tint = Color(0xFF10B981),
-                      modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                      text = "${(voiceVolume * 100).roundToInt()}%",
-                      color = Color(0xFF94A3B8),
-                      fontSize = 11.sp,
-                      fontFamily = FontFamily.Monospace
-                    )
-                  }
-                }
-              }
-            }
+              },
+              testButtonTestTag = "test_voice_button",
+              isSpeakingVoicePreview = isSpeakingVoicePreview,
+              isBengaliVoiceMissing = isTtsReady && !isBengaliVoiceReady,
+              voiceVolume = voiceVolume,
+              onVoiceVolumeChange = { voiceVolume = it }
+            )
 
             Spacer(modifier = Modifier.height(14.dp))
           } else {
@@ -1684,12 +1370,16 @@ fun TaskModalBottomSheet(
             // -----------------------------------------------------------
 
             // Top Controller: "TOTAL ROUTINE DURATION"
-            Surface(
+            Box(
               modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f)), RoundedCornerShape(18.dp)),
-              color = Color(0xFF121620)
+                .background(
+                  Brush.verticalGradient(
+                    listOf(Color(0xFF101727), Color(0xFF0A0E18))
+                  )
+                )
+                .border(BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f)), RoundedCornerShape(18.dp))
             ) {
               Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -1729,82 +1419,54 @@ fun TaskModalBottomSheet(
                   }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                  OutlinedTextField(
-                    value = totalPoolHoursInput,
-                    onValueChange = { raw ->
-                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                      totalPoolHoursInput = clean
-                      val newH = parsed.coerceIn(0, 12)
-                      totalPoolHours = newH
-                      splitValidationError = null
-                      val pool = newH * 60 + totalPoolMinutes
-                      val s1 = part1DurationHours * 60 + part1DurationMins
-                      val s2 = part2DurationHours * 60 + part2DurationMins
-                      if ((s1 > 0 || s2 > 0) && pool >= 2) {
-                        val newS1 = if (s1 > 0) s1.coerceIn(1, pool - 1) else (pool - s2.coerceIn(1, pool - 1)).coerceAtLeast(1)
-                        val newS2 = (pool - newS1).coerceAtLeast(1)
-                        part1DurationHours = newS1 / 60
-                        part1DurationMins = newS1 % 60
-                        part2DurationHours = newS2 / 60
-                        part2DurationMins = newS2 % 60
-                      }
-                    },
-                    label = { Text("Total Hours") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f).testTag("split_total_hours_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F141E),
-                      unfocusedContainerColor = Color(0xFF0F141E),
-                      focusedBorderColor = Color(0xFF8B5CF6),
-                      unfocusedBorderColor = Color(0xFF1F2637),
-                      focusedTextColor = Color(0xFFF8FAFC),
-                      unfocusedTextColor = Color(0xFFF8FAFC)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true
-                  )
-
-                  OutlinedTextField(
-                    value = totalPoolMinutesInput,
-                    onValueChange = { raw ->
-                      val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                      totalPoolMinutesInput = clean
-                      val newM = parsed.coerceIn(0, 59)
-                      totalPoolMinutes = newM
-                      splitValidationError = null
-                      val pool = totalPoolHours * 60 + newM
-                      val s1 = part1DurationHours * 60 + part1DurationMins
-                      val s2 = part2DurationHours * 60 + part2DurationMins
-                      if ((s1 > 0 || s2 > 0) && pool >= 2) {
-                        val newS1 = if (s1 > 0) s1.coerceIn(1, pool - 1) else (pool - s2.coerceIn(1, pool - 1)).coerceAtLeast(1)
-                        val newS2 = (pool - newS1).coerceAtLeast(1)
-                        part1DurationHours = newS1 / 60
-                        part1DurationMins = newS1 % 60
-                        part2DurationHours = newS2 / 60
-                        part2DurationMins = newS2 % 60
-                      }
-                    },
-                    label = { Text("Total Mins") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f).testTag("split_total_mins_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F141E),
-                      unfocusedContainerColor = Color(0xFF0F141E),
-                      focusedBorderColor = Color(0xFF8B5CF6),
-                      unfocusedBorderColor = Color(0xFF1F2637),
-                      focusedTextColor = Color(0xFFF8FAFC),
-                      unfocusedTextColor = Color(0xFFF8FAFC)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true
-                  )
-                }
+                LuxuryTimeDurationRow(
+                  accentColor = Color(0xFF8B5CF6),
+                  hoursLabel = "TOTAL HOURS",
+                  hoursValue = totalPoolHoursInput,
+                  onHoursValueChange = { raw ->
+                    val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                    totalPoolHoursInput = clean
+                    val newH = parsed.coerceIn(0, 12)
+                    totalPoolHours = newH
+                    splitValidationError = null
+                    val pool = newH * 60 + totalPoolMinutes
+                    val s1 = part1DurationHours * 60 + part1DurationMins
+                    val s2 = part2DurationHours * 60 + part2DurationMins
+                    if ((s1 > 0 || s2 > 0) && pool >= 2) {
+                      val newS1 = if (s1 > 0) s1.coerceIn(1, pool - 1) else (pool - s2.coerceIn(1, pool - 1)).coerceAtLeast(1)
+                      val newS2 = (pool - newS1).coerceAtLeast(1)
+                      part1DurationHours = newS1 / 60
+                      part1DurationMins = newS1 % 60
+                      part2DurationHours = newS2 / 60
+                      part2DurationMins = newS2 % 60
+                    }
+                  },
+                  hoursTestTag = "split_total_hours_input",
+                  minsLabel = "TOTAL MINS",
+                  minsValue = totalPoolMinutesInput,
+                  onMinsValueChange = { raw ->
+                    val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                    totalPoolMinutesInput = clean
+                    val newM = parsed.coerceIn(0, 59)
+                    totalPoolMinutes = newM
+                    splitValidationError = null
+                    val pool = totalPoolHours * 60 + newM
+                    val s1 = part1DurationHours * 60 + part1DurationMins
+                    val s2 = part2DurationHours * 60 + part2DurationMins
+                    if ((s1 > 0 || s2 > 0) && pool >= 2) {
+                      val newS1 = if (s1 > 0) s1.coerceIn(1, pool - 1) else (pool - s2.coerceIn(1, pool - 1)).coerceAtLeast(1)
+                      val newS2 = (pool - newS1).coerceAtLeast(1)
+                      part1DurationHours = newS1 / 60
+                      part1DurationMins = newS1 % 60
+                      part2DurationHours = newS2 / 60
+                      part2DurationMins = newS2 % 60
+                    }
+                  },
+                  minsTestTag = "split_total_mins_input",
+                  showStartTime = false
+                )
               }
             }
 
@@ -1885,7 +1547,7 @@ fun TaskModalBottomSheet(
                   activeVoiceUtteranceId = null
                 } else {
                   val msg = part1VoiceMessage.ifBlank { "${part1Title.ifBlank { "Session 1" }} starting now" }
-                  AutomationManager.applyTtsLanguage(ttsInstance, msg)
+                  AutomationManager.applyTtsLanguage(ttsInstance, msg, activeVoicePresetId)
                   val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolumeS1.coerceIn(0f, 1f)) }
                   ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s1_tts")
                 }
@@ -1951,7 +1613,7 @@ fun TaskModalBottomSheet(
                   activeVoiceUtteranceId = null
                 } else {
                   val msg = part2VoiceMessage.ifBlank { "${part2Title.ifBlank { "Session 2" }} starting now" }
-                  AutomationManager.applyTtsLanguage(ttsInstance, msg)
+                  AutomationManager.applyTtsLanguage(ttsInstance, msg, activeVoicePresetId)
                   val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolumeS2.coerceIn(0f, 1f)) }
                   ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s2_tts")
                 }
@@ -1972,18 +1634,30 @@ fun TaskModalBottomSheet(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
           ) {
             // Card 1: FLEXIBLE Card
-            Surface(
+            Box(
               modifier = Modifier
                 .weight(1f)
-                .heightIn(min = 124.dp)
+                .heightIn(min = 128.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF0A0F1D)
+                .background(
+                  Brush.verticalGradient(
+                    listOf(Color(0xFF101727), Color(0xFF0A0E18))
+                  )
+                )
+                .border(
+                  BorderStroke(
+                    1.dp,
+                    if (customFlexibilityMinutes > 0) Color(0xFF06B6D4).copy(alpha = 0.45f) else Color(0xFF1E2B42)
+                  ),
+                  RoundedCornerShape(16.dp)
+                )
             ) {
               Column(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .padding(12.dp)
+                  .heightIn(min = 128.dp)
+                  .padding(12.dp),
+                verticalArrangement = Arrangement.SpaceBetween
               ) {
                 Row(
                   modifier = Modifier.fillMaxWidth(),
@@ -2023,68 +1697,85 @@ fun TaskModalBottomSheet(
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.Center
+                  horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
                 ) {
                   Surface(
                     onClick = { decrementFlexibility() },
                     shape = CircleShape,
-                    color = Color(0xFF1E293B),
-                    border = BorderStroke(1.dp, Color(0xFF334155)),
+                    color = Color(0xFF141D2E),
+                    border = BorderStroke(1.dp, Color(0xFF283A57)),
                     modifier = Modifier
-                      .size(32.dp)
+                      .size(30.dp)
                       .testTag("decrement_flexibility_button")
                   ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                      Text("-", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
                     }
                   }
 
-                  Spacer(modifier = Modifier.width(4.dp))
-
-                  OutlinedTextField(
-                    value = customFlexInput,
-                    onValueChange = { raw ->
-                      val digits = raw.filter { it.isDigit() }.take(2)
-                      customFlexInput = digits
-                      val parsed = digits.toIntOrNull() ?: 0
-                      customFlexibilityMinutes = parsed.coerceIn(0, 30)
-                    },
-                    prefix = { Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp) },
-                    suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  Box(
                     modifier = Modifier
-                      .width(74.dp)
-                      .testTag("custom_flexibility_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F172A),
-                      unfocusedContainerColor = Color(0xFF0F172A),
-                      focusedBorderColor = Color(0xFF06B6D4),
-                      unfocusedBorderColor = Color(0xFF1E2C45),
-                      focusedTextColor = Color(0xFFF8FAFC),
-                      unfocusedTextColor = Color(0xFFF8FAFC)
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    singleLine = true,
-                    textStyle = TextStyle(
-                      fontSize = 12.sp,
-                      fontWeight = FontWeight.Bold,
-                      textAlign = TextAlign.Center
+                      .weight(1f)
+                      .height(36.dp)
+                      .clip(RoundedCornerShape(10.dp))
+                      .background(Color(0xFF070B13))
+                      .border(
+                        1.dp,
+                        if (customFlexibilityMinutes > 0) Color(0xFF06B6D4).copy(alpha = 0.45f) else Color(0xFF1E2B42),
+                        RoundedCornerShape(10.dp)
+                      )
+                      .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    BasicTextField(
+                      value = customFlexInput,
+                      onValueChange = { raw ->
+                        val digits = raw.filter { it.isDigit() }.take(2)
+                        customFlexInput = digits
+                        val parsed = digits.toIntOrNull() ?: 0
+                        customFlexibilityMinutes = parsed.coerceIn(0, 30)
+                      },
+                      singleLine = true,
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                      textStyle = TextStyle(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFF8FAFC),
+                        textAlign = TextAlign.Center
+                      ),
+                      cursorBrush = SolidColor(Color(0xFF06B6D4)),
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_flexibility_input"),
+                      decorationBox = { innerTextField ->
+                        Row(
+                          modifier = Modifier.fillMaxWidth(),
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.Center
+                        ) {
+                          Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                          Spacer(modifier = Modifier.width(2.dp))
+                          Box(contentAlignment = Alignment.Center) {
+                            innerTextField()
+                          }
+                          Spacer(modifier = Modifier.width(2.dp))
+                          Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp)
+                        }
+                      }
                     )
-                  )
-
-                  Spacer(modifier = Modifier.width(4.dp))
+                  }
 
                   Surface(
                     onClick = { incrementFlexibility() },
                     shape = CircleShape,
-                    color = Color(0xFF1E293B),
+                    color = Color(0xFF141D2E),
                     border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
                     modifier = Modifier
-                      .size(32.dp)
+                      .size(30.dp)
                       .testTag("increment_flexibility_button")
                   ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
+                      Text("+", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
                     }
                   }
                 }
@@ -2092,18 +1783,30 @@ fun TaskModalBottomSheet(
             }
 
             // Card 2: BUFFER TIME Card
-            Surface(
+            Box(
               modifier = Modifier
                 .weight(1f)
-                .heightIn(min = 124.dp)
+                .heightIn(min = 128.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF0A0F1D)
+                .background(
+                  Brush.verticalGradient(
+                    listOf(Color(0xFF101727), Color(0xFF0A0E18))
+                  )
+                )
+                .border(
+                  BorderStroke(
+                    1.dp,
+                    if (interTaskBufferMinutes > 0) Color(0xFF10B981).copy(alpha = 0.45f) else Color(0xFF1E2B42)
+                  ),
+                  RoundedCornerShape(16.dp)
+                )
             ) {
               Column(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .padding(12.dp)
+                  .heightIn(min = 128.dp)
+                  .padding(12.dp),
+                verticalArrangement = Arrangement.SpaceBetween
               ) {
                 Row(
                   modifier = Modifier.fillMaxWidth(),
@@ -2143,67 +1846,83 @@ fun TaskModalBottomSheet(
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.Center
+                  horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
                 ) {
                   Surface(
                     onClick = { decrementBuffer() },
                     shape = CircleShape,
-                    color = Color(0xFF1E293B),
-                    border = BorderStroke(1.dp, Color(0xFF334155)),
+                    color = Color(0xFF141D2E),
+                    border = BorderStroke(1.dp, Color(0xFF283A57)),
                     modifier = Modifier
-                      .size(32.dp)
+                      .size(30.dp)
                       .testTag("decrement_buffer_button")
                   ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                      Text("-", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
                     }
                   }
 
-                  Spacer(modifier = Modifier.width(4.dp))
-
-                  OutlinedTextField(
-                    value = bufferInput,
-                    onValueChange = { raw ->
-                      val digits = raw.filter { it.isDigit() }.take(2)
-                      bufferInput = digits
-                      val parsed = digits.toIntOrNull() ?: 0
-                      interTaskBufferMinutes = parsed.coerceIn(0, 30)
-                    },
-                    suffix = { Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  Box(
                     modifier = Modifier
-                      .width(74.dp)
-                      .testTag("custom_buffer_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedContainerColor = Color(0xFF0F172A),
-                      unfocusedContainerColor = Color(0xFF0F172A),
-                      focusedBorderColor = Color(0xFF10B981),
-                      unfocusedBorderColor = Color(0xFF1E2C45),
-                      focusedTextColor = Color(0xFFF8FAFC),
-                      unfocusedTextColor = Color(0xFFF8FAFC)
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    singleLine = true,
-                    textStyle = TextStyle(
-                      fontSize = 12.sp,
-                      fontWeight = FontWeight.Bold,
-                      textAlign = TextAlign.Center
+                      .weight(1f)
+                      .height(36.dp)
+                      .clip(RoundedCornerShape(10.dp))
+                      .background(Color(0xFF070B13))
+                      .border(
+                        1.dp,
+                        if (interTaskBufferMinutes > 0) Color(0xFF10B981).copy(alpha = 0.45f) else Color(0xFF1E2B42),
+                        RoundedCornerShape(10.dp)
+                      )
+                      .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    BasicTextField(
+                      value = bufferInput,
+                      onValueChange = { raw ->
+                        val digits = raw.filter { it.isDigit() }.take(2)
+                        bufferInput = digits
+                        val parsed = digits.toIntOrNull() ?: 0
+                        interTaskBufferMinutes = parsed.coerceIn(0, 30)
+                      },
+                      singleLine = true,
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                      textStyle = TextStyle(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFF8FAFC),
+                        textAlign = TextAlign.Center
+                      ),
+                      cursorBrush = SolidColor(Color(0xFF10B981)),
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_buffer_input"),
+                      decorationBox = { innerTextField ->
+                        Row(
+                          modifier = Modifier.fillMaxWidth(),
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.Center
+                        ) {
+                          Box(contentAlignment = Alignment.Center) {
+                            innerTextField()
+                          }
+                          Spacer(modifier = Modifier.width(2.dp))
+                          Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp)
+                        }
+                      }
                     )
-                  )
-
-                  Spacer(modifier = Modifier.width(4.dp))
+                  }
 
                   Surface(
                     onClick = { incrementBuffer() },
                     shape = CircleShape,
-                    color = Color(0xFF1E293B),
+                    color = Color(0xFF141D2E),
                     border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
                     modifier = Modifier
-                      .size(32.dp)
+                      .size(30.dp)
                       .testTag("increment_buffer_button")
                   ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                      Text("+", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
                     }
                   }
                 }
@@ -2217,218 +1936,31 @@ fun TaskModalBottomSheet(
           // UNIFIED HARDWARE INTEGRATION GRID [ TASK ALERTS ] & [ AUTO DND ]
           // (Rendered for BOTH Single Dynamic Tasks and Split Fluid Twins)
           // ==============================================================
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-          ) {
-            // Column 1: Task Alerts Card
-            Surface(
-              modifier = Modifier
-                .weight(1f)
-                .heightIn(min = 124.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF0A0F1D)
-            ) {
-              Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                // Row 1: Icon on Left, Switch on Right
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Box(
-                    modifier = Modifier
-                      .size(28.dp)
-                      .clip(CircleShape)
-                      .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.MusicNote,
-                      contentDescription = null,
-                      tint = Color(0xFF06B6D4),
-                      modifier = Modifier.size(16.dp)
-                    )
-                  }
-
-                  Switch(
-                    checked = isSoundAlertEnabled,
-                    onCheckedChange = { isSoundAlertEnabled = it },
-                    colors = SwitchDefaults.colors(
-                      checkedThumbColor = Color.White,
-                      checkedTrackColor = Color(0xFF06B6D4),
-                      uncheckedThumbColor = Color(0xFF94A3B8),
-                      uncheckedTrackColor = Color(0xFF1E2C45)
-                    )
-                  )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Row 2: Full-Width Title (Zero Truncation / No Collision)
-                Text(
-                  text = "TASK ALERTS",
-                  color = Color(0xFFE2E8F0),
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  fontSize = 11.sp,
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Row 3: Ringtone Selector Control + Play/Stop Preview Button
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Surface(
-                    modifier = Modifier
-                      .weight(1f)
-                      .height(36.dp)
-                      .clip(RoundedCornerShape(8.dp))
-                      .clickable {
-                        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                          putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
-                          putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Task Sound")
-                          customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
-                        }
-                        ringtonePickerLauncher.launch(intent)
-                      },
-                    color = Color(0xFF0F172A)
-                  ) {
-                    Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterStart) {
-                      Text(
-                        text = customRingtoneTitle,
-                        color = Color(0xFF06B6D4),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                      )
-                    }
-                  }
-
-                  Surface(
-                    onClick = toggleTonePreview,
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF0F172A),
-                    border = BorderStroke(
-                      1.dp,
-                      if (isPlayingTonePreview) Color(0xFFEF4444).copy(alpha = 0.6f) else Color(0xFF06B6D4).copy(alpha = 0.4f)
-                    ),
-                    modifier = Modifier
-                      .size(36.dp)
-                      .testTag("task_ringtone_preview_button")
-                  ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Icon(
-                        imageVector = if (isPlayingTonePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlayingTonePreview) "Stop Ringtone Preview" else "Play Ringtone Preview",
-                        tint = if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF06B6D4),
-                        modifier = Modifier.size(16.dp)
-                      )
-                    }
-                  }
-                }
+          LuxuryHardwareGrid(
+            isSoundAlertEnabled = isSoundAlertEnabled,
+            onIsSoundAlertEnabledChange = { isSoundAlertEnabled = it },
+            soundSwitchTestTag = null,
+            customRingtoneTitle = customRingtoneTitle,
+            onPickRingtone = {
+              val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+                putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Select Task Sound")
+                customRingtoneUri?.let { putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
               }
-            }
-
-            // Column 2: Auto DND Card
-            Surface(
-              modifier = Modifier
-                .weight(1f)
-                .heightIn(min = 124.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-              color = Color(0xFF0A0F1D)
-            ) {
-              Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                // Row 1: Icon on Left, Switch on Right
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Box(
-                    modifier = Modifier
-                      .size(28.dp)
-                      .clip(CircleShape)
-                      .background(Color(0xFFA855F7).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Icon(
-                      imageVector = Icons.Default.Bedtime,
-                      contentDescription = null,
-                      tint = Color(0xFFA855F7),
-                      modifier = Modifier.size(16.dp)
-                    )
-                  }
-
-                  Switch(
-                    checked = enableDnd,
-                    onCheckedChange = { enableDnd = it },
-                    colors = SwitchDefaults.colors(
-                      checkedThumbColor = Color.White,
-                      checkedTrackColor = Color(0xFFA855F7),
-                      uncheckedThumbColor = Color(0xFF94A3B8),
-                      uncheckedTrackColor = Color(0xFF1E2C45)
-                    )
-                  )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Row 2: Full-Width Title (Zero Truncation / No Collision)
-                Text(
-                  text = "AUTO DND",
-                  color = Color(0xFFE2E8F0),
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  fontSize = 11.sp,
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Row 3: Status Control
-                Box(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF0F172A))
-                    .padding(horizontal = 8.dp),
-                  contentAlignment = Alignment.CenterStart
-                ) {
-                  Row(
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Box(
-                      modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B))
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                      text = if (enableDnd) "Engaged" else "Disabled",
-                      color = if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B),
-                      fontSize = 10.sp,
-                      fontFamily = FontFamily.Monospace,
-                      fontWeight = FontWeight.SemiBold,
-                      maxLines = 1,
-                      overflow = TextOverflow.Ellipsis
-                    )
-                  }
-                }
-              }
-            }
-          }
+              ringtonePickerLauncher.launch(intent)
+            },
+            pickRingtoneTestTag = null,
+            isPlayingTonePreview = isPlayingTonePreview,
+            onToggleTonePreview = toggleTonePreview,
+            previewToneTestTag = "task_ringtone_preview_button",
+            enableDnd = enableDnd,
+            onEnableDndChange = { enableDnd = it },
+            dndSwitchTestTag = null,
+            isDndDelayLockedZero = false,
+            supportsDndDelay = false,
+            dndDelayMinutes = 0,
+            onDndDelayMinutesChange = {}
+          )
 
           Spacer(modifier = Modifier.height(14.dp))
 
@@ -3143,375 +2675,64 @@ private fun AnchorEditSection(
       Spacer(modifier = Modifier.height(14.dp))
 
       // Friday 3-Box Start Time & Duration Matrix
-      val friHoursFocusRequester = remember { FocusRequester() }
-      val friMinsFocusRequester = remember { FocusRequester() }
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        // Start Time Box
-        Surface(
-          modifier = Modifier
-            .weight(1.3f)
-            .heightIn(min = 68.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-            .clickable { onOpenFridayClock() }
-            .testTag("open_friday_time_picker_button"),
-          color = Color(0xFF0A0F1D)
-        ) {
-          Column(
-            modifier = Modifier
-              .fillMaxWidth()
-              .heightIn(min = 68.dp)
-              .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-          ) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = "FRIDAY START",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 0.5.sp,
-                color = Color(0xFF94A3B8)
-              )
-              Icon(
-                imageVector = Icons.Default.Schedule,
-                contentDescription = null,
-                tint = Color(0xFF10B981),
-                modifier = Modifier.size(13.dp)
-              )
-            }
-            Text(
-              text = RoutineTask.formatTime(fridayStartHour * 60 + fridayStartMinute),
-              fontSize = 15.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color(0xFFF8FAFC),
-              maxLines = 1
-            )
-          }
-        }
-
-        // Hours Box
-        Surface(
-          modifier = Modifier
-            .weight(1f)
-            .heightIn(min = 68.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-            .clickable { friHoursFocusRequester.requestFocus() },
-          color = Color(0xFF0A0F1D)
-        ) {
-          Column(
-            modifier = Modifier
-              .fillMaxWidth()
-              .heightIn(min = 68.dp)
-              .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-          ) {
-            Text(
-              text = "HOURS",
-              fontSize = 9.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace,
-              letterSpacing = 0.5.sp,
-              color = Color(0xFF94A3B8)
-            )
-            BasicTextField(
-              value = friHoursInput,
-              onValueChange = { raw ->
-                val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                friHoursInput = clean
-                onFridayDurationHoursChange(parsed.coerceIn(0, 12))
-              },
-              singleLine = true,
-              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              textStyle = TextStyle(
-                color = Color(0xFFF8FAFC),
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-              ),
-              cursorBrush = SolidColor(Color(0xFF10B981)),
-              modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(friHoursFocusRequester)
-                .testTag("friday_duration_hours_input"),
-              decorationBox = { innerTextField ->
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Box(contentAlignment = Alignment.CenterStart) {
-                    if (friHoursInput.isEmpty()) {
-                      Text(
-                        text = "00",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF475569)
-                      )
-                    }
-                    innerTextField()
-                  }
-                  Spacer(modifier = Modifier.width(3.dp))
-                  Text(
-                    text = "h",
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B)
-                  )
-                }
-              }
-            )
-          }
-        }
-
-        // Minutes Box
-        Surface(
-          modifier = Modifier
-            .weight(1f)
-            .heightIn(min = 68.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-            .clickable { friMinsFocusRequester.requestFocus() },
-          color = Color(0xFF0A0F1D)
-        ) {
-          Column(
-            modifier = Modifier
-              .fillMaxWidth()
-              .heightIn(min = 68.dp)
-              .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-          ) {
-            Text(
-              text = "MINS",
-              fontSize = 9.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace,
-              letterSpacing = 0.5.sp,
-              color = Color(0xFF94A3B8)
-            )
-            BasicTextField(
-              value = friMinsInput,
-              onValueChange = { raw ->
-                val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                friMinsInput = clean
-                onFridayDurationMinsChange(parsed.coerceIn(0, 59))
-              },
-              singleLine = true,
-              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              textStyle = TextStyle(
-                color = Color(0xFFF8FAFC),
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
-              ),
-              cursorBrush = SolidColor(Color(0xFF10B981)),
-              modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(friMinsFocusRequester)
-                .testTag("friday_duration_mins_input"),
-              decorationBox = { innerTextField ->
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Box(contentAlignment = Alignment.CenterStart) {
-                    if (friMinsInput.isEmpty()) {
-                      Text(
-                        text = "00",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF475569)
-                      )
-                    }
-                    innerTextField()
-                  }
-                  Spacer(modifier = Modifier.width(3.dp))
-                  Text(
-                    text = "m",
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B)
-                  )
-                }
-              }
-            )
-          }
-        }
-      }
+      LuxuryTimeDurationRow(
+        accentColor = Color(0xFF10B981),
+        hoursValue = friHoursInput,
+        onHoursValueChange = { raw ->
+          val (clean, parsed) = sanitizeNumberInput(raw, 2)
+          friHoursInput = clean
+          onFridayDurationHoursChange(parsed.coerceIn(0, 12))
+        },
+        hoursTestTag = "friday_duration_hours_input",
+        minsValue = friMinsInput,
+        onMinsValueChange = { raw ->
+          val (clean, parsed) = sanitizeNumberInput(raw, 2)
+          friMinsInput = clean
+          onFridayDurationMinsChange(parsed.coerceIn(0, 59))
+        },
+        minsTestTag = "friday_duration_mins_input",
+        showStartTime = true,
+        startLabel = "FRIDAY START",
+        startTimeMinute = fridayStartHour * 60 + fridayStartMinute,
+        onOpenClock = onOpenFridayClock,
+        startTimeTestTag = "open_friday_time_picker_button"
+      )
 
       Spacer(modifier = Modifier.height(10.dp))
 
       // Friday Ending Time Preview Row
       val totalFriMins = fridayDurationHours * 60 + fridayDurationMins
       val friEndMinute = ((fridayStartHour * 60 + fridayStartMinute + totalFriMins) % 1440 + 1440) % 1440
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Text(
-          text = "ENDING TIME",
-          fontSize = 10.sp,
-          fontWeight = FontWeight.Bold,
-          fontFamily = FontFamily.Monospace,
-          color = Color(0xFF64748B)
-        )
-        Box(
-          modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF10B981).copy(alpha = 0.12f))
-            .border(BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f)), RoundedCornerShape(8.dp))
-            .padding(horizontal = 8.dp, vertical = 3.dp)
-        ) {
-          Text(
-            text = RoutineTask.formatTime(friEndMinute),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            color = Color(0xFF6EE7B7)
-          )
-        }
-      }
+      LuxuryBottomSummaryRow(
+        label = "ENDING TIME",
+        valueText = RoutineTask.formatTime(friEndMinute),
+        accentColor = Color(0xFF10B981),
+        badgeTextColor = Color(0xFF6EE7B7)
+      )
 
       Spacer(modifier = Modifier.height(14.dp))
 
       // Friday Voice Announcement Card
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF0A0F1D)
-      ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Box(
-                modifier = Modifier
-                  .size(28.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFF10B981).copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                  contentDescription = null,
-                  tint = Color(0xFF10B981),
-                  modifier = Modifier.size(15.dp)
-                )
-              }
-              Spacer(modifier = Modifier.width(10.dp))
-              Text(
-                text = "FRIDAY VOICE ANNOUNCEMENT",
-                color = Color(0xFFE2E8F0),
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp
-              )
-            }
-
-            Switch(
-              checked = isVoiceEnabled,
-              onCheckedChange = onIsVoiceEnabledChange,
-              colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF10B981),
-                uncheckedThumbColor = Color(0xFF94A3B8),
-                uncheckedTrackColor = Color(0xFF1E2C45)
-              ),
-              modifier = Modifier.testTag("friday_voice_switch")
-            )
-          }
-
-          if (isVoiceEnabled) {
-            Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedTextField(
-              value = fridayVoiceMessage,
-              onValueChange = onFridayVoiceMessageChange,
-              placeholder = { Text("কাস্টম ভয়েস মেসেজ লিখুন...", color = Color(0xFF475569)) },
-              trailingIcon = {
-                IconButton(onClick = onTestFridayVoice, modifier = Modifier.testTag("test_friday_voice_button")) {
-                  Icon(
-                    imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
-                    contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Friday Voice",
-                    tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else Color(0xFF6EE7B7)
-                  )
-                }
-              },
-              modifier = Modifier.fillMaxWidth().testTag("friday_voice_message_input"),
-              colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF0F172A),
-                unfocusedContainerColor = Color(0xFF0F172A),
-                focusedBorderColor = Color(0xFF10B981),
-                unfocusedBorderColor = Color(0xFF1E2C45),
-                focusedTextColor = Color(0xFFF8FAFC),
-                unfocusedTextColor = Color(0xFFF8FAFC)
-              ),
-              shape = RoundedCornerShape(12.dp)
-            )
-
-            if (isBengaliVoiceMissing && AutomationManager.containsBengali(fridayVoiceMessage)) {
-              Spacer(modifier = Modifier.height(8.dp))
-              BengaliVoiceMissingWarningPill()
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Volume Slider
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.VolumeMute,
-                contentDescription = null,
-                tint = Color(0xFF64748B),
-                modifier = Modifier.size(16.dp)
-              )
-              Slider(
-                value = voiceVolume,
-                onValueChange = onVoiceVolumeChange,
-                valueRange = 0f..1f,
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                colors = SliderDefaults.colors(
-                  thumbColor = Color(0xFF10B981),
-                  activeTrackColor = Color(0xFF10B981),
-                  inactiveTrackColor = Color(0xFF1E2C45)
-                )
-              )
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                contentDescription = null,
-                tint = Color(0xFF10B981),
-                modifier = Modifier.size(16.dp)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "${(voiceVolume * 100).roundToInt()}%",
-                color = Color(0xFF94A3B8),
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
-              )
-            }
-          } else {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-              text = "Spoken reminders disabled for this anchor",
-              fontSize = 10.sp,
-              fontFamily = FontFamily.Monospace,
-              color = Color(0xFF64748B)
-            )
-          }
-        }
-      }
+      LuxuryVoiceStudioCard(
+        title = "Friday Voice Announcement",
+        subtitle = "Hardware speech synthesis at start trigger",
+        accentColor = Color(0xFF10B981),
+        playTint = Color(0xFF6EE7B7),
+        isVoiceEnabled = isVoiceEnabled,
+        onIsVoiceEnabledChange = onIsVoiceEnabledChange,
+        switchTestTag = "friday_voice_switch",
+        voiceMessage = fridayVoiceMessage,
+        onVoiceMessageChange = onFridayVoiceMessageChange,
+        placeholderText = "কাস্টম ভয়েস মেসেজ লিখুন...",
+        messageTestTag = "friday_voice_message_input",
+        onTestVoice = onTestFridayVoice,
+        testButtonTestTag = "test_friday_voice_button",
+        isSpeakingVoicePreview = isSpeakingVoicePreview,
+        isBengaliVoiceMissing = isBengaliVoiceMissing,
+        voiceVolume = voiceVolume,
+        onVoiceVolumeChange = onVoiceVolumeChange,
+        disabledHint = "Spoken reminders disabled for this anchor"
+      )
     } else {
       // -----------------------------------------------------------
       // REGULAR DAYS / STANDARD ANCHOR FORM
@@ -3570,835 +2791,125 @@ private fun AnchorEditSection(
         Spacer(modifier = Modifier.height(14.dp))
 
         // Standard 3-Box Start Time & Duration Matrix
-        val anchorHoursFocusRequester = remember { FocusRequester() }
-        val anchorMinsFocusRequester = remember { FocusRequester() }
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          // Start Time Box
-          Surface(
-            modifier = Modifier
-              .weight(1.3f)
-              .heightIn(min = 68.dp)
-              .clip(RoundedCornerShape(14.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-              .clickable { onOpenClock() }
-              .testTag("open_time_picker_button"),
-            color = Color(0xFF0A0F1D)
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 68.dp)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-              verticalArrangement = Arrangement.SpaceBetween
-            ) {
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Text(
-                  text = "START TIME",
-                  fontSize = 9.sp,
-                  fontWeight = FontWeight.Bold,
-                  fontFamily = FontFamily.Monospace,
-                  letterSpacing = 0.5.sp,
-                  color = Color(0xFF94A3B8)
-                )
-                Icon(
-                  imageVector = Icons.Default.Schedule,
-                  contentDescription = null,
-                  tint = accentColor,
-                  modifier = Modifier.size(13.dp)
-                )
-              }
-              Text(
-                text = RoutineTask.formatTime(startHour * 60 + startMinute),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFFF8FAFC),
-                maxLines = 1
-              )
-            }
-          }
-
-          // Duration Hours Box
-          Surface(
-            modifier = Modifier
-              .weight(1f)
-              .heightIn(min = 68.dp)
-              .clip(RoundedCornerShape(14.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-              .clickable { anchorHoursFocusRequester.requestFocus() },
-            color = Color(0xFF0A0F1D)
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 68.dp)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-              verticalArrangement = Arrangement.SpaceBetween
-            ) {
-              Text(
-                text = "HOURS",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 0.5.sp,
-                color = Color(0xFF94A3B8)
-              )
-              BasicTextField(
-                value = hoursInput,
-                onValueChange = { raw ->
-                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                  hoursInput = clean
-                  onDurationHoursChange(parsed.coerceIn(0, 12))
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = TextStyle(
-                  color = Color(0xFFF8FAFC),
-                  fontSize = 16.sp,
-                  fontWeight = FontWeight.Bold
-                ),
-                cursorBrush = SolidColor(accentColor),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .focusRequester(anchorHoursFocusRequester)
-                  .testTag("duration_hours_input"),
-                decorationBox = { innerTextField ->
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Box(contentAlignment = Alignment.CenterStart) {
-                      if (hoursInput.isEmpty()) {
-                        Text(
-                          text = "00",
-                          fontSize = 16.sp,
-                          fontWeight = FontWeight.Bold,
-                          color = Color(0xFF475569)
-                        )
-                      }
-                      innerTextField()
-                    }
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                      text = "h",
-                      fontSize = 12.sp,
-                      color = Color(0xFF64748B)
-                    )
-                  }
-                }
-              )
-            }
-          }
-
-          // Duration Minutes Box
-          Surface(
-            modifier = Modifier
-              .weight(1f)
-              .heightIn(min = 68.dp)
-              .clip(RoundedCornerShape(14.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp))
-              .clickable { anchorMinsFocusRequester.requestFocus() },
-            color = Color(0xFF0A0F1D)
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 68.dp)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-              verticalArrangement = Arrangement.SpaceBetween
-            ) {
-              Text(
-                text = "MINS",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 0.5.sp,
-                color = Color(0xFF94A3B8)
-              )
-              BasicTextField(
-                value = minsInput,
-                onValueChange = { raw ->
-                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                  minsInput = clean
-                  onDurationMinsChange(parsed.coerceIn(0, 59))
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = TextStyle(
-                  color = Color(0xFFF8FAFC),
-                  fontSize = 16.sp,
-                  fontWeight = FontWeight.Bold
-                ),
-                cursorBrush = SolidColor(accentColor),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .focusRequester(anchorMinsFocusRequester)
-                  .testTag("duration_mins_input"),
-                decorationBox = { innerTextField ->
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Box(contentAlignment = Alignment.CenterStart) {
-                      if (minsInput.isEmpty()) {
-                        Text(
-                          text = "00",
-                          fontSize = 16.sp,
-                          fontWeight = FontWeight.Bold,
-                          color = Color(0xFF475569)
-                        )
-                      }
-                      innerTextField()
-                    }
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                      text = "m",
-                      fontSize = 12.sp,
-                      color = Color(0xFF64748B)
-                    )
-                  }
-                }
-              )
-            }
-          }
-        }
+        LuxuryTimeDurationRow(
+          accentColor = accentColor,
+          hoursValue = hoursInput,
+          onHoursValueChange = { raw ->
+            val (clean, parsed) = sanitizeNumberInput(raw, 2)
+            hoursInput = clean
+            onDurationHoursChange(parsed.coerceIn(0, 12))
+          },
+          hoursTestTag = "duration_hours_input",
+          minsValue = minsInput,
+          onMinsValueChange = { raw ->
+            val (clean, parsed) = sanitizeNumberInput(raw, 2)
+            minsInput = clean
+            onDurationMinsChange(parsed.coerceIn(0, 59))
+          },
+          minsTestTag = "duration_mins_input",
+          showStartTime = true,
+          startLabel = "START TIME",
+          startTimeMinute = startHour * 60 + startMinute,
+          onOpenClock = onOpenClock,
+          startTimeTestTag = "open_time_picker_button"
+        )
 
         Spacer(modifier = Modifier.height(10.dp))
 
         // Ending Time Preview Row
         val currentTotalMins = durationHours * 60 + durationMins
         val regEndMinute = ((startHour * 60 + startMinute + currentTotalMins) % 1440 + 1440) % 1440
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Text(
-            text = "ENDING TIME",
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            color = Color(0xFF64748B)
-          )
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(8.dp))
-              .background(accentColor.copy(alpha = 0.12f))
-              .border(BorderStroke(1.dp, accentColor.copy(alpha = 0.3f)), RoundedCornerShape(8.dp))
-              .padding(horizontal = 8.dp, vertical = 3.dp)
-          ) {
-            Text(
-              text = RoutineTask.formatTime(regEndMinute),
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace,
-              color = accentLight
-            )
-          }
-        }
+        LuxuryBottomSummaryRow(
+          label = "ENDING TIME",
+          valueText = RoutineTask.formatTime(regEndMinute),
+          accentColor = accentColor,
+          badgeTextColor = accentLight
+        )
       }
 
-      // Slot 1 Informational Note Regarding Bedtime Calculation & Sleep Duration Numeric Box
+      // Slot 1 Sleep Duration Numeric Box & Target Sleep Quota (without REVERSE BEDTIME CALCULATION box)
       if (isSlot1) {
         Spacer(modifier = Modifier.height(14.dp))
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF0A0F1D))
-            .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.35f)), RoundedCornerShape(16.dp)),
-          color = Color.Transparent
-        ) {
-          Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(
-              modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF6366F1).copy(alpha = 0.15f)),
-              contentAlignment = Alignment.Center
-            ) {
-              Icon(
-                imageVector = Icons.Default.Bedtime,
-                contentDescription = null,
-                tint = Color(0xFFA5B4FC),
-                modifier = Modifier.size(20.dp)
-              )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-              Text(
-                text = "REVERSE BEDTIME CALCULATION",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = Color(0xFFA5B4FC)
-              )
-              Spacer(modifier = Modifier.height(2.dp))
-              Text(
-                text = "Bedtime is mathematically computed backwards from Slot 2 wake time minus your Sleep Duration.",
-                fontSize = 11.sp,
-                color = Color(0xFFE0E7FF),
-                lineHeight = 16.sp
-              )
-            }
-          }
-        }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Side-by-Side Numeric Inputs for Sleep Duration
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          Surface(
-            modifier = Modifier
-              .weight(1f)
-              .clip(RoundedCornerShape(14.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
-            color = Color(0xFF0A0F1D)
-          ) {
-            Column(modifier = Modifier.padding(10.dp)) {
-              Text(
-                text = "SLEEP HOURS",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 0.5.sp,
-                color = Color(0xFF94A3B8)
-              )
-              Spacer(modifier = Modifier.height(4.dp))
-              OutlinedTextField(
-                value = hoursInput,
-                onValueChange = { raw ->
-                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                  hoursInput = clean
-                  onDurationHoursChange(parsed.coerceIn(0, 12))
-                },
-                suffix = { Text("h", color = Color(0xFF64748B), fontSize = 11.sp) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth().testTag("duration_hours_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                  focusedContainerColor = Color.Transparent,
-                  unfocusedContainerColor = Color.Transparent,
-                  focusedBorderColor = Color(0xFF6366F1),
-                  unfocusedBorderColor = Color.Transparent,
-                  focusedTextColor = Color(0xFFF8FAFC),
-                  unfocusedTextColor = Color(0xFFF8FAFC)
-                ),
-                shape = RoundedCornerShape(8.dp),
-                singleLine = true
-              )
-            }
-          }
-
-          Surface(
-            modifier = Modifier
-              .weight(1f)
-              .clip(RoundedCornerShape(14.dp))
-              .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
-            color = Color(0xFF0A0F1D)
-          ) {
-            Column(modifier = Modifier.padding(10.dp)) {
-              Text(
-                text = "SLEEP MINS",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 0.5.sp,
-                color = Color(0xFF94A3B8)
-              )
-              Spacer(modifier = Modifier.height(4.dp))
-              OutlinedTextField(
-                value = minsInput,
-                onValueChange = { raw ->
-                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                  minsInput = clean
-                  onDurationMinsChange(parsed.coerceIn(0, 59))
-                },
-                suffix = { Text("m", color = Color(0xFF64748B), fontSize = 11.sp) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth().testTag("duration_mins_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                  focusedContainerColor = Color.Transparent,
-                  unfocusedContainerColor = Color.Transparent,
-                  focusedBorderColor = Color(0xFF6366F1),
-                  unfocusedBorderColor = Color.Transparent,
-                  focusedTextColor = Color(0xFFF8FAFC),
-                  unfocusedTextColor = Color(0xFFF8FAFC)
-                ),
-                shape = RoundedCornerShape(8.dp),
-                singleLine = true
-              )
-            }
-          }
-        }
+        LuxuryTimeDurationRow(
+          accentColor = Color(0xFF6366F1),
+          hoursLabel = "SLEEP HOURS",
+          hoursValue = hoursInput,
+          onHoursValueChange = { raw ->
+            val (clean, parsed) = sanitizeNumberInput(raw, 2)
+            hoursInput = clean
+            onDurationHoursChange(parsed.coerceIn(0, 12))
+          },
+          hoursTestTag = "duration_hours_input",
+          minsLabel = "SLEEP MINS",
+          minsValue = minsInput,
+          onMinsValueChange = { raw ->
+            val (clean, parsed) = sanitizeNumberInput(raw, 2)
+            minsInput = clean
+            onDurationMinsChange(parsed.coerceIn(0, 59))
+          },
+          minsTestTag = "duration_mins_input",
+          showStartTime = false
+        )
 
         Spacer(modifier = Modifier.height(10.dp))
 
         val totalSleepMins = durationHours * 60 + durationMins
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Text(
-            text = "TARGET SLEEP QUOTA",
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            color = Color(0xFF64748B)
-          )
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(8.dp))
-              .background(Color(0xFF6366F1).copy(alpha = 0.15f))
-              .border(BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.35f)), RoundedCornerShape(8.dp))
-              .padding(horizontal = 8.dp, vertical = 3.dp)
-          ) {
-            Text(
-              text = "${durationHours}h ${durationMins}m ($totalSleepMins mins)",
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace,
-              color = Color(0xFFA5B4FC)
-            )
-          }
-        }
-      }
-
-      // Slot 5 Informational Note Regarding 100% Elastic Spanning
-      if (isSlot5) {
-        Spacer(modifier = Modifier.height(14.dp))
-        Surface(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF0A0F1D))
-            .border(BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.35f)), RoundedCornerShape(16.dp)),
-          color = Color.Transparent
-        ) {
-          Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(
-              modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
-              contentAlignment = Alignment.Center
-            ) {
-              Icon(
-                imageVector = Icons.Default.Shield,
-                contentDescription = null,
-                tint = Color(0xFFF59E0B),
-                modifier = Modifier.size(20.dp)
-              )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-              Text(
-                text = "ACCORDION BUFFER GUARANTEE",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = Color(0xFFF59E0B)
-              )
-              Spacer(modifier = Modifier.height(2.dp))
-              Text(
-                text = "Slot 5 Start Time and Duration are locked. The engine automatically spans 100% of the duration between Slot 4 completion and Slot 6 commencement on active days.",
-                fontSize = 11.sp,
-                color = Color(0xFFFEF3C7),
-                lineHeight = 16.sp
-              )
-            }
-          }
-        }
+        LuxuryBottomSummaryRow(
+          label = "TARGET SLEEP QUOTA",
+          valueText = "${durationHours}h ${durationMins}m ($totalSleepMins mins)",
+          accentColor = Color(0xFF6366F1),
+          badgeTextColor = Color(0xFFA5B4FC)
+        )
       }
 
       Spacer(modifier = Modifier.height(14.dp))
 
       // Voice Message Announcement Card with inline TTS preview
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF0A0F1D)
-      ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Box(
-                modifier = Modifier
-                  .size(28.dp)
-                  .clip(CircleShape)
-                  .background(accentColor.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                  contentDescription = null,
-                  tint = accentColor,
-                  modifier = Modifier.size(15.dp)
-                )
-              }
-              Spacer(modifier = Modifier.width(10.dp))
-              Text(
-                text = "VOICE ANNOUNCEMENT",
-                color = Color(0xFFE2E8F0),
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp
-              )
-            }
-
-            Switch(
-              checked = isVoiceEnabled,
-              onCheckedChange = onIsVoiceEnabledChange,
-              colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = accentColor,
-                uncheckedThumbColor = Color(0xFF94A3B8),
-                uncheckedTrackColor = Color(0xFF1E2C45)
-              ),
-              modifier = Modifier.testTag("anchor_voice_switch")
-            )
-          }
-
-          if (isVoiceEnabled) {
-            Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedTextField(
-              value = voiceMessage,
-              onValueChange = onVoiceMessageChange,
-              placeholder = { Text("কাস্টম ভয়েস মেসেজ লিখুন...", color = Color(0xFF475569)) },
-              trailingIcon = {
-                IconButton(onClick = onTestVoice, modifier = Modifier.testTag("test_voice_button")) {
-                  Icon(
-                    imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
-                    contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Voice",
-                    tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else accentLight
-                  )
-                }
-              },
-              modifier = Modifier.fillMaxWidth().testTag("voice_message_input"),
-              colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF0F172A),
-                unfocusedContainerColor = Color(0xFF0F172A),
-                focusedBorderColor = accentColor,
-                unfocusedBorderColor = Color(0xFF1E2C45),
-                focusedTextColor = Color(0xFFF8FAFC),
-                unfocusedTextColor = Color(0xFFF8FAFC)
-              ),
-              shape = RoundedCornerShape(12.dp)
-            )
-
-            if (isBengaliVoiceMissing && AutomationManager.containsBengali(voiceMessage)) {
-              Spacer(modifier = Modifier.height(8.dp))
-              BengaliVoiceMissingWarningPill()
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Volume Slider
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.VolumeMute,
-                contentDescription = null,
-                tint = Color(0xFF64748B),
-                modifier = Modifier.size(16.dp)
-              )
-              Slider(
-                value = voiceVolume,
-                onValueChange = onVoiceVolumeChange,
-                valueRange = 0f..1f,
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                colors = SliderDefaults.colors(
-                  thumbColor = accentColor,
-                  activeTrackColor = accentColor,
-                  inactiveTrackColor = Color(0xFF1E2C45)
-                )
-              )
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                contentDescription = null,
-                tint = accentColor,
-                modifier = Modifier.size(16.dp)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "${(voiceVolume * 100).roundToInt()}%",
-                color = Color(0xFF94A3B8),
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
-              )
-            }
-          } else {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-              text = "Spoken reminders disabled for this anchor",
-              fontSize = 10.sp,
-              fontFamily = FontFamily.Monospace,
-              color = Color(0xFF64748B)
-            )
-          }
-        }
-      }
+      LuxuryVoiceStudioCard(
+        title = "Voice Announcement",
+        subtitle = "Hardware speech synthesis at start trigger",
+        accentColor = accentColor,
+        playTint = accentLight,
+        isVoiceEnabled = isVoiceEnabled,
+        onIsVoiceEnabledChange = onIsVoiceEnabledChange,
+        switchTestTag = "anchor_voice_switch",
+        voiceMessage = voiceMessage,
+        onVoiceMessageChange = onVoiceMessageChange,
+        placeholderText = "কাস্টম ভয়েস মেসেজ লিখুন...",
+        messageTestTag = "voice_message_input",
+        onTestVoice = onTestVoice,
+        testButtonTestTag = "test_voice_button",
+        isSpeakingVoicePreview = isSpeakingVoicePreview,
+        isBengaliVoiceMissing = isBengaliVoiceMissing,
+        voiceVolume = voiceVolume,
+        onVoiceVolumeChange = onVoiceVolumeChange,
+        disabledHint = "Spoken reminders disabled for this anchor"
+      )
     }
 
     // ==============================================================
     // 2. 2-COLUMN HARDWARE QUICK ACTION GRID (ALL ANCHORS)
     // ==============================================================
     Spacer(modifier = Modifier.height(14.dp))
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-      // Column 1: Task Alerts Card
-      Surface(
-        modifier = Modifier
-          .weight(1f)
-          .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF0A0F1D)
-      ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(
-              modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
-              contentAlignment = Alignment.Center
-            ) {
-              Icon(
-                imageVector = Icons.Default.MusicNote,
-                contentDescription = null,
-                tint = Color(0xFF06B6D4),
-                modifier = Modifier.size(16.dp)
-              )
-            }
-            Switch(
-              checked = isSoundAlertEnabled,
-              onCheckedChange = onIsSoundAlertEnabledChange,
-              colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF06B6D4),
-                uncheckedThumbColor = Color(0xFF94A3B8),
-                uncheckedTrackColor = Color(0xFF1E2C45)
-              ),
-              modifier = Modifier.testTag("anchor_sound_switch")
-            )
-          }
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          Text(
-            text = "TASK ALERTS",
-            color = Color(0xFFE2E8F0),
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp
-          )
-
-          Spacer(modifier = Modifier.height(6.dp))
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Surface(
-              modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(8.dp))
-                .clickable { onPickRingtone() }
-                .testTag("anchor_pick_ringtone_button"),
-              color = Color(0xFF0F172A)
-            ) {
-              Text(
-                text = customRingtoneTitle.take(16),
-                color = Color(0xFF06B6D4),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-              )
-            }
-
-            Spacer(modifier = Modifier.width(6.dp))
-
-            IconButton(
-              onClick = onToggleTonePreview,
-              modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(
-                  if (isPlayingTonePreview) Color(0xFFEF4444).copy(alpha = 0.2f)
-                  else Color(0xFF06B6D4).copy(alpha = 0.15f)
-                )
-                .border(
-                  BorderStroke(
-                    1.dp,
-                    if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF06B6D4)
-                  ),
-                  RoundedCornerShape(8.dp)
-                )
-                .testTag("anchor_preview_tone_button")
-            ) {
-              Icon(
-                imageVector = if (isPlayingTonePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
-                contentDescription = if (isPlayingTonePreview) "Stop Preview" else "Play Preview",
-                tint = if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF06B6D4),
-                modifier = Modifier.size(16.dp)
-              )
-            }
-          }
-        }
-      }
-
-      // Column 2: Auto DND Card
-      Surface(
-        modifier = Modifier
-          .weight(1f)
-          .clip(RoundedCornerShape(16.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(16.dp)),
-        color = Color(0xFF0A0F1D)
-      ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Box(
-              modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF8B5CF6).copy(alpha = 0.15f)),
-              contentAlignment = Alignment.Center
-            ) {
-              Icon(
-                imageVector = Icons.Default.DoNotDisturbOn,
-                contentDescription = null,
-                tint = Color(0xFF8B5CF6),
-                modifier = Modifier.size(16.dp)
-              )
-            }
-            Switch(
-              checked = enableDnd,
-              onCheckedChange = onEnableDndChange,
-              colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF8B5CF6),
-                uncheckedThumbColor = Color(0xFF94A3B8),
-                uncheckedTrackColor = Color(0xFF1E2C45)
-              ),
-              modifier = Modifier.testTag("anchor_dnd_switch")
-            )
-          }
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          Text(
-            text = "AUTO DND",
-            color = Color(0xFFE2E8F0),
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp
-          )
-
-          Spacer(modifier = Modifier.height(4.dp))
-
-          if (isSlot1 || isSlot5) {
-            Text(
-              text = "Locked: 0m (Immediate)",
-              fontSize = 10.sp,
-              fontFamily = FontFamily.Monospace,
-              color = Color(0xFF94A3B8)
-            )
-          } else if (enableDnd) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-              Text(
-                text = "DELAY",
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = Color(0xFFC4B5FD)
-              )
-
-              var delayInputText by remember(dndDelayMinutes) { mutableStateOf(dndDelayMinutes.toString()) }
-              OutlinedTextField(
-                value = delayInputText,
-                onValueChange = { raw ->
-                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                  delayInputText = clean
-                  onDndDelayMinutesChange(parsed.coerceIn(0, 25))
-                },
-                modifier = Modifier
-                  .width(68.dp)
-                  .testTag("anchor_dnd_delay_input"),
-                suffix = {
-                  Text(
-                    text = "m",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF8B5CF6)
-                  )
-                },
-                singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = Color(0xFFF8FAFC),
-                  textAlign = TextAlign.Center
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                  focusedContainerColor = Color(0xFF0F172A),
-                  unfocusedContainerColor = Color(0xFF0F172A),
-                  focusedBorderColor = Color(0xFF8B5CF6),
-                  unfocusedBorderColor = Color(0xFF1E2C45),
-                  focusedTextColor = Color(0xFFF8FAFC),
-                  unfocusedTextColor = Color(0xFFF8FAFC)
-                ),
-                shape = RoundedCornerShape(8.dp)
-              )
-            }
-          } else {
-            Text(
-              text = "Alerts allowed",
-              fontSize = 10.sp,
-              color = Color(0xFF64748B)
-            )
-          }
-        }
-      }
-    }
+    LuxuryHardwareGrid(
+      isSoundAlertEnabled = isSoundAlertEnabled,
+      onIsSoundAlertEnabledChange = onIsSoundAlertEnabledChange,
+      soundSwitchTestTag = "anchor_sound_switch",
+      customRingtoneTitle = customRingtoneTitle,
+      onPickRingtone = onPickRingtone,
+      pickRingtoneTestTag = "anchor_pick_ringtone_button",
+      isPlayingTonePreview = isPlayingTonePreview,
+      onToggleTonePreview = onToggleTonePreview,
+      previewToneTestTag = "anchor_preview_tone_button",
+      enableDnd = enableDnd,
+      onEnableDndChange = onEnableDndChange,
+      dndSwitchTestTag = "anchor_dnd_switch",
+      isDndDelayLockedZero = isSlot1 || isSlot5,
+      supportsDndDelay = !isSlot1 && !isSlot5,
+      dndDelayMinutes = dndDelayMinutes,
+      onDndDelayMinutesChange = onDndDelayMinutesChange
+    )
 
     // ==============================================================
     // 3. SLOT 5 (ELASTIC BUFFER) WEEKLY RECURRENCE SELECTOR
@@ -4525,9 +3036,1028 @@ private fun AnchorEditSection(
   }
 }
 
-/**
- * Dual Session Card for Fluid Twin Sessions.
- */
+@Composable
+private fun LuxuryTimeDurationRow(
+  accentColor: Color,
+  hoursValue: String,
+  onHoursValueChange: (String) -> Unit,
+  hoursTestTag: String,
+  minsValue: String,
+  onMinsValueChange: (String) -> Unit,
+  minsTestTag: String,
+  hoursLabel: String = "HOURS",
+  minsLabel: String = "MINS",
+  showStartTime: Boolean = true,
+  startLabel: String = "START TIME",
+  startTimeMinute: Int = 0,
+  birthStartMinute: Int? = null,
+  onOpenClock: () -> Unit = {},
+  startTimeTestTag: String = "open_time_picker_button",
+  safetyFloorValue: String? = null,
+  onSafetyFloorValueChange: ((String) -> Unit)? = null,
+  safetyFloorError: Boolean = false,
+  safetyFloorTestTag: String? = null
+) {
+  val hoursFocusRequester = remember { FocusRequester() }
+  val minsFocusRequester = remember { FocusRequester() }
+  val safetyFocusRequester = remember { FocusRequester() }
+
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp)
+  ) {
+    if (showStartTime) {
+      Box(
+        modifier = Modifier
+          .weight(1.3f)
+          .heightIn(min = 72.dp)
+          .clip(RoundedCornerShape(16.dp))
+          .background(
+            Brush.verticalGradient(
+              listOf(Color(0xFF101727), Color(0xFF0A0E18))
+            )
+          )
+          .border(BorderStroke(1.dp, Color(0xFF1E2B42)), RoundedCornerShape(16.dp))
+          .clickable { onOpenClock() }
+          .testTag(startTimeTestTag)
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+          verticalArrangement = Arrangement.SpaceBetween
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = startLabel,
+              fontSize = 9.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace,
+              letterSpacing = 0.5.sp,
+              color = Color(0xFF94A3B8)
+            )
+            Icon(
+              imageVector = Icons.Default.Schedule,
+              contentDescription = null,
+              tint = accentColor,
+              modifier = Modifier.size(13.dp)
+            )
+          }
+          Column {
+            Text(
+              text = RoutineTask.formatTime(startTimeMinute),
+              fontSize = 17.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFFF8FAFC),
+              maxLines = 1
+            )
+            if (birthStartMinute != null && birthStartMinute != startTimeMinute) {
+              Text(
+                text = "Born: ${RoutineTask.formatTime(birthStartMinute)}",
+                fontSize = 9.5.sp,
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFF38BDF8),
+                maxLines = 1
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // Hours Well
+    Box(
+      modifier = Modifier
+        .weight(1f)
+        .heightIn(min = 72.dp)
+        .clip(RoundedCornerShape(16.dp))
+        .background(
+          Brush.verticalGradient(
+            listOf(Color(0xFF101727), Color(0xFF0A0E18))
+          )
+        )
+        .border(BorderStroke(1.dp, Color(0xFF1E2B42)), RoundedCornerShape(16.dp))
+        .clickable { hoursFocusRequester.requestFocus() }
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(min = 72.dp)
+          .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+      ) {
+        Text(
+          text = hoursLabel,
+          fontSize = 9.sp,
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          letterSpacing = 0.5.sp,
+          color = Color(0xFF94A3B8),
+          maxLines = 1
+        )
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF070B13))
+            .border(1.dp, Color(0xFF1A2538), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+          BasicTextField(
+            value = hoursValue,
+            onValueChange = onHoursValueChange,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            textStyle = TextStyle(
+              color = Color(0xFFF8FAFC),
+              fontSize = 17.sp,
+              fontWeight = FontWeight.Bold
+            ),
+            cursorBrush = SolidColor(accentColor),
+            modifier = Modifier
+              .fillMaxWidth()
+              .focusRequester(hoursFocusRequester)
+              .testTag(hoursTestTag),
+            decorationBox = { innerTextField ->
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Box(contentAlignment = Alignment.CenterStart) {
+                  if (hoursValue.isEmpty()) {
+                    Text(
+                      text = "00",
+                      fontSize = 17.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF475569)
+                    )
+                  }
+                  innerTextField()
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                  text = "h",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color(0xFF64748B)
+                )
+              }
+            }
+          )
+        }
+      }
+    }
+
+    // Minutes Well
+    Box(
+      modifier = Modifier
+        .weight(1f)
+        .heightIn(min = 72.dp)
+        .clip(RoundedCornerShape(16.dp))
+        .background(
+          Brush.verticalGradient(
+            listOf(Color(0xFF101727), Color(0xFF0A0E18))
+          )
+        )
+        .border(BorderStroke(1.dp, Color(0xFF1E2B42)), RoundedCornerShape(16.dp))
+        .clickable { minsFocusRequester.requestFocus() }
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(min = 72.dp)
+          .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+      ) {
+        Text(
+          text = minsLabel,
+          fontSize = 9.sp,
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          letterSpacing = 0.5.sp,
+          color = Color(0xFF94A3B8),
+          maxLines = 1
+        )
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF070B13))
+            .border(1.dp, Color(0xFF1A2538), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+          BasicTextField(
+            value = minsValue,
+            onValueChange = onMinsValueChange,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            textStyle = TextStyle(
+              color = Color(0xFFF8FAFC),
+              fontSize = 17.sp,
+              fontWeight = FontWeight.Bold
+            ),
+            cursorBrush = SolidColor(accentColor),
+            modifier = Modifier
+              .fillMaxWidth()
+              .focusRequester(minsFocusRequester)
+              .testTag(minsTestTag),
+            decorationBox = { innerTextField ->
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Box(contentAlignment = Alignment.CenterStart) {
+                  if (minsValue.isEmpty()) {
+                    Text(
+                      text = "00",
+                      fontSize = 17.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF475569)
+                    )
+                  }
+                  innerTextField()
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                  text = "m",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color(0xFF64748B)
+                )
+              }
+            }
+          )
+        }
+      }
+    }
+
+    // Optional Safety Floor Well (DualSessionCard)
+    if (safetyFloorValue != null && onSafetyFloorValueChange != null && safetyFloorTestTag != null) {
+      Box(
+        modifier = Modifier
+          .weight(1.05f)
+          .heightIn(min = 72.dp)
+          .clip(RoundedCornerShape(16.dp))
+          .background(
+            Brush.verticalGradient(
+              listOf(Color(0xFF101727), Color(0xFF0A0E18))
+            )
+          )
+          .border(
+            BorderStroke(1.dp, if (safetyFloorError) DangerRed else Color(0xFF1E2B42)),
+            RoundedCornerShape(16.dp)
+          )
+          .clickable { safetyFocusRequester.requestFocus() }
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+          verticalArrangement = Arrangement.SpaceBetween
+        ) {
+          Text(
+            text = "🛡️ SAFETY",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            letterSpacing = 0.5.sp,
+            color = if (safetyFloorError) Color(0xFFFCA5A5) else Color(0xFF10B981),
+            maxLines = 1
+          )
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF070B13))
+              .border(
+                1.dp,
+                if (safetyFloorError) DangerRed else Color(0xFF1A2538),
+                RoundedCornerShape(10.dp)
+              )
+              .padding(horizontal = 10.dp, vertical = 6.dp)
+          ) {
+            BasicTextField(
+              value = safetyFloorValue,
+              onValueChange = onSafetyFloorValueChange,
+              singleLine = true,
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+              textStyle = TextStyle(
+                color = Color(0xFFF8FAFC),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold
+              ),
+              cursorBrush = SolidColor(Color(0xFF10B981)),
+              modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(safetyFocusRequester)
+                .testTag(safetyFloorTestTag),
+              decorationBox = { innerTextField ->
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Box(contentAlignment = Alignment.CenterStart) {
+                    if (safetyFloorValue.isEmpty()) {
+                      Text(
+                        text = "00",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF475569)
+                      )
+                    }
+                    innerTextField()
+                  }
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = "m",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF64748B)
+                  )
+                }
+              }
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun LuxuryBottomSummaryRow(
+  label: String,
+  valueText: String,
+  accentColor: Color,
+  badgeTextColor: Color = accentColor
+) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .background(Color(0xFF0B111E))
+      .border(BorderStroke(1.dp, Color(0xFF1D2A40)), RoundedCornerShape(12.dp))
+      .padding(horizontal = 12.dp, vertical = 8.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Text(
+      text = label,
+      fontSize = 10.sp,
+      fontWeight = FontWeight.Bold,
+      fontFamily = FontFamily.Monospace,
+      color = Color(0xFF94A3B8)
+    )
+    Box(
+      modifier = Modifier
+        .clip(RoundedCornerShape(8.dp))
+        .background(accentColor.copy(alpha = 0.14f))
+        .border(BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)), RoundedCornerShape(8.dp))
+        .padding(horizontal = 9.dp, vertical = 3.dp)
+    ) {
+      Text(
+        text = valueText,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        fontFamily = FontFamily.Monospace,
+        color = badgeTextColor
+      )
+    }
+  }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LuxuryVoiceStudioCard(
+  title: String,
+  subtitle: String?,
+  accentColor: Color,
+  playTint: Color = accentColor,
+  isVoiceEnabled: Boolean,
+  onIsVoiceEnabledChange: (Boolean) -> Unit,
+  switchTestTag: String?,
+  voiceMessage: String,
+  onVoiceMessageChange: (String) -> Unit,
+  placeholderText: String,
+  messageTestTag: String,
+  onTestVoice: () -> Unit,
+  testButtonTestTag: String,
+  isSpeakingVoicePreview: Boolean,
+  isBengaliVoiceMissing: Boolean,
+  voiceVolume: Float,
+  onVoiceVolumeChange: (Float) -> Unit,
+  disabledHint: String? = null
+) {
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(18.dp))
+      .background(
+        Brush.verticalGradient(
+          listOf(Color(0xFF101727), Color(0xFF0A0E18))
+        )
+      )
+      .border(
+        BorderStroke(
+          1.dp,
+          if (isVoiceEnabled) accentColor.copy(alpha = 0.35f) else Color(0xFF1E2B42)
+        ),
+        RoundedCornerShape(18.dp)
+      )
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(
+          modifier = Modifier.weight(1f),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Box(
+            modifier = Modifier
+              .size(32.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(accentColor.copy(alpha = 0.15f))
+              .border(1.dp, accentColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+              contentDescription = null,
+              tint = accentColor,
+              modifier = Modifier.size(16.dp)
+            )
+          }
+          Spacer(modifier = Modifier.width(10.dp))
+          Column {
+            Text(
+              text = title,
+              color = Color(0xFFF8FAFC),
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle != null) {
+              Text(
+                text = subtitle,
+                color = Color(0xFF64748B),
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
+        }
+
+        Switch(
+          checked = isVoiceEnabled,
+          onCheckedChange = onIsVoiceEnabledChange,
+          colors = SwitchDefaults.colors(
+            checkedThumbColor = Color.White,
+            checkedTrackColor = accentColor,
+            uncheckedThumbColor = Color(0xFF94A3B8),
+            uncheckedTrackColor = Color(0xFF1E2C45)
+          ),
+          modifier = if (switchTestTag != null) Modifier.testTag(switchTestTag) else Modifier
+        )
+      }
+
+      if (isVoiceEnabled) {
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF070B13))
+            .border(1.dp, Color(0xFF1E2B42), RoundedCornerShape(14.dp))
+            .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .padding(end = 8.dp),
+            contentAlignment = Alignment.CenterStart
+          ) {
+            if (voiceMessage.isEmpty()) {
+              Text(
+                text = placeholderText,
+                color = Color(0xFF475569),
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+            BasicTextField(
+              value = voiceMessage,
+              onValueChange = onVoiceMessageChange,
+              textStyle = TextStyle(
+                color = Color(0xFFF8FAFC),
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Medium
+              ),
+              cursorBrush = SolidColor(accentColor),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag(messageTestTag)
+            )
+          }
+
+          Box(
+            modifier = Modifier
+              .size(34.dp)
+              .clip(CircleShape)
+              .background(
+                if (isSpeakingVoicePreview) Color(0xFFEF4444).copy(alpha = 0.2f)
+                else accentColor.copy(alpha = 0.16f)
+              )
+              .border(
+                1.dp,
+                if (isSpeakingVoicePreview) Color(0xFFEF4444).copy(alpha = 0.65f) else accentColor.copy(alpha = 0.45f),
+                CircleShape
+              )
+              .clickable(onClick = onTestVoice)
+              .testTag(testButtonTestTag),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
+              contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Voice",
+              tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else playTint,
+              modifier = Modifier.size(18.dp)
+            )
+          }
+        }
+
+        if (isBengaliVoiceMissing && AutomationManager.containsBengali(voiceMessage)) {
+          Spacer(modifier = Modifier.height(8.dp))
+          BengaliVoiceMissingWarningPill()
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.VolumeMute,
+            contentDescription = null,
+            tint = Color(0xFF64748B),
+            modifier = Modifier.size(16.dp)
+          )
+          Slider(
+            value = voiceVolume,
+            onValueChange = onVoiceVolumeChange,
+            valueRange = 0f..1f,
+            modifier = Modifier
+              .weight(1f)
+              .padding(horizontal = 8.dp),
+            thumb = {
+              Box(
+                modifier = Modifier
+                  .size(20.dp)
+                  .clip(CircleShape)
+                  .background(accentColor.copy(alpha = 0.25f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .background(accentColor)
+                    .border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+                )
+              }
+            },
+            track = { sliderState ->
+              val span = (sliderState.valueRange.endInclusive - sliderState.valueRange.start).coerceAtLeast(0.0001f)
+              val fraction = ((sliderState.value - sliderState.valueRange.start) / span).coerceIn(0f, 1f)
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(4.dp)
+                  .clip(RoundedCornerShape(2.dp))
+                  .background(Color(0xFF1E2C45))
+              ) {
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                      Brush.horizontalGradient(
+                        listOf(accentColor.copy(alpha = 0.65f), accentColor)
+                      )
+                    )
+                )
+              }
+            }
+          )
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+            contentDescription = null,
+            tint = accentColor,
+            modifier = Modifier.size(16.dp)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "${(voiceVolume * 100).roundToInt()}%",
+            color = Color(0xFF94A3B8),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace
+          )
+        }
+      } else if (disabledHint != null) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+          text = disabledHint,
+          fontSize = 10.sp,
+          fontFamily = FontFamily.Monospace,
+          color = Color(0xFF64748B)
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun LuxuryHardwareGrid(
+  isSoundAlertEnabled: Boolean,
+  onIsSoundAlertEnabledChange: (Boolean) -> Unit,
+  soundSwitchTestTag: String?,
+  customRingtoneTitle: String,
+  onPickRingtone: () -> Unit,
+  pickRingtoneTestTag: String?,
+  isPlayingTonePreview: Boolean,
+  onToggleTonePreview: () -> Unit,
+  previewToneTestTag: String,
+  enableDnd: Boolean,
+  onEnableDndChange: (Boolean) -> Unit,
+  dndSwitchTestTag: String?,
+  isDndDelayLockedZero: Boolean,
+  supportsDndDelay: Boolean,
+  dndDelayMinutes: Int,
+  onDndDelayMinutesChange: (Int) -> Unit
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(10.dp)
+  ) {
+    // Column 1: Task Alerts Card
+    Box(
+      modifier = Modifier
+        .weight(1f)
+        .heightIn(min = 128.dp)
+        .clip(RoundedCornerShape(16.dp))
+        .background(
+          Brush.verticalGradient(
+            listOf(Color(0xFF101727), Color(0xFF0A0E18))
+          )
+        )
+        .border(
+          BorderStroke(
+            1.dp,
+            if (isSoundAlertEnabled) Color(0xFF06B6D4).copy(alpha = 0.4f) else Color(0xFF1E2B42)
+          ),
+          RoundedCornerShape(16.dp)
+        )
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(min = 128.dp)
+          .padding(12.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Box(
+            modifier = Modifier
+              .size(28.dp)
+              .clip(CircleShape)
+              .background(Color(0xFF06B6D4).copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.MusicNote,
+              contentDescription = null,
+              tint = Color(0xFF06B6D4),
+              modifier = Modifier.size(16.dp)
+            )
+          }
+
+          Switch(
+            checked = isSoundAlertEnabled,
+            onCheckedChange = onIsSoundAlertEnabledChange,
+            colors = SwitchDefaults.colors(
+              checkedThumbColor = Color.White,
+              checkedTrackColor = Color(0xFF06B6D4),
+              uncheckedThumbColor = Color(0xFF94A3B8),
+              uncheckedTrackColor = Color(0xFF1E2C45)
+            ),
+            modifier = if (soundSwitchTestTag != null) Modifier.testTag(soundSwitchTestTag) else Modifier
+          )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+          text = "TASK ALERTS",
+          color = Color(0xFFE2E8F0),
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          fontSize = 11.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          val pickModifier = Modifier
+            .weight(1f)
+            .height(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF070B13))
+            .border(1.dp, Color(0xFF1E2B42), RoundedCornerShape(10.dp))
+            .clickable { onPickRingtone() }
+          Box(
+            modifier = if (pickRingtoneTestTag != null) pickModifier.testTag(pickRingtoneTestTag) else pickModifier
+              .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.CenterStart
+          ) {
+            Text(
+              text = customRingtoneTitle,
+              color = Color(0xFF06B6D4),
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+              modifier = if (pickRingtoneTestTag != null) Modifier.padding(horizontal = 8.dp) else Modifier
+            )
+          }
+
+          Surface(
+            onClick = onToggleTonePreview,
+            shape = RoundedCornerShape(10.dp),
+            color = Color(0xFF070B13),
+            border = BorderStroke(
+              1.dp,
+              if (isPlayingTonePreview) Color(0xFFEF4444).copy(alpha = 0.65f) else Color(0xFF06B6D4).copy(alpha = 0.45f)
+            ),
+            modifier = Modifier
+              .size(36.dp)
+              .testTag(previewToneTestTag)
+          ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+              Icon(
+                imageVector = if (isPlayingTonePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
+                contentDescription = if (isPlayingTonePreview) "Stop Ringtone Preview" else "Play Ringtone Preview",
+                tint = if (isPlayingTonePreview) Color(0xFFEF4444) else Color(0xFF06B6D4),
+                modifier = Modifier.size(16.dp)
+              )
+            }
+          }
+        }
+      }
+    }
+
+    // Column 2: Auto DND Card
+    Box(
+      modifier = Modifier
+        .weight(1f)
+        .heightIn(min = 128.dp)
+        .clip(RoundedCornerShape(16.dp))
+        .background(
+          Brush.verticalGradient(
+            listOf(Color(0xFF101727), Color(0xFF0A0E18))
+          )
+        )
+        .border(
+          BorderStroke(
+            1.dp,
+            if (enableDnd) Color(0xFFA855F7).copy(alpha = 0.4f) else Color(0xFF1E2B42)
+          ),
+          RoundedCornerShape(16.dp)
+        )
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(min = 128.dp)
+          .padding(12.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Box(
+            modifier = Modifier
+              .size(28.dp)
+              .clip(CircleShape)
+              .background(Color(0xFFA855F7).copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.Bedtime,
+              contentDescription = null,
+              tint = Color(0xFFA855F7),
+              modifier = Modifier.size(16.dp)
+            )
+          }
+
+          Switch(
+            checked = enableDnd,
+            onCheckedChange = onEnableDndChange,
+            colors = SwitchDefaults.colors(
+              checkedThumbColor = Color.White,
+              checkedTrackColor = Color(0xFFA855F7),
+              uncheckedThumbColor = Color(0xFF94A3B8),
+              uncheckedTrackColor = Color(0xFF1E2C45)
+            ),
+            modifier = if (dndSwitchTestTag != null) Modifier.testTag(dndSwitchTestTag) else Modifier
+          )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+          text = "AUTO DND",
+          color = Color(0xFFE2E8F0),
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace,
+          fontSize = 11.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (isDndDelayLockedZero) {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(36.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF070B13))
+              .border(1.dp, Color(0xFF1E2B42), RoundedCornerShape(10.dp))
+              .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.CenterStart
+          ) {
+            Text(
+              text = "🔒 0m Immediate",
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace,
+              color = Color(0xFF94A3B8),
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
+        } else if (supportsDndDelay && enableDnd) {
+          var delayInputText by remember(dndDelayMinutes) { mutableStateOf(dndDelayMinutes.toString()) }
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+          ) {
+            Surface(
+              onClick = {
+                val next = (dndDelayMinutes - 1).coerceIn(0, 25)
+                delayInputText = next.toString()
+                onDndDelayMinutesChange(next)
+              },
+              shape = CircleShape,
+              color = Color(0xFF141D2E),
+              border = BorderStroke(1.dp, Color(0xFF283A57)),
+              modifier = Modifier.size(30.dp)
+            ) {
+              Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Text("-", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+              }
+            }
+
+            Box(
+              modifier = Modifier
+                .weight(1f)
+                .height(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF070B13))
+                .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 6.dp),
+              contentAlignment = Alignment.Center
+            ) {
+              BasicTextField(
+                value = delayInputText,
+                onValueChange = { raw ->
+                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                  delayInputText = clean
+                  onDndDelayMinutesChange(parsed.coerceIn(0, 25))
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = TextStyle(
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(0xFFF8FAFC),
+                  textAlign = TextAlign.Center
+                ),
+                cursorBrush = SolidColor(Color(0xFF8B5CF6)),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("anchor_dnd_delay_input"),
+                decorationBox = { innerTextField ->
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                  ) {
+                    Box(contentAlignment = Alignment.Center) {
+                      innerTextField()
+                    }
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(
+                      text = "m",
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF8B5CF6)
+                    )
+                  }
+                }
+              )
+            }
+
+            Surface(
+              onClick = {
+                val next = (dndDelayMinutes + 1).coerceIn(0, 25)
+                delayInputText = next.toString()
+                onDndDelayMinutesChange(next)
+              },
+              shape = CircleShape,
+              color = Color(0xFF141D2E),
+              border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f)),
+              modifier = Modifier.size(30.dp)
+            ) {
+              Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Text("+", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC4B5FD))
+              }
+            }
+          }
+        } else {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(36.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF070B13))
+              .border(1.dp, Color(0xFF1E2B42), RoundedCornerShape(10.dp))
+              .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.CenterStart
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Box(
+                modifier = Modifier
+                  .size(6.dp)
+                  .clip(CircleShape)
+                  .background(if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B))
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = if (enableDnd) "Engaged" else "Disabled",
+                color = if (enableDnd) Color(0xFF10B981) else Color(0xFF64748B),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 @Composable
 private fun DualSessionCard(
   sessionNumber: Int,
@@ -4577,12 +4107,16 @@ private fun DualSessionCard(
   val sessionDurationTotal = durationHours * 60 + durationMins
   val isSafetyFloorExceeded = safetyFloor > 0 && safetyFloor > sessionDurationTotal
 
-  Surface(
+  Box(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(18.dp))
-      .border(BorderStroke(1.dp, accentColor.copy(alpha = 0.4f)), RoundedCornerShape(18.dp)),
-    color = Color(0xFF121620)
+      .background(
+        Brush.verticalGradient(
+          listOf(Color(0xFF101727), Color(0xFF0A0E18))
+        )
+      )
+      .border(BorderStroke(1.dp, accentColor.copy(alpha = 0.45f)), RoundedCornerShape(18.dp))
   ) {
     Column(modifier = Modifier.padding(14.dp)) {
       // Header Badge
@@ -4626,14 +4160,14 @@ private fun DualSessionCard(
         placeholder = { Text(if (sessionNumber == 1) "Morning Deep Work" else "Afternoon Synthesis", color = TextTertiary) },
         modifier = Modifier.fillMaxWidth().testTag("session_${sessionNumber}_title_input"),
         colors = OutlinedTextFieldDefaults.colors(
-          focusedContainerColor = Color(0xFF0F141E),
-          unfocusedContainerColor = Color(0xFF0F141E),
+          focusedContainerColor = Color(0xFF070B13),
+          unfocusedContainerColor = Color(0xFF070B13),
           focusedBorderColor = accentColor,
-          unfocusedBorderColor = Color(0xFF1F2637),
+          unfocusedBorderColor = Color(0xFF1E2B42),
           focusedTextColor = Color(0xFFF8FAFC),
           unfocusedTextColor = Color(0xFFF8FAFC)
         ),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         singleLine = true
       )
 
@@ -4643,10 +4177,10 @@ private fun DualSessionCard(
       Surface(
         modifier = Modifier
           .fillMaxWidth()
-          .clip(RoundedCornerShape(12.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1F2637)), RoundedCornerShape(12.dp))
+          .clip(RoundedCornerShape(14.dp))
+          .border(BorderStroke(1.dp, Color(0xFF1E2B42)), RoundedCornerShape(14.dp))
           .clickable { onOpenClock() },
-        color = Color(0xFF0F141E)
+        color = Color(0xFF070B13)
       ) {
         Row(
           modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -4681,80 +4215,33 @@ private fun DualSessionCard(
       Spacer(modifier = Modifier.height(10.dp))
 
       // Duration & Safety Floor Inputs
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        OutlinedTextField(
-          value = hoursInput,
-          onValueChange = { raw ->
-            val (clean, parsed) = sanitizeNumberInput(raw, 2)
-            hoursInput = clean
-            onDurationChange(parsed.coerceIn(0, 12), durationMins)
-          },
-          label = { Text("Hours") },
-          placeholder = { Text("00", color = Color(0xFF475569)) },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          modifier = Modifier.weight(1f).testTag("session_${sessionNumber}_hours_input"),
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = Color(0xFF0F141E),
-            unfocusedContainerColor = Color(0xFF0F141E),
-            focusedBorderColor = accentColor,
-            unfocusedBorderColor = Color(0xFF1F2637),
-            focusedTextColor = Color(0xFFF8FAFC),
-            unfocusedTextColor = Color(0xFFF8FAFC)
-          ),
-          shape = RoundedCornerShape(12.dp),
-          singleLine = true
-        )
-
-        OutlinedTextField(
-          value = minsInput,
-          onValueChange = { raw ->
-            val (clean, parsed) = sanitizeNumberInput(raw, 2)
-            minsInput = clean
-            onDurationChange(durationHours, parsed.coerceIn(0, 59))
-          },
-          label = { Text("Minutes") },
-          placeholder = { Text("00", color = Color(0xFF475569)) },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          modifier = Modifier.weight(1f).testTag("session_${sessionNumber}_mins_input"),
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = Color(0xFF0F141E),
-            unfocusedContainerColor = Color(0xFF0F141E),
-            focusedBorderColor = accentColor,
-            unfocusedBorderColor = Color(0xFF1F2637),
-            focusedTextColor = Color(0xFFF8FAFC),
-            unfocusedTextColor = Color(0xFFF8FAFC)
-          ),
-          shape = RoundedCornerShape(12.dp),
-          singleLine = true
-        )
-
-        OutlinedTextField(
-          value = safetyFloorInput,
-          onValueChange = { raw ->
-            val (clean, parsed) = sanitizeNumberInput(raw, 3)
-            safetyFloorInput = clean
-            val floor = parsed.coerceIn(0, 720)
-            onSafetyFloorChange(floor)
-          },
-          label = { Text("🛡️ Safety") },
-          isError = isSafetyFloorExceeded,
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          modifier = Modifier.weight(1.1f).testTag("session_${sessionNumber}_safety_input"),
-          colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = Color(0xFF0F141E),
-            unfocusedContainerColor = Color(0xFF0F141E),
-            focusedBorderColor = if (isSafetyFloorExceeded) DangerRed else Color(0xFF10B981),
-            unfocusedBorderColor = if (isSafetyFloorExceeded) DangerRed else Color(0xFF1F2637),
-            focusedTextColor = Color(0xFFF8FAFC),
-            unfocusedTextColor = Color(0xFFF8FAFC)
-          ),
-          shape = RoundedCornerShape(12.dp),
-          singleLine = true
-        )
-      }
+      LuxuryTimeDurationRow(
+        accentColor = accentColor,
+        hoursValue = hoursInput,
+        onHoursValueChange = { raw ->
+          val (clean, parsed) = sanitizeNumberInput(raw, 2)
+          hoursInput = clean
+          onDurationChange(parsed.coerceIn(0, 12), durationMins)
+        },
+        hoursTestTag = "session_${sessionNumber}_hours_input",
+        minsValue = minsInput,
+        onMinsValueChange = { raw ->
+          val (clean, parsed) = sanitizeNumberInput(raw, 2)
+          minsInput = clean
+          onDurationChange(durationHours, parsed.coerceIn(0, 59))
+        },
+        minsTestTag = "session_${sessionNumber}_mins_input",
+        showStartTime = false,
+        safetyFloorValue = safetyFloorInput,
+        onSafetyFloorValueChange = { raw ->
+          val (clean, parsed) = sanitizeNumberInput(raw, 3)
+          safetyFloorInput = clean
+          val floor = parsed.coerceIn(0, 720)
+          onSafetyFloorChange(floor)
+        },
+        safetyFloorError = isSafetyFloorExceeded,
+        safetyFloorTestTag = "session_${sessionNumber}_safety_input"
+      )
 
       if (isSafetyFloorExceeded) {
         Spacer(modifier = Modifier.height(6.dp))
@@ -4768,149 +4255,27 @@ private fun DualSessionCard(
 
       Spacer(modifier = Modifier.height(10.dp))
 
-      // Full Voice Studio Sub-Card (Switch, Collapsible TextField, Play/Stop Toggle, Volume Slider)
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(14.dp))
-          .border(BorderStroke(1.dp, Color(0xFF1E2C45)), RoundedCornerShape(14.dp)),
-        color = Color(0xFF0A0F1D)
-      ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Box(
-                modifier = Modifier
-                  .size(28.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFF10B981).copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                  contentDescription = null,
-                  tint = Color(0xFF10B981),
-                  modifier = Modifier.size(15.dp)
-                )
-              }
-              Spacer(modifier = Modifier.width(8.dp))
-              Column {
-                Text(
-                  text = "Voice Announcement",
-                  color = Color(0xFFF8FAFC),
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 12.sp
-                )
-                Text(
-                  text = "Session $sessionNumber speech synthesis",
-                  color = Color(0xFF64748B),
-                  fontSize = 10.sp
-                )
-              }
-            }
-
-            Switch(
-              checked = isVoiceEnabled,
-              onCheckedChange = onIsVoiceEnabledChange,
-              colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF10B981),
-                uncheckedThumbColor = Color(0xFF94A3B8),
-                uncheckedTrackColor = Color(0xFF1E2C45)
-              ),
-              modifier = Modifier.testTag("session_${sessionNumber}_voice_switch")
-            )
-          }
-
-          if (isVoiceEnabled) {
-            Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedTextField(
-              value = voiceMessage,
-              onValueChange = onVoiceMessageChange,
-              placeholder = { Text("Session $sessionNumber voice announcement", color = Color(0xFF475569)) },
-              trailingIcon = {
-                IconButton(
-                  onClick = onTestVoice,
-                  modifier = Modifier.testTag("session_${sessionNumber}_test_voice_button")
-                ) {
-                  Icon(
-                    imageVector = if (isSpeakingVoicePreview) Icons.Default.Stop else Icons.Default.PlayArrow,
-                    contentDescription = if (isSpeakingVoicePreview) "Stop Voice Preview" else "Test Voice",
-                    tint = if (isSpeakingVoicePreview) Color(0xFFEF4444) else Color(0xFF10B981)
-                  )
-                }
-              },
-              modifier = Modifier.fillMaxWidth().testTag("session_${sessionNumber}_voice_input"),
-              colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF0F172A),
-                unfocusedContainerColor = Color(0xFF0F172A),
-                focusedBorderColor = Color(0xFF10B981),
-                unfocusedBorderColor = Color(0xFF1E2C45),
-                focusedTextColor = Color(0xFFF8FAFC),
-                unfocusedTextColor = Color(0xFFF8FAFC)
-              ),
-              shape = RoundedCornerShape(12.dp)
-            )
-
-            if (isBengaliVoiceMissing && AutomationManager.containsBengali(voiceMessage)) {
-              Spacer(modifier = Modifier.height(8.dp))
-              BengaliVoiceMissingWarningPill()
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Volume Slider (0% - 100%)
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.VolumeMute,
-                contentDescription = null,
-                tint = Color(0xFF64748B),
-                modifier = Modifier.size(16.dp)
-              )
-              Slider(
-                value = voiceVolume,
-                onValueChange = onVoiceVolumeChange,
-                valueRange = 0f..1f,
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                colors = SliderDefaults.colors(
-                  thumbColor = Color(0xFF10B981),
-                  activeTrackColor = Color(0xFF10B981),
-                  inactiveTrackColor = Color(0xFF1E2C45)
-                )
-              )
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                contentDescription = null,
-                tint = Color(0xFF10B981),
-                modifier = Modifier.size(16.dp)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "${(voiceVolume * 100).roundToInt()}%",
-                color = Color(0xFF94A3B8),
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
-              )
-            }
-          } else {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-              text = "Spoken reminders disabled for Session $sessionNumber",
-              fontSize = 10.sp,
-              fontFamily = FontFamily.Monospace,
-              color = Color(0xFF64748B)
-            )
-          }
-        }
-      }
+      // Full Voice Studio Sub-Card
+      LuxuryVoiceStudioCard(
+        title = "Voice Announcement",
+        subtitle = "Session $sessionNumber speech synthesis",
+        accentColor = Color(0xFF10B981),
+        playTint = Color(0xFF10B981),
+        isVoiceEnabled = isVoiceEnabled,
+        onIsVoiceEnabledChange = onIsVoiceEnabledChange,
+        switchTestTag = "session_${sessionNumber}_voice_switch",
+        voiceMessage = voiceMessage,
+        onVoiceMessageChange = onVoiceMessageChange,
+        placeholderText = "Session $sessionNumber voice announcement",
+        messageTestTag = "session_${sessionNumber}_voice_input",
+        onTestVoice = onTestVoice,
+        testButtonTestTag = "session_${sessionNumber}_test_voice_button",
+        isSpeakingVoicePreview = isSpeakingVoicePreview,
+        isBengaliVoiceMissing = isBengaliVoiceMissing,
+        voiceVolume = voiceVolume,
+        onVoiceVolumeChange = onVoiceVolumeChange,
+        disabledHint = "Spoken reminders disabled for Session $sessionNumber"
+      )
     }
   }
 }

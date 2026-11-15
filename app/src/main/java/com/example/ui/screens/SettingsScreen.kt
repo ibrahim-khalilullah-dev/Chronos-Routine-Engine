@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -9,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,10 +40,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.AlertDialog
@@ -59,6 +71,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -69,10 +82,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -85,6 +100,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.RoutineTask
 import com.example.model.TaskRatingRecord
 import com.example.model.TaskType
+import com.example.service.AutomationManager
 import com.example.ui.components.taskRatingCache
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.OneUiBackground
@@ -259,6 +275,8 @@ fun SettingsScreen(
   onOpenTrashBin: () -> Unit = {},
   onPauseTask: (taskId: String, isAnchor: Boolean, slotNumber: Int?, days: Int?, todayOnly: Boolean, indefinitely: Boolean) -> Unit = { _, _, _, _, _, _ -> },
   onResumeTask: (taskId: String, isAnchor: Boolean, slotNumber: Int?) -> Unit = { _, _, _ -> },
+  selectedVoicePresetId: String = "natural_female",
+  onSelectVoicePreset: (String) -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   // Expanded category in PROGRESS_BARS view
@@ -1285,6 +1303,516 @@ fun SettingsScreen(
           }
         }
       }
+    }
+
+    // ==============================================================
+    // 2B. VOICE PERSONA STUDIO (COLLAPSIBLE 12-PERSONA BN & EN DROPDOWN)
+    // ==============================================================
+    val settingsContext = LocalContext.current
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var personaTts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var isPersonaTtsReady by remember { mutableStateOf(false) }
+    var triedPersonaGoogleFallback by remember { mutableStateOf(false) }
+    var playingPresetId by remember { mutableStateOf<String?>(null) }
+    var pendingPreviewPresetId by remember { mutableStateOf<String?>(null) }
+    var isVoiceDropdownExpanded by remember { mutableStateOf(false) }
+    var customTestText by remember { mutableStateOf("") }
+    var selectedVoiceCategory by remember { mutableStateOf("all") }
+    var pendingConfirmPreset by remember { mutableStateOf<AutomationManager.VoicePreset?>(null) }
+
+    val activePreset = remember(selectedVoicePresetId) {
+      AutomationManager.getVoicePreset(selectedVoicePresetId)
+    }
+
+    fun speakVoicePresetSample(ttsEngine: TextToSpeech?, preset: AutomationManager.VoicePreset) {
+      if (ttsEngine == null) return
+      val textToSpeak = customTestText.trim().ifBlank { preset.defaultSampleText }
+      AutomationManager.applyTtsLanguage(ttsEngine, textToSpeak, preset.id)
+      playingPresetId = preset.id
+      ttsEngine.speak(
+        textToSpeak,
+        TextToSpeech.QUEUE_FLUSH,
+        Bundle(),
+        "voice_persona_preview_${preset.id}"
+      )
+    }
+
+    fun attachPersonaTtsListener(engine: TextToSpeech?) {
+      engine?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) {}
+        override fun onDone(utteranceId: String?) {
+          mainHandler.post { playingPresetId = null }
+        }
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String?) {
+          mainHandler.post { playingPresetId = null }
+        }
+        override fun onError(utteranceId: String?, errorCode: Int) {
+          mainHandler.post { playingPresetId = null }
+        }
+      })
+    }
+
+    DisposableEffect(settingsContext) {
+      var engine: TextToSpeech? = null
+      try {
+        engine = TextToSpeech(settingsContext) { status ->
+          if (status == TextToSpeech.SUCCESS) {
+            isPersonaTtsReady = true
+            attachPersonaTtsListener(engine)
+            val queued = pendingPreviewPresetId
+            if (queued != null) {
+              pendingPreviewPresetId = null
+              speakVoicePresetSample(engine, AutomationManager.getVoicePreset(queued))
+            }
+          } else if (!triedPersonaGoogleFallback && AutomationManager.hasGoogleTtsEngine(settingsContext)) {
+            triedPersonaGoogleFallback = true
+            try {
+              engine?.shutdown()
+            } catch (_: Exception) {}
+            try {
+              var googleEngine: TextToSpeech? = null
+              googleEngine = TextToSpeech(settingsContext, { gStatus ->
+                if (gStatus == TextToSpeech.SUCCESS) {
+                  isPersonaTtsReady = true
+                  personaTts = googleEngine
+                  attachPersonaTtsListener(googleEngine)
+                  val queued = pendingPreviewPresetId
+                  if (queued != null) {
+                    pendingPreviewPresetId = null
+                    speakVoicePresetSample(googleEngine, AutomationManager.getVoicePreset(queued))
+                  }
+                }
+              }, "com.google.android.tts")
+              personaTts = googleEngine
+            } catch (_: Exception) {}
+          }
+        }
+        personaTts = engine
+      } catch (_: Exception) {
+        isPersonaTtsReady = false
+      }
+      onDispose {
+        playingPresetId = null
+        pendingPreviewPresetId = null
+        try {
+          personaTts?.stop()
+          personaTts?.shutdown()
+        } catch (_: Exception) {}
+        personaTts = null
+      }
+    }
+
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(22.dp))
+        .background(
+          Brush.verticalGradient(
+            listOf(Color(0xFF101727), Color(0xFF0A0E18))
+          )
+        )
+        .border(BorderStroke(1.dp, Color(0xFF1E2B42)), RoundedCornerShape(22.dp))
+        .testTag("voice_persona_card")
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+        // Collapsible Dropdown Trigger Row
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { isVoiceDropdownExpanded = !isVoiceDropdownExpanded }
+            .padding(vertical = 2.dp)
+            .testTag("voice_dropdown_trigger"),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Box(
+              modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF38BDF8).copy(alpha = 0.14f))
+                .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = "Voice Persona Studio",
+                tint = Color(0xFF38BDF8),
+                modifier = Modifier.size(20.dp)
+              )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = "Voice Persona Studio",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+              Text(
+                text = "${activePreset.emoji} ${activePreset.label} • Active",
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF38BDF8),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.width(8.dp))
+
+          Box(
+            modifier = Modifier
+              .size(32.dp)
+              .clip(CircleShape)
+              .background(Color(0xFF070B13))
+              .border(1.dp, Color(0xFF1E2B42), CircleShape),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = if (isVoiceDropdownExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+              contentDescription = if (isVoiceDropdownExpanded) "Collapse voice studio" else "Expand voice studio",
+              tint = Color(0xFF94A3B8),
+              modifier = Modifier.size(18.dp)
+            )
+          }
+        }
+
+        AnimatedVisibility(visible = isVoiceDropdownExpanded) {
+          Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // 1. Custom Test Input Field
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(14.dp))
+                  .background(Color(0xFF070B13))
+                  .border(1.dp, Color(0xFF1E2B42), RoundedCornerShape(14.dp))
+                  .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Box(modifier = Modifier.weight(1f)) {
+                  if (customTestText.isEmpty()) {
+                    Text(
+                      text = "Type বাংলা or English to test any voice...",
+                      fontSize = 12.5.sp,
+                      color = Color(0xFF64748B)
+                    )
+                  }
+                  BasicTextField(
+                    value = customTestText,
+                    onValueChange = { customTestText = it },
+                    textStyle = TextStyle(
+                      color = Color(0xFFF8FAFC),
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.Medium
+                    ),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF38BDF8)),
+                    singleLine = true,
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .testTag("voice_persona_test_input")
+                  )
+                }
+                if (customTestText.isNotEmpty()) {
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Box(
+                    modifier = Modifier
+                      .size(24.dp)
+                      .clip(CircleShape)
+                      .background(Color(0xFF162236))
+                      .clickable { customTestText = "" },
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Close,
+                      contentDescription = "Clear test text",
+                      tint = Color(0xFF94A3B8),
+                      modifier = Modifier.size(14.dp)
+                    )
+                  }
+                }
+              }
+              Text(
+                text = "Auto-detects বাংলা & English • Uses ready-made text if empty",
+                fontSize = 10.5.sp,
+                color = TextTertiary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+              )
+            }
+
+            // 2. Category Filter Pills
+            val categoryOptions = listOf(
+              "all" to "All (${AutomationManager.VOICE_PRESETS.size})",
+              "female" to "Female (${AutomationManager.VOICE_PRESETS.count { it.category == "female" }})",
+              "youth" to "Youth 10–15y (${AutomationManager.VOICE_PRESETS.count { it.category == "youth" }})",
+              "male" to "Male & Studio (${AutomationManager.VOICE_PRESETS.count { it.category == "male" }})"
+            )
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              categoryOptions.forEach { (catId, catLabel) ->
+                val isCatSelected = selectedVoiceCategory == catId
+                Box(
+                  modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isCatSelected) Color(0xFF1E3A5F) else Color(0xFF070B13))
+                    .border(
+                      width = 1.dp,
+                      color = if (isCatSelected) Color(0xFF38BDF8).copy(alpha = 0.7f) else Color(0xFF1E2B42),
+                      shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable { selectedVoiceCategory = catId }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .testTag("voice_category_$catId")
+                ) {
+                  Text(
+                    text = catLabel,
+                    fontSize = 11.sp,
+                    fontWeight = if (isCatSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isCatSelected) Color(0xFF38BDF8) else TextSecondary,
+                    maxLines = 1
+                  )
+                }
+              }
+            }
+
+            // 3. Filtered Voice Preset Rows
+            val filteredPresets = remember(selectedVoiceCategory) {
+              if (selectedVoiceCategory == "all") AutomationManager.VOICE_PRESETS
+              else AutomationManager.VOICE_PRESETS.filter { it.category == selectedVoiceCategory }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+              filteredPresets.forEach { preset ->
+                val isSelected = selectedVoicePresetId == preset.id
+                val isPlaying = playingPresetId == preset.id
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (isSelected) Color(0xFF132035) else Color(0xFF070B13))
+                    .border(
+                      width = 1.dp,
+                      color = if (isSelected) Color(0xFF38BDF8).copy(alpha = 0.7f) else Color(0xFF1A2538),
+                      shape = RoundedCornerShape(14.dp)
+                    )
+                    .clickable {
+                      if (preset.id != selectedVoicePresetId) {
+                        pendingConfirmPreset = preset
+                      }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .testTag("voice_preset_${preset.id}"),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                  Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Box(
+                      modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(
+                          if (isSelected) Color(0xFF38BDF8).copy(alpha = 0.16f) else Color(0xFF111827)
+                        ),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Text(text = preset.emoji, fontSize = 16.sp)
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                      ) {
+                        Text(
+                          text = preset.label,
+                          fontSize = 13.5.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = if (isSelected) Color(0xFFF8FAFC) else TextPrimary,
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis,
+                          modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (isSelected) {
+                          Row(
+                            modifier = Modifier
+                              .clip(RoundedCornerShape(6.dp))
+                              .background(Color(0xFF38BDF8).copy(alpha = 0.18f))
+                              .padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                          ) {
+                            Icon(
+                              imageVector = Icons.Default.Check,
+                              contentDescription = "Selected",
+                              tint = Color(0xFF38BDF8),
+                              modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                              text = "ACTIVE",
+                              fontSize = 9.sp,
+                              fontWeight = FontWeight.ExtraBold,
+                              color = Color(0xFF38BDF8)
+                            )
+                          }
+                        }
+                      }
+                      Text(
+                        text = preset.description,
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                      )
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.width(8.dp))
+
+                  Box(
+                    modifier = Modifier
+                      .size(36.dp)
+                      .clip(CircleShape)
+                      .background(
+                        if (isPlaying) Color(0xFFEF4444).copy(alpha = 0.2f)
+                        else Color(0xFF162236)
+                      )
+                      .border(
+                        1.dp,
+                        if (isPlaying) Color(0xFFEF4444).copy(alpha = 0.7f) else Color(0xFF283A57),
+                        CircleShape
+                      )
+                      .clickable {
+                        if (isPlaying) {
+                          try {
+                            personaTts?.stop()
+                          } catch (_: Exception) {}
+                          playingPresetId = null
+                        } else {
+                          val textToSpeak = customTestText.trim().ifBlank { preset.defaultSampleText }
+                          val needsBengali = AutomationManager.containsBengali(textToSpeak)
+                          if (needsBengali &&
+                            !AutomationManager.isBengaliTtsAvailable(personaTts) &&
+                            !triedPersonaGoogleFallback &&
+                            AutomationManager.hasGoogleTtsEngine(settingsContext)
+                          ) {
+                            triedPersonaGoogleFallback = true
+                            pendingPreviewPresetId = preset.id
+                            try {
+                              personaTts?.shutdown()
+                            } catch (_: Exception) {}
+                            try {
+                              var googleEngine: TextToSpeech? = null
+                              googleEngine = TextToSpeech(settingsContext, { gStatus ->
+                                if (gStatus == TextToSpeech.SUCCESS) {
+                                  isPersonaTtsReady = true
+                                  personaTts = googleEngine
+                                  attachPersonaTtsListener(googleEngine)
+                                  val queued = pendingPreviewPresetId
+                                  if (queued != null) {
+                                    pendingPreviewPresetId = null
+                                    speakVoicePresetSample(googleEngine, AutomationManager.getVoicePreset(queued))
+                                  }
+                                }
+                              }, "com.google.android.tts")
+                              personaTts = googleEngine
+                            } catch (_: Exception) {}
+                          } else if (isPersonaTtsReady && personaTts != null) {
+                            speakVoicePresetSample(personaTts, preset)
+                          }
+                        }
+                      }
+                      .testTag("voice_preset_preview_${preset.id}"),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = if (isPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                      contentDescription = if (isPlaying) "Stop preview" else "Preview ${preset.label}",
+                      tint = if (isPlaying) Color(0xFFFCA5A5) else Color(0xFF38BDF8),
+                      modifier = Modifier.size(18.dp)
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    pendingConfirmPreset?.let { presetToConfirm ->
+      AlertDialog(
+        onDismissRequest = { pendingConfirmPreset = null },
+        modifier = Modifier.testTag("voice_confirm_dialog"),
+        containerColor = Color(0xFF0F172A),
+        titleContentColor = Color(0xFFF8FAFC),
+        textContentColor = Color(0xFFCBD5E1),
+        title = {
+          Text(
+            text = "Confirm Voice Persona?",
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 18.sp
+          )
+        },
+        text = {
+          Text(
+            text = "Set “${presetToConfirm.emoji} ${presetToConfirm.label}” as the active voice for all routine alerts and previews (Bengali & English)?",
+            fontSize = 13.5.sp,
+            lineHeight = 19.sp
+          )
+        },
+        confirmButton = {
+          Button(
+            onClick = {
+              onSelectVoicePreset(presetToConfirm.id)
+              pendingConfirmPreset = null
+            },
+            colors = ButtonDefaults.buttonColors(
+              containerColor = Color(0xFF06B6D4),
+              contentColor = Color(0xFF030712)
+            ),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.testTag("voice_confirm_apply_button")
+          ) {
+            Text(
+              text = "Confirm & Apply",
+              fontWeight = FontWeight.Bold
+            )
+          }
+        },
+        dismissButton = {
+          TextButton(
+            onClick = { pendingConfirmPreset = null },
+            modifier = Modifier.testTag("voice_confirm_cancel_button")
+          ) {
+            Text(
+              text = "Cancel",
+              color = Color(0xFF94A3B8),
+              fontWeight = FontWeight.SemiBold
+            )
+          }
+        }
+      )
     }
 
     // ==============================================================

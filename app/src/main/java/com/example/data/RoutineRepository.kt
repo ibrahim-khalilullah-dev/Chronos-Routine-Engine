@@ -33,6 +33,7 @@ class RoutineRepository(context: Context) {
     private const val KEY_ACTIVE_DAY = "key_active_day"
     private const val KEY_SORT_MODE = "key_sort_mode"
     private const val KEY_TASK_RATING_HISTORY = "key_task_rating_history_json"
+    private const val KEY_VOICE_PRESET_ID = "key_voice_preset_id"
     private const val PURGE_THRESHOLD_MILLIS = 30L * 24 * 60 * 60 * 1000L // 30 Days
     private const val RATING_HISTORY_THRESHOLD_MILLIS = 90L * 24 * 60 * 60 * 1000L // 90 Days
     private const val VAULT_FILE_NAME = "chronos_vault.json"
@@ -99,6 +100,12 @@ class RoutineRepository(context: Context) {
       val ratingHistoryJson = vaultObj.optJSONArray("ratingHistory")
       if (ratingHistoryJson != null && ratingHistoryJson.length() > 0 && !prefs.contains(KEY_TASK_RATING_HISTORY)) {
         editor.putString(KEY_TASK_RATING_HISTORY, ratingHistoryJson.toString())
+        restoredSomething = true
+      }
+
+      val voicePresetId = vaultObj.optString("voicePresetId", "")
+      if (voicePresetId.isNotBlank() && !prefs.contains(KEY_VOICE_PRESET_ID)) {
+        editor.putString(KEY_VOICE_PRESET_ID, voicePresetId)
         restoredSomething = true
       }
 
@@ -182,6 +189,7 @@ class RoutineRepository(context: Context) {
       put("sleepDurationMinutes", sleepDuration)
       put("bufferMinutes", bufferMinutes)
       put("sortMode", sortModeName)
+      put("voicePresetId", getVoicePresetId())
       put("anchors", if (!anchorsRaw.isNullOrEmpty()) JSONArray(anchorsRaw) else JSONArray())
       put("dynamicTasks", if (!dynamicRaw.isNullOrEmpty()) JSONArray(dynamicRaw) else JSONArray())
       put("ratingHistory", if (!ratingHistoryRaw.isNullOrEmpty()) JSONArray(ratingHistoryRaw) else JSONArray())
@@ -283,6 +291,16 @@ class RoutineRepository(context: Context) {
 
   fun setSortMode(mode: TimelineSortMode) {
     prefs.edit().putString(KEY_SORT_MODE, mode.name).apply()
+    persistVaultAsync()
+  }
+
+  fun getVoicePresetId(): String {
+    return prefs.getString(KEY_VOICE_PRESET_ID, "natural_female")?.takeIf { it.isNotBlank() }
+      ?: "natural_female"
+  }
+
+  fun setVoicePresetId(presetId: String) {
+    prefs.edit().putString(KEY_VOICE_PRESET_ID, presetId).apply()
     persistVaultAsync()
   }
 
