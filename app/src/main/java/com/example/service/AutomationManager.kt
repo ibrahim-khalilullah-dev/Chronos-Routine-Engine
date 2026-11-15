@@ -45,6 +45,7 @@ object AutomationManager {
   const val EXTRA_FORMATTED_DURATION = "extra_formatted_duration"
   const val EXTRA_FORMATTED_END_TIME = "extra_formatted_end_time"
   const val EXTRA_DND_DELAY_MINUTES = "extra_dnd_delay_minutes"
+  const val EXTRA_TASK_END_MILLIS = "extra_task_end_millis"
 
   fun resolveCategoryInfo(task: RoutineTask, activeDay: RoutineDay = RoutineDay.today()): Pair<String, String> {
     return when {
@@ -682,7 +683,8 @@ object AutomationManager {
     context: Context,
     task: RoutineTask,
     startMillis: Long,
-    targetRoutineDay: RoutineDay
+    targetRoutineDay: RoutineDay,
+    now: Long = System.currentTimeMillis()
   ) {
     if (task.isDeleted || task.isCurrentlyPaused() || task.isOverflow) {
       cancelTaskAlarms(context, task.id)
@@ -715,8 +717,7 @@ object AutomationManager {
 
     val endHourMin = ((targetCal.get(Calendar.HOUR_OF_DAY) * 60 + targetCal.get(Calendar.MINUTE) + effectiveDurationMin) % 1440 + 1440) % 1440
     val formattedEndTime = RoutineTask.formatTime(endHourMin)
-
-    val now = System.currentTimeMillis()
+    val endMillis = startMillis + (effectiveDurationMin * 60L * 1000L)
 
     // 1. Task Start Alarm (only if start time is in the future)
     if (startMillis > now + 1500L) {
@@ -750,15 +751,16 @@ object AutomationManager {
       scheduleExactOrAlarmClock(am, startMillis, pendingStart, useAlarmClock = true)
     }
 
-    // Deep Sleep Immune Delayed DND via AlarmManager
+    // Deep Sleep Immune Delayed DND via AlarmManager (only if trigger precedes task end)
     if (task.enableDnd && effectiveDndDelay > 0) {
       val dndTriggerMillis = startMillis + (effectiveDndDelay * 60L * 1000L)
-      if (dndTriggerMillis > now) {
+      if (dndTriggerMillis > now && dndTriggerMillis < endMillis) {
         val dndIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
           action = ACTION_APPLY_DND
           putExtra(EXTRA_TASK_ID, task.id)
           putExtra(EXTRA_ENABLE_DND, task.enableDnd)
           putExtra(EXTRA_DND_DELAY_MINUTES, effectiveDndDelay)
+          putExtra(EXTRA_TASK_END_MILLIS, endMillis)
         }
         val pendingDnd = PendingIntent.getBroadcast(
           context,
@@ -766,12 +768,11 @@ object AutomationManager {
           dndIntent,
           PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        scheduleExactOrAlarmClock(am, dndTriggerMillis, pendingDnd, useAlarmClock = false)
+        scheduleExactOrAlarmClock(am, dndTriggerMillis, pendingDnd, useAlarmClock = true)
       }
     }
 
     // Synchronize end alarm: use setAlarmClock for DND-enabled tasks so DND teardown pierces Doze reliably
-    val endMillis = startMillis + (effectiveDurationMin * 60L * 1000L)
     if (endMillis > now) {
       val endIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
         action = ACTION_END_TASK
@@ -869,8 +870,9 @@ object AutomationManager {
     }
   }
 
-  fun rescheduleAllAlarms(context: Context) {
+  fun reconcileStaleDndState(context: Context, nowMillis: Long = System.currentTimeMillis()) {
     try {
+      val activeDndTaskId = getActiveDndTaskId(context) ?: return
       val repository = RoutineRepository(context)
       val anchors = repository.getAnchors().filter { !it.isDeleted }
       val dynamicTasks = repository.getDynamicTasks().filter { !it.isDeleted }
@@ -878,7 +880,70 @@ object AutomationManager {
       val bufferMinutes = repository.getBufferMinutes()
       val calculatedAnchors = SchedulerEngine.calculateAnchors(anchors, sleepDuration)
 
-      // Purge any legacy slot_* alarms and stale alarms before re-registering upcoming 7-day horizon
+      val baseCal = Calendar.getInstance().apply { timeInMillis = nowMillis }
+      var hasValidOngoingDndOccurrence = false
+
+      for (dayOffset in -1..0) {
+        val dayCal = (baseCal.clone() as Calendar).apply {
+          add(Calendar.DAY_OF_YEAR, dayOffset)
+        }
+        val routineDay = calendarToRoutineDay(dayCal)
+        val daySchedule = SchedulerEngine.scheduleDay(
+          calculatedAnchors,
+          dynamicTasks,
+          routineDay,
+          bufferMinutes
+        )
+
+        val matchingTask = daySchedule.scheduledTasks.firstOrNull { it.id == activeDndTaskId }
+        if (matchingTask != null && !matchingTask.isDeleted && !matchingTask.isCurrentlyPaused() && matchingTask.enableDnd) {
+          val startCal = (dayCal.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, matchingTask.startTimeMinute / 60)
+            set(Calendar.MINUTE, matchingTask.startTimeMinute % 60)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+          }
+          val startMillis = startCal.timeInMillis
+          val endMillis = startMillis + matchingTask.durationMinutes * 60L * 1000L
+          val effectiveDndDelay = if (matchingTask.slotNumber == 3 && routineDay == RoutineDay.FRIDAY) {
+            5
+          } else {
+            matchingTask.dndDelayMinutes.coerceIn(0, 25)
+          }
+          val effectiveDndStartMillis = startMillis + effectiveDndDelay * 60L * 1000L
+          if (nowMillis in effectiveDndStartMillis until endMillis) {
+            hasValidOngoingDndOccurrence = true
+            break
+          }
+        }
+      }
+
+      if (!hasValidOngoingDndOccurrence) {
+        if (!setDndMode(context, false, activeDndTaskId)) {
+          val prefs = context.getSharedPreferences(PREFS_DND, Context.MODE_PRIVATE)
+          if (prefs.getString(KEY_ACTIVE_DND_TASK_ID, null) == activeDndTaskId) {
+            prefs.edit().remove(KEY_ACTIVE_DND_TASK_ID).commit()
+          }
+        }
+      }
+    } catch (_: Exception) {}
+  }
+
+  fun rescheduleAllAlarms(context: Context) {
+    rescheduleAllAlarmsAt(context, System.currentTimeMillis())
+  }
+
+  internal fun rescheduleAllAlarmsAt(context: Context, now: Long) {
+    try {
+      reconcileStaleDndState(context, now)
+      val repository = RoutineRepository(context)
+      val anchors = repository.getAnchors().filter { !it.isDeleted }
+      val dynamicTasks = repository.getDynamicTasks().filter { !it.isDeleted }
+      val sleepDuration = repository.getSleepDurationMinutes()
+      val bufferMinutes = repository.getBufferMinutes()
+      val calculatedAnchors = SchedulerEngine.calculateAnchors(anchors, sleepDuration)
+
+      // Purge any legacy slot_* alarms and stale alarms before re-registering upcoming horizon
       for (slot in 1..7) {
         cancelTaskAlarms(context, "slot_$slot")
       }
@@ -889,11 +954,10 @@ object AutomationManager {
         cancelTaskAlarms(context, dyn.id)
       }
 
-      val now = System.currentTimeMillis()
       val baseCal = Calendar.getInstance().apply { timeInMillis = now }
       val scheduledTaskIds = mutableSetOf<String>()
 
-      for (dayOffset in 0..6) {
+      for (dayOffset in -1..6) {
         val dayCal = (baseCal.clone() as Calendar).apply {
           add(Calendar.DAY_OF_YEAR, dayOffset)
         }
@@ -916,14 +980,14 @@ object AutomationManager {
           val startMillis = startCal.timeInMillis
           val endMillis = startMillis + task.durationMinutes * 60L * 1000L
 
-          val isUpcomingOrOngoing = if (dayOffset == 0) {
+          val isUpcomingOrOngoing = if (dayOffset <= 0) {
             endMillis > now
           } else {
             startMillis > now
           }
 
           if (isUpcomingOrOngoing) {
-            scheduleTaskAlarmsForOccurrence(context, task, startMillis, routineDay)
+            scheduleTaskAlarmsForOccurrence(context, task, startMillis, routineDay, now)
             scheduledTaskIds.add(task.id)
           }
         }

@@ -743,5 +743,171 @@ class ExampleRobolectricTest {
       tier1File.delete()
     }
   }
+
+  @Test
+  fun `dnd alarm is skipped when delay equals or exceeds task duration while end alarm stays scheduled`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val cal = java.util.Calendar.getInstance().apply {
+      add(java.util.Calendar.HOUR_OF_DAY, 2)
+      set(java.util.Calendar.SECOND, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val dayOfTask = when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
+      java.util.Calendar.SATURDAY -> RoutineDay.SATURDAY
+      java.util.Calendar.SUNDAY -> RoutineDay.SUNDAY
+      java.util.Calendar.MONDAY -> RoutineDay.MONDAY
+      java.util.Calendar.TUESDAY -> RoutineDay.TUESDAY
+      java.util.Calendar.WEDNESDAY -> RoutineDay.WEDNESDAY
+      java.util.Calendar.THURSDAY -> RoutineDay.THURSDAY
+      java.util.Calendar.FRIDAY -> RoutineDay.FRIDAY
+      else -> RoutineDay.SATURDAY
+    }
+    val startMin = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+
+    val invalidDelayTask = RoutineTask(
+      id = "short_task_long_delay",
+      title = "10m Task 15m Delay",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = startMin,
+      durationMinutes = 10,
+      enableDnd = true,
+      dndDelayMinutes = 15,
+      selectedDays = setOf(dayOfTask)
+    )
+    AutomationManager.scheduleTaskAlarms(context, invalidDelayTask)
+
+    val noDndPi = android.app.PendingIntent.getBroadcast(
+      context,
+      (invalidDelayTask.id + "_dnd").hashCode(),
+      android.content.Intent(context, com.example.receiver.RoutineAlarmReceiver::class.java).apply {
+        action = AutomationManager.ACTION_APPLY_DND
+      },
+      android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+    )
+    val endPi = android.app.PendingIntent.getBroadcast(
+      context,
+      (invalidDelayTask.id + "_end").hashCode(),
+      android.content.Intent(context, com.example.receiver.RoutineAlarmReceiver::class.java).apply {
+        action = AutomationManager.ACTION_END_TASK
+      },
+      android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+    )
+    assertEquals("DND alarm must NOT be scheduled when delay >= duration", null, noDndPi)
+    assertNotNull("End alarm must still be scheduled", endPi)
+
+    val validDelayTask = RoutineTask(
+      id = "long_task_short_delay",
+      title = "30m Task 5m Delay",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = startMin,
+      durationMinutes = 30,
+      enableDnd = true,
+      dndDelayMinutes = 5,
+      selectedDays = setOf(dayOfTask)
+    )
+    AutomationManager.scheduleTaskAlarms(context, validDelayTask)
+    val validDndPi = android.app.PendingIntent.getBroadcast(
+      context,
+      (validDelayTask.id + "_dnd").hashCode(),
+      android.content.Intent(context, com.example.receiver.RoutineAlarmReceiver::class.java).apply {
+        action = AutomationManager.ACTION_APPLY_DND
+      },
+      android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+    )
+    assertNotNull("DND alarm must be scheduled when delay < duration", validDndPi)
+  }
+
+  @Test
+  fun `reconcileStaleDndState clears active DND owner when task has ended or DND is disabled`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val pastEndTask = RoutineTask(
+      id = "stale_dnd_owner",
+      title = "Ended Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 60, // 01:00 AM
+      durationMinutes = 30,
+      enableDnd = false,
+      selectedDays = RoutineDay.allDays()
+    )
+    repo.saveAnchors(SchedulerEngine.createDefaultAnchors(360))
+    repo.saveDynamicTasks(listOf(pastEndTask))
+
+    val dndPrefs = context.getSharedPreferences("chronos_dnd_prefs", Context.MODE_PRIVATE)
+    dndPrefs.edit().putString("key_active_dnd_task_id", pastEndTask.id).commit()
+    assertEquals(pastEndTask.id, AutomationManager.getActiveDndTaskId(context))
+
+    AutomationManager.reconcileStaleDndState(context)
+    assertEquals(null, AutomationManager.getActiveDndTaskId(context))
+  }
+
+  @Test
+  fun `alarm receiver ignores ACTION_APPLY_DND when EXTRA_TASK_END_MILLIS has elapsed`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val activeTask = RoutineTask(
+      id = "expired_apply_dnd_task",
+      title = "Active DND Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 600,
+      durationMinutes = 30,
+      enableDnd = true,
+      dndDelayMinutes = 10
+    )
+    repo.saveDynamicTasks(listOf(activeTask))
+    context.getSharedPreferences("chronos_dnd_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+
+    val receiver = com.example.receiver.RoutineAlarmReceiver()
+    val expiredIntent = android.content.Intent(AutomationManager.ACTION_APPLY_DND).apply {
+      putExtra(AutomationManager.EXTRA_TASK_ID, activeTask.id)
+      putExtra(AutomationManager.EXTRA_TASK_END_MILLIS, System.currentTimeMillis() - 5000L)
+    }
+    receiver.onReceive(context, expiredIntent)
+    assertEquals(null, AutomationManager.getActiveDndTaskId(context))
+  }
+
+  @Test
+  fun `rescheduleAllAlarmsAt preserves overnight end alarm across midnight rollover`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val anchors = SchedulerEngine.createDefaultAnchors(360) // Slot 1 Sleep: 23:00 (1380m) for 360m -> ends 05:00 next day
+    repo.saveAnchors(anchors)
+    repo.saveDynamicTasks(emptyList())
+
+    // Simulate 01:00 AM on Tuesday (yesterday Monday Sleep 23:00 -> Tuesday 05:00 is currently ongoing)
+    val nowCal = java.util.Calendar.getInstance().apply {
+      set(java.util.Calendar.YEAR, 2026)
+      set(java.util.Calendar.MONTH, java.util.Calendar.MAY)
+      set(java.util.Calendar.DAY_OF_MONTH, 12) // Tuesday
+      set(java.util.Calendar.HOUR_OF_DAY, 1)
+      set(java.util.Calendar.MINUTE, 0)
+      set(java.util.Calendar.SECOND, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val expectedSleepEndCal = (nowCal.clone() as java.util.Calendar).apply {
+      set(java.util.Calendar.HOUR_OF_DAY, 5)
+      set(java.util.Calendar.MINUTE, 0)
+    }
+
+    AutomationManager.rescheduleAllAlarmsAt(context, nowCal.timeInMillis)
+
+    val am = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+    val shadowAm = org.robolectric.Shadows.shadowOf(am)
+    val scheduledAlarms = shadowAm.scheduledAlarms
+
+    val slot1EndPi = android.app.PendingIntent.getBroadcast(
+      context,
+      ("anchor_slot_1_end").hashCode(),
+      android.content.Intent(context, com.example.receiver.RoutineAlarmReceiver::class.java).apply {
+        action = AutomationManager.ACTION_END_TASK
+      },
+      android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+    )
+    assertNotNull("Overnight Slot 1 end alarm must remain scheduled after midnight", slot1EndPi)
+    assertTrue(
+      "Overnight Slot 1 end alarm must target today 05:00 AM rather than skipping to next night",
+      scheduledAlarms.any { it.operation == slot1EndPi && it.triggerAtTime == expectedSleepEndCal.timeInMillis }
+    )
+  }
 }
 

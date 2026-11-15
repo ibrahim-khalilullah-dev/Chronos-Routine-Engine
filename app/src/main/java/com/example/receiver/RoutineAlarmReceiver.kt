@@ -25,7 +25,11 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
       }
       AutomationManager.ACTION_APPLY_DND -> {
         val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID)
+        val taskEndMillis = intent.getLongExtra(AutomationManager.EXTRA_TASK_END_MILLIS, -1L)
         if (!taskId.isNullOrBlank()) {
+          if (taskEndMillis > 0L && System.currentTimeMillis() >= taskEndMillis - 1000L) {
+            return
+          }
           val repository = RoutineRepository(context)
           val targetTask = (repository.getAnchors() + repository.getDynamicTasks())
             .firstOrNull { it.id == taskId }

@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -650,6 +651,7 @@ fun TaskModalBottomSheet(
   val initialStartMin = remember(initialTask) { initialTask?.startTimeMinute ?: 540 }
   val initialVoice = remember(initialTask) { initialTask?.voiceMessage ?: "" }
   val initialDnd = remember(initialTask) { initialTask?.enableDnd ?: false }
+  val initialDndDelay = remember(initialTask) { initialTask?.dndDelayMinutes ?: 0 }
   val initialSound = remember(initialTask) { initialTask?.isSoundAlertEnabled ?: true }
 
   // Unsaved Changes Dismissal Guard
@@ -669,6 +671,7 @@ fun TaskModalBottomSheet(
             part1VoiceMessage.isNotBlank() ||
             part2VoiceMessage.isNotBlank() ||
             enableDnd ||
+            dndDelayMinutes > 0 ||
             !isSoundAlertEnabled ||
             customFlexibilityMinutes > 0 ||
             interTaskBufferMinutes > 0
@@ -677,6 +680,7 @@ fun TaskModalBottomSheet(
             voiceMessage.isNotBlank() ||
             (durationHours * 60 + durationMins) > 0 ||
             enableDnd ||
+            dndDelayMinutes > 0 ||
             !isSoundAlertEnabled ||
             isHighPriority ||
             customFlexibilityMinutes > 0 ||
@@ -705,6 +709,7 @@ fun TaskModalBottomSheet(
           voiceVolumeS1 != (resolvedP1Task?.voiceVolume ?: 1f) ||
           voiceVolumeS2 != (resolvedP2Task?.voiceVolume ?: 1f) ||
           enableDnd != initialDnd ||
+          dndDelayMinutes != initialDndDelay ||
           isSoundAlertEnabled != initialSound ||
           (initialTask.category != null && selectedCategory.id != initialTask.category) ||
           selectedDays != initialTask.selectedDays ||
@@ -716,6 +721,7 @@ fun TaskModalBottomSheet(
           (startHour * 60 + startMinute) != initialStartMin ||
           voiceMessage != initialVoice ||
           enableDnd != initialDnd ||
+          dndDelayMinutes != initialDndDelay ||
           isSoundAlertEnabled != initialSound ||
           isFluidTwinMode != initialTask.isFluidTwin ||
           (initialTask.category != null && selectedCategory.id != initialTask.category) ||
@@ -860,7 +866,7 @@ fun TaskModalBottomSheet(
             part1SafetyFloorMinutes = part1SafetyFloor.coerceIn(0, p1Dur),
             part2SafetyFloorMinutes = part2SafetyFloor.coerceIn(0, p2Dur),
             enableHaptic = enableHaptic,
-            dndDelayMinutes = dndDelayMinutes.coerceIn(0, 25),
+            dndDelayMinutes = if (enableDnd) dndDelayMinutes.coerceIn(0, 25) else 0,
             category = selectedCategory.id,
             part1OriginalStartMinute = finalP1Start,
             part2OriginalStartMinute = finalP2Start
@@ -885,6 +891,7 @@ fun TaskModalBottomSheet(
         durationMinutes = calculatedDuration,
         voiceMessage = voiceMessage,
         enableDnd = enableDnd,
+        dndDelayMinutes = if (enableDnd) dndDelayMinutes.coerceIn(0, 25) else 0,
         enableHaptic = enableHaptic,
         allowSplitting = false,
         isHighPriority = isHighPriority,
@@ -1694,10 +1701,11 @@ fun TaskModalBottomSheet(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                val flexFocusRequester = remember { FocusRequester() }
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+                  horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
                 ) {
                   Surface(
                     onClick = { decrementFlexibility() },
@@ -1705,11 +1713,11 @@ fun TaskModalBottomSheet(
                     color = Color(0xFF141D2E),
                     border = BorderStroke(1.dp, Color(0xFF283A57)),
                     modifier = Modifier
-                      .size(30.dp)
+                      .size(28.dp)
                       .testTag("decrement_flexibility_button")
                   ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Text("-", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                      Text("-", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
                     }
                   }
 
@@ -1724,45 +1732,41 @@ fun TaskModalBottomSheet(
                         if (customFlexibilityMinutes > 0) Color(0xFF06B6D4).copy(alpha = 0.45f) else Color(0xFF1E2B42),
                         RoundedCornerShape(10.dp)
                       )
-                      .padding(horizontal = 6.dp),
+                      .clickable { flexFocusRequester.requestFocus() }
+                      .padding(horizontal = 4.dp),
                     contentAlignment = Alignment.Center
                   ) {
-                    BasicTextField(
-                      value = customFlexInput,
-                      onValueChange = { raw ->
-                        val digits = raw.filter { it.isDigit() }.take(2)
-                        customFlexInput = digits
-                        val parsed = digits.toIntOrNull() ?: 0
-                        customFlexibilityMinutes = parsed.coerceIn(0, 30)
-                      },
-                      singleLine = true,
-                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                      textStyle = TextStyle(
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFF8FAFC),
-                        textAlign = TextAlign.Center
-                      ),
-                      cursorBrush = SolidColor(Color(0xFF06B6D4)),
-                      modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("custom_flexibility_input"),
-                      decorationBox = { innerTextField ->
-                        Row(
-                          modifier = Modifier.fillMaxWidth(),
-                          verticalAlignment = Alignment.CenterVertically,
-                          horizontalArrangement = Arrangement.Center
-                        ) {
-                          Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                          Spacer(modifier = Modifier.width(2.dp))
-                          Box(contentAlignment = Alignment.Center) {
-                            innerTextField()
-                          }
-                          Spacer(modifier = Modifier.width(2.dp))
-                          Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp)
-                        }
-                      }
-                    )
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.Center
+                    ) {
+                      Text("±", color = Color(0xFF06B6D4), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                      Spacer(modifier = Modifier.width(2.dp))
+                      BasicTextField(
+                        value = customFlexInput,
+                        onValueChange = { raw ->
+                          val digits = raw.filter { it.isDigit() }.take(2)
+                          customFlexInput = digits
+                          val parsed = digits.toIntOrNull() ?: 0
+                          customFlexibilityMinutes = parsed.coerceIn(0, 30)
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        textStyle = TextStyle(
+                          fontSize = 13.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = Color(0xFFF8FAFC),
+                          textAlign = TextAlign.Center
+                        ),
+                        cursorBrush = SolidColor(Color(0xFF06B6D4)),
+                        modifier = Modifier
+                          .widthIn(min = 18.dp, max = 26.dp)
+                          .focusRequester(flexFocusRequester)
+                          .testTag("custom_flexibility_input")
+                      )
+                      Spacer(modifier = Modifier.width(1.dp))
+                      Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp)
+                    }
                   }
 
                   Surface(
@@ -1771,11 +1775,11 @@ fun TaskModalBottomSheet(
                     color = Color(0xFF141D2E),
                     border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
                     modifier = Modifier
-                      .size(30.dp)
+                      .size(28.dp)
                       .testTag("increment_flexibility_button")
                   ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Text("+", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
+                      Text("+", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF06B6D4))
                     }
                   }
                 }
@@ -1843,10 +1847,11 @@ fun TaskModalBottomSheet(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                val bufferFocusRequester = remember { FocusRequester() }
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+                  horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
                 ) {
                   Surface(
                     onClick = { decrementBuffer() },
@@ -1854,11 +1859,11 @@ fun TaskModalBottomSheet(
                     color = Color(0xFF141D2E),
                     border = BorderStroke(1.dp, Color(0xFF283A57)),
                     modifier = Modifier
-                      .size(30.dp)
+                      .size(28.dp)
                       .testTag("decrement_buffer_button")
                   ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Text("-", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                      Text("-", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
                     }
                   }
 
@@ -1873,43 +1878,39 @@ fun TaskModalBottomSheet(
                         if (interTaskBufferMinutes > 0) Color(0xFF10B981).copy(alpha = 0.45f) else Color(0xFF1E2B42),
                         RoundedCornerShape(10.dp)
                       )
-                      .padding(horizontal = 6.dp),
+                      .clickable { bufferFocusRequester.requestFocus() }
+                      .padding(horizontal = 4.dp),
                     contentAlignment = Alignment.Center
                   ) {
-                    BasicTextField(
-                      value = bufferInput,
-                      onValueChange = { raw ->
-                        val digits = raw.filter { it.isDigit() }.take(2)
-                        bufferInput = digits
-                        val parsed = digits.toIntOrNull() ?: 0
-                        interTaskBufferMinutes = parsed.coerceIn(0, 30)
-                      },
-                      singleLine = true,
-                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                      textStyle = TextStyle(
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFF8FAFC),
-                        textAlign = TextAlign.Center
-                      ),
-                      cursorBrush = SolidColor(Color(0xFF10B981)),
-                      modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("custom_buffer_input"),
-                      decorationBox = { innerTextField ->
-                        Row(
-                          modifier = Modifier.fillMaxWidth(),
-                          verticalAlignment = Alignment.CenterVertically,
-                          horizontalArrangement = Arrangement.Center
-                        ) {
-                          Box(contentAlignment = Alignment.Center) {
-                            innerTextField()
-                          }
-                          Spacer(modifier = Modifier.width(2.dp))
-                          Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp)
-                        }
-                      }
-                    )
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.Center
+                    ) {
+                      BasicTextField(
+                        value = bufferInput,
+                        onValueChange = { raw ->
+                          val digits = raw.filter { it.isDigit() }.take(2)
+                          bufferInput = digits
+                          val parsed = digits.toIntOrNull() ?: 0
+                          interTaskBufferMinutes = parsed.coerceIn(0, 30)
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        textStyle = TextStyle(
+                          fontSize = 13.sp,
+                          fontWeight = FontWeight.Bold,
+                          color = Color(0xFFF8FAFC),
+                          textAlign = TextAlign.Center
+                        ),
+                        cursorBrush = SolidColor(Color(0xFF10B981)),
+                        modifier = Modifier
+                          .widthIn(min = 18.dp, max = 26.dp)
+                          .focusRequester(bufferFocusRequester)
+                          .testTag("custom_buffer_input")
+                      )
+                      Spacer(modifier = Modifier.width(2.dp))
+                      Text("m", color = Color(0xFF94A3B8), fontSize = 10.sp)
+                    }
                   }
 
                   Surface(
@@ -1918,11 +1919,11 @@ fun TaskModalBottomSheet(
                     color = Color(0xFF141D2E),
                     border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)),
                     modifier = Modifier
-                      .size(30.dp)
+                      .size(28.dp)
                       .testTag("increment_buffer_button")
                   ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                      Text("+", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+                      Text("+", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
                     }
                   }
                 }
@@ -1957,9 +1958,9 @@ fun TaskModalBottomSheet(
             onEnableDndChange = { enableDnd = it },
             dndSwitchTestTag = null,
             isDndDelayLockedZero = false,
-            supportsDndDelay = false,
-            dndDelayMinutes = 0,
-            onDndDelayMinutesChange = {}
+            supportsDndDelay = true,
+            dndDelayMinutes = dndDelayMinutes,
+            onDndDelayMinutesChange = { dndDelayMinutes = it }
           )
 
           Spacer(modifier = Modifier.height(14.dp))
@@ -2125,16 +2126,14 @@ fun TaskModalBottomSheet(
                 ),
               contentAlignment = Alignment.Center
             ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                  text = if (isAnchor) "Save Anchor Changes" else "✓ Save & Apply Routine",
-                  fontSize = 14.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = Color.White
-                )
-              }
+              Text(
+                text = if (isAnchor) "✓ Save Anchor Changes" else "✓ Save & Apply Routine",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
             }
           }
 
@@ -3166,29 +3165,33 @@ private fun LuxuryTimeDurationRow(
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF070B13))
             .border(1.dp, Color(0xFF1A2538), RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .clickable { hoursFocusRequester.requestFocus() }
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+          contentAlignment = Alignment.Center
         ) {
-          BasicTextField(
-            value = hoursValue,
-            onValueChange = onHoursValueChange,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            textStyle = TextStyle(
-              color = Color(0xFFF8FAFC),
-              fontSize = 17.sp,
-              fontWeight = FontWeight.Bold
-            ),
-            cursorBrush = SolidColor(accentColor),
-            modifier = Modifier
-              .fillMaxWidth()
-              .focusRequester(hoursFocusRequester)
-              .testTag(hoursTestTag),
-            decorationBox = { innerTextField ->
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Box(contentAlignment = Alignment.CenterStart) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+          ) {
+            BasicTextField(
+              value = hoursValue,
+              onValueChange = onHoursValueChange,
+              singleLine = true,
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+              textStyle = TextStyle(
+                color = Color(0xFFF8FAFC),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+              ),
+              cursorBrush = SolidColor(accentColor),
+              modifier = Modifier
+                .widthIn(min = 22.dp, max = 32.dp)
+                .focusRequester(hoursFocusRequester)
+                .testTag(hoursTestTag),
+              decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.Center) {
                   if (hoursValue.isEmpty()) {
                     Text(
                       text = "00",
@@ -3199,16 +3202,16 @@ private fun LuxuryTimeDurationRow(
                   }
                   innerTextField()
                 }
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                  text = "h",
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.SemiBold,
-                  color = Color(0xFF64748B)
-                )
               }
-            }
-          )
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              text = "h",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = Color(0xFF64748B)
+            )
+          }
         }
       }
     }
@@ -3231,7 +3234,7 @@ private fun LuxuryTimeDurationRow(
         modifier = Modifier
           .fillMaxWidth()
           .heightIn(min = 72.dp)
-          .padding(horizontal = 10.dp, vertical = 10.dp),
+          .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.SpaceBetween
       ) {
         Text(
@@ -3249,29 +3252,33 @@ private fun LuxuryTimeDurationRow(
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF070B13))
             .border(1.dp, Color(0xFF1A2538), RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .clickable { minsFocusRequester.requestFocus() }
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+          contentAlignment = Alignment.Center
         ) {
-          BasicTextField(
-            value = minsValue,
-            onValueChange = onMinsValueChange,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            textStyle = TextStyle(
-              color = Color(0xFFF8FAFC),
-              fontSize = 17.sp,
-              fontWeight = FontWeight.Bold
-            ),
-            cursorBrush = SolidColor(accentColor),
-            modifier = Modifier
-              .fillMaxWidth()
-              .focusRequester(minsFocusRequester)
-              .testTag(minsTestTag),
-            decorationBox = { innerTextField ->
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Box(contentAlignment = Alignment.CenterStart) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+          ) {
+            BasicTextField(
+              value = minsValue,
+              onValueChange = onMinsValueChange,
+              singleLine = true,
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+              textStyle = TextStyle(
+                color = Color(0xFFF8FAFC),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+              ),
+              cursorBrush = SolidColor(accentColor),
+              modifier = Modifier
+                .widthIn(min = 22.dp, max = 32.dp)
+                .focusRequester(minsFocusRequester)
+                .testTag(minsTestTag),
+              decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.Center) {
                   if (minsValue.isEmpty()) {
                     Text(
                       text = "00",
@@ -3282,16 +3289,16 @@ private fun LuxuryTimeDurationRow(
                   }
                   innerTextField()
                 }
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                  text = "m",
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.SemiBold,
-                  color = Color(0xFF64748B)
-                )
               }
-            }
-          )
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              text = "m",
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = Color(0xFF64748B)
+            )
+          }
         }
       }
     }
@@ -3318,7 +3325,7 @@ private fun LuxuryTimeDurationRow(
           modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 72.dp)
-            .padding(horizontal = 10.dp, vertical = 10.dp),
+            .padding(horizontal = 8.dp, vertical = 10.dp),
           verticalArrangement = Arrangement.SpaceBetween
         ) {
           Text(
@@ -3340,29 +3347,33 @@ private fun LuxuryTimeDurationRow(
                 if (safetyFloorError) DangerRed else Color(0xFF1A2538),
                 RoundedCornerShape(10.dp)
               )
-              .padding(horizontal = 10.dp, vertical = 6.dp)
+              .clickable { safetyFocusRequester.requestFocus() }
+              .padding(horizontal = 6.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
           ) {
-            BasicTextField(
-              value = safetyFloorValue,
-              onValueChange = onSafetyFloorValueChange,
-              singleLine = true,
-              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-              textStyle = TextStyle(
-                color = Color(0xFFF8FAFC),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold
-              ),
-              cursorBrush = SolidColor(Color(0xFF10B981)),
-              modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(safetyFocusRequester)
-                .testTag(safetyFloorTestTag),
-              decorationBox = { innerTextField ->
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Box(contentAlignment = Alignment.CenterStart) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.Center
+            ) {
+              BasicTextField(
+                value = safetyFloorValue,
+                onValueChange = onSafetyFloorValueChange,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = TextStyle(
+                  color = Color(0xFFF8FAFC),
+                  fontSize = 17.sp,
+                  fontWeight = FontWeight.Bold,
+                  textAlign = TextAlign.Center
+                ),
+                cursorBrush = SolidColor(Color(0xFF10B981)),
+                modifier = Modifier
+                  .widthIn(min = 22.dp, max = 38.dp)
+                  .focusRequester(safetyFocusRequester)
+                  .testTag(safetyFloorTestTag),
+                decorationBox = { innerTextField ->
+                  Box(contentAlignment = Alignment.Center) {
                     if (safetyFloorValue.isEmpty()) {
                       Text(
                         text = "00",
@@ -3373,16 +3384,16 @@ private fun LuxuryTimeDurationRow(
                     }
                     innerTextField()
                   }
-                  Spacer(modifier = Modifier.width(4.dp))
-                  Text(
-                    text = "m",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF64748B)
-                  )
                 }
-              }
-            )
+              )
+              Spacer(modifier = Modifier.width(3.dp))
+              Text(
+                text = "m",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF64748B)
+              )
+            }
           }
         }
       }
@@ -3935,10 +3946,11 @@ private fun LuxuryHardwareGrid(
           }
         } else if (supportsDndDelay && enableDnd) {
           var delayInputText by remember(dndDelayMinutes) { mutableStateOf(dndDelayMinutes.toString()) }
+          val delayFocusRequester = remember { FocusRequester() }
           Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
           ) {
             Surface(
               onClick = {
@@ -3949,7 +3961,7 @@ private fun LuxuryHardwareGrid(
               shape = CircleShape,
               color = Color(0xFF141D2E),
               border = BorderStroke(1.dp, Color(0xFF283A57)),
-              modifier = Modifier.size(30.dp)
+              modifier = Modifier.size(28.dp)
             ) {
               Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 Text("-", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
@@ -3963,47 +3975,43 @@ private fun LuxuryHardwareGrid(
                 .clip(RoundedCornerShape(10.dp))
                 .background(Color(0xFF070B13))
                 .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                .padding(horizontal = 6.dp),
+                .clickable { delayFocusRequester.requestFocus() }
+                .padding(horizontal = 4.dp),
               contentAlignment = Alignment.Center
             ) {
-              BasicTextField(
-                value = delayInputText,
-                onValueChange = { raw ->
-                  val (clean, parsed) = sanitizeNumberInput(raw, 2)
-                  delayInputText = clean
-                  onDndDelayMinutesChange(parsed.coerceIn(0, 25))
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = TextStyle(
-                  fontSize = 12.sp,
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+              ) {
+                BasicTextField(
+                  value = delayInputText,
+                  onValueChange = { raw ->
+                    val (clean, parsed) = sanitizeNumberInput(raw, 2)
+                    delayInputText = clean
+                    onDndDelayMinutesChange(parsed.coerceIn(0, 25))
+                  },
+                  singleLine = true,
+                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  textStyle = TextStyle(
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF8FAFC),
+                    textAlign = TextAlign.Center
+                  ),
+                  cursorBrush = SolidColor(Color(0xFF8B5CF6)),
+                  modifier = Modifier
+                    .widthIn(min = 18.dp, max = 26.dp)
+                    .focusRequester(delayFocusRequester)
+                    .testTag("anchor_dnd_delay_input")
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(
+                  text = "m",
+                  fontSize = 10.sp,
                   fontWeight = FontWeight.Bold,
-                  color = Color(0xFFF8FAFC),
-                  textAlign = TextAlign.Center
-                ),
-                cursorBrush = SolidColor(Color(0xFF8B5CF6)),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .testTag("anchor_dnd_delay_input"),
-                decorationBox = { innerTextField ->
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                  ) {
-                    Box(contentAlignment = Alignment.Center) {
-                      innerTextField()
-                    }
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Text(
-                      text = "m",
-                      fontSize = 10.sp,
-                      fontWeight = FontWeight.Bold,
-                      color = Color(0xFF8B5CF6)
-                    )
-                  }
-                }
-              )
+                  color = Color(0xFF8B5CF6)
+                )
+              }
             }
 
             Surface(
@@ -4015,10 +4023,10 @@ private fun LuxuryHardwareGrid(
               shape = CircleShape,
               color = Color(0xFF141D2E),
               border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.5f)),
-              modifier = Modifier.size(30.dp)
+              modifier = Modifier.size(28.dp)
             ) {
               Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Text("+", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC4B5FD))
+                Text("+", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFC4B5FD))
               }
             }
           }

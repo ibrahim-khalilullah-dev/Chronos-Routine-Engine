@@ -680,6 +680,54 @@ class ExampleUnitTest {
     val fallback = com.example.service.AutomationManager.getVoicePreset("nonexistent_preset")
     assertEquals("natural_female", fallback.id)
   }
-}
 
+  @Test
+  fun testConsoleParserDndDelaySyncForDynamicAndTwin() {
+    val script = """
+      DYNAMIC | Delayed Focus | 45 | 09:00 | Y | ALL | Y | Go | 10 | 5 | Y | work | 80 | Y | 12
+      DYNAMIC | Clamped & Disabled DND | 30 | 11:00 | N | ALL | Y | Wait | 0 | 0 | N | general | 100 | Y | 20
+      TWIN | 60 | Twin A | 07:00 | 30 | Go A | Twin B | 14:00 | 30 | Go B | Y | Mon,Wed | 5 | 2 | studying | 10 | 10 | Y | Y | 90 | 90 | Y | 15
+      TWIN | 40 | Twin Off A | 15:00 | 20 | Off A | Twin Off B | 16:00 | 20 | Off B | N | Tue | 0 | 0 | work | 0 | 0 | Y | Y | 100 | 100 | Y | 18
+    """.trimIndent()
+
+    val parsed = ConsoleParser.parse(script)
+    assertEquals(0, parsed.errorCount)
+    assertEquals(6, parsed.validTasks.size)
+
+    val dynDelayed = parsed.validTasks[0]
+    assertTrue(dynDelayed.enableDnd)
+    assertEquals(12, dynDelayed.dndDelayMinutes)
+
+    val dynDisabled = parsed.validTasks[1]
+    assertFalse(dynDisabled.enableDnd)
+    assertEquals(0, dynDisabled.dndDelayMinutes)
+
+    val twinA = parsed.validTasks[2]
+    val twinB = parsed.validTasks[3]
+    assertTrue(twinA.enableDnd)
+    assertEquals(15, twinA.dndDelayMinutes)
+    assertEquals(15, twinB.dndDelayMinutes)
+
+    val twinOffA = parsed.validTasks[4]
+    assertFalse(twinOffA.enableDnd)
+    assertEquals(0, twinOffA.dndDelayMinutes)
+
+    val exported = ConsoleParser.generateRoutineScript(
+      anchors = emptyList(),
+      dynamicTasks = parsed.validTasks,
+      sleepMinutes = 360,
+      bufferMinutes = 0
+    )
+    assertTrue(exported.contains("| 80 | Y | 12"))
+    assertTrue(exported.contains("| 90 | 90 | Y | 15"))
+
+    val reparsed = ConsoleParser.parse(exported)
+    assertEquals(0, reparsed.errorCount)
+    assertEquals(12, reparsed.validTasks[0].dndDelayMinutes)
+    assertEquals(0, reparsed.validTasks[1].dndDelayMinutes)
+    assertEquals(15, reparsed.validTasks[2].dndDelayMinutes)
+    assertEquals(15, reparsed.validTasks[3].dndDelayMinutes)
+    assertEquals(0, reparsed.validTasks[4].dndDelayMinutes)
+  }
+}
 

@@ -468,6 +468,8 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         val isSoundEnabled = rawTokens.getOrNull(21)?.takeIf { it.isNotBlank() }?.uppercase()?.let {
           it in setOf("Y", "YES", "TRUE", "1")
         } ?: true
+        val rawDndDelay = rawTokens.getOrNull(22)?.trim()?.toIntOrNull()?.coerceIn(0, 25) ?: 0
+        val dndDelayMinutes = if (enableDnd) rawDndDelay else 0
 
         val totalPool = requestedPool.coerceAtLeast((p1Dur + p2Dur).coerceAtLeast(2))
         val twinId = "fluid_${UUID.randomUUID().toString().take(8)}"
@@ -481,6 +483,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           durationMinutes = p1Dur,
           voiceMessage = p1Voice,
           enableDnd = enableDnd,
+          dndDelayMinutes = dndDelayMinutes,
           enableHaptic = true,
           allowSplitting = false,
           selectedDays = parsedDays,
@@ -509,6 +512,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           durationMinutes = p2Dur,
           voiceMessage = p2Voice,
           enableDnd = enableDnd,
+          dndDelayMinutes = dndDelayMinutes,
           enableHaptic = true,
           allowSplitting = false,
           selectedDays = parsedDays,
@@ -668,6 +672,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
       var parsedCategory = "general"
       var parsedVoiceVolume = 1.0f
       var parsedSoundEnabled = true
+      var parsedDndDelayMinutes = 0
       if (!isFluidTwin) {
         if (tokens.size > 9) {
           val prioToken = tokens[9].uppercase()
@@ -688,6 +693,12 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
             parsedSoundEnabled = soundTok in setOf("Y", "YES", "TRUE", "1")
           }
         }
+        if (tokens.size > 13) {
+          val delayInt = tokens[13].trim().toIntOrNull()
+          if (delayInt != null) {
+            parsedDndDelayMinutes = if (enableDnd) delayInt.coerceIn(0, 25) else 0
+          }
+        }
       }
 
       val task = RoutineTask(
@@ -699,6 +710,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         durationMinutes = duration,
         voiceMessage = customMessage,
         enableDnd = enableDnd,
+        dndDelayMinutes = parsedDndDelayMinutes,
         enableHaptic = true,
         allowSplitting = !isFluidTwin,
         isHighPriority = isHighPriority,
@@ -922,11 +934,12 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
             val p1VolPct = (p1.voiceVolume.coerceIn(0f, 1f) * 100).toInt()
             val p2VolPct = (p2.voiceVolume.coerceIn(0f, 1f) * 100).toInt()
             val soundStr = if (p1.isSoundAlertEnabled) "Y" else "N"
+            val dndDelay = if (p1.enableDnd) p1.dndDelayMinutes.coerceIn(0, 25) else 0
 
             sb.appendLine(
               "TWIN | $pool | ${p1.title} | $p1Start | ${p1.durationMinutes} | $p1VoiceMsg | " +
                 "${p2.title} | $p2Start | ${p2.durationMinutes} | $p2VoiceMsg | " +
-                "$dndStr | $daysStr | $flex | $rest | $cat | $p1Safety | $p2Safety | $p1VoiceStr | $p2VoiceStr | $p1VolPct | $p2VolPct | $soundStr"
+                "$dndStr | $daysStr | $flex | $rest | $cat | $p1Safety | $p2Safety | $p1VoiceStr | $p2VoiceStr | $p1VolPct | $p2VolPct | $soundStr | $dndDelay"
             )
             continue
           }
@@ -945,8 +958,9 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         val cat = task.category?.trim()?.lowercase()?.ifBlank { null } ?: "general"
         val volPct = (task.voiceVolume.coerceIn(0f, 1f) * 100).toInt()
         val soundStr = if (task.isSoundAlertEnabled) "Y" else "N"
+        val dndDelay = if (task.enableDnd) task.dndDelayMinutes.coerceIn(0, 25) else 0
 
-        sb.appendLine("$title | $duration | $timeStr | $dndStr | $daysStr | $voiceStr | $voiceMsg | $flex | $rest | $prioStr | $cat | $volPct | $soundStr")
+        sb.appendLine("$title | $duration | $timeStr | $dndStr | $daysStr | $voiceStr | $voiceMsg | $flex | $rest | $prioStr | $cat | $volPct | $soundStr | $dndDelay")
       }
     }
 

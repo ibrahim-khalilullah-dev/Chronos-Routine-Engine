@@ -435,8 +435,8 @@ fun ChronosArchitectureGuideSheet(
         ) {
           Text(
             text = "Engineered specifically for complete immunity against aggressive OEM task killers (such as Samsung One UI Device Care deep sleep):\n\n" +
-              "• AlarmManager.setAlarmClock: Start alarms and DND-enabled end alarms use system clock alarm architecture, scheduling the earliest upcoming non-overflow occurrence over a 7-day horizon.\n" +
-              "• Task-Owned Priority DND & Overlap Guard: Tracks the active DND owner task ID synchronously, rejects delayed DND triggers for paused or deleted tasks, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.\n" +
+              "• AlarmManager.setAlarmClock & Overnight Rollover Guard: Start alarms, bounded delayed DND triggers (scheduled only when delay < duration), and DND-enabled end alarms use system clock alarm architecture across dayOffset -1..6 so overnight tasks retain their morning end alarm across midnight.\n" +
+              "• Task-Owned Priority DND & Stale Reconciliation: Tracks the active DND owner task ID synchronously, rejects stale or expired ACTION_APPLY_DND triggers via EXTRA_TASK_END_MILLIS, reconciles stale DND state on reschedule, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.\n" +
               "• 12-Persona Bilingual TTS & Audio Ducking: Sound chimes, haptic vibration, and TTS voice briefings run independently with a cancellable 1500ms delay, dynamic bn-BD/en-US language switching, Google TTS fallback, and transient audio ducking. Choose between 12 free offline bilingual BN/EN voice personas across Female (5), Youth 10–15y (3), and Male & Studio (4) categories in Settings via a collapsible dropdown with custom BN/EN test text and confirmation dialog, while keeping app access protected behind your device lock.\n" +
               "• 4-Tier Offline Vault: Routines and your active Voice Persona automatically persist to chronos_vault.json across external, public documents, and internal storage, enabling zero-click restoration on fresh reinstallation.",
             color = TextSecondary,
@@ -482,14 +482,14 @@ fun ChronosArchitectureGuideSheet(
                 fontWeight = FontWeight.Bold
               )
               Text(
-                text = "2. TWIN | Pool | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1VoiceYN | P2VoiceYN | P1Vol | P2Vol | Sound]",
+                text = "2. TWIN | Pool | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1VoiceYN | P2VoiceYN | P1Vol | P2Vol | Sound | DndDelay]",
                 color = Color(0xFF38BDF8),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold
               )
               Text(
-                text = "3. DYNAMIC | Name | Dur | Start | DND | Days | Voice | Msg | Flex | Rest | Priority | Category | [VoiceVol | Sound]",
+                text = "3. DYNAMIC | Name | Dur | Start | DND | Days | Voice | Msg | Flex | Rest | Priority | Category | [VoiceVol | Sound | DndDelay]",
                 color = Color(0xFF34D399),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,
@@ -497,7 +497,7 @@ fun ChronosArchitectureGuideSheet(
               )
               Spacer(modifier = Modifier.height(8.dp))
               Text(
-                text = "Example:\nDeep Work | 90 | 09:30 | Y | Mon,Wed,Fri | Y | Focus session starting now | 15 | 0 | Y | work | 100 | Y",
+                text = "Example:\nDeep Work | 90 | 09:30 | Y | Mon,Wed,Fri | Y | Focus session starting now | 15 | 0 | Y | work | 100 | Y | 5",
                 color = Color(0xFFE2E8F0),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,

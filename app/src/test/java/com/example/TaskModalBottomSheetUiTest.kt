@@ -186,4 +186,39 @@ class TaskModalBottomSheetUiTest {
     composeTestRule.onNodeWithTag("voice_confirm_dialog").assertDoesNotExist()
     assertEquals("deep_male", selectedPreset)
   }
+
+  @Test
+  fun `single dynamic task enables DND delay stepper and displays single checkmark on save button`() {
+    val existingTask = RoutineTask(
+      id = "single_dnd_delay_1",
+      title = "Deep Reading",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 540,
+      originalStartTimeMinute = 540,
+      durationMinutes = 45,
+      enableDnd = true,
+      dndDelayMinutes = 12,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    var savedTask: RoutineTask? = null
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        TaskModalBottomSheet(
+          initialTask = existingTask,
+          onDismiss = {},
+          onSaveTask = { savedTask = it },
+          onSaveAnchorDetails = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+          onSaveSlot5 = { _, _, _, _, _ -> }
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("anchor_dnd_delay_input").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("✓ Save & Apply Routine").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("save_task_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(12, savedTask?.dndDelayMinutes)
+  }
 }
