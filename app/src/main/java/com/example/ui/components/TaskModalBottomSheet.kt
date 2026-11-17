@@ -255,6 +255,19 @@ fun TaskModalBottomSheet(
     dndDelayMinutes: Int
   ) -> Unit,
   onSaveSlot5: (title: String, voiceMessage: String, selectedDays: Set<RoutineDay>, enableDnd: Boolean, dndDelayMinutes: Int) -> Unit,
+  onSaveSlot5Detailed: ((
+    title: String,
+    voiceMessage: String,
+    selectedDays: Set<RoutineDay>,
+    enableDnd: Boolean,
+    dndDelayMinutes: Int,
+    enableHaptic: Boolean,
+    isVoiceEnabled: Boolean,
+    voiceVolume: Float,
+    isSoundAlertEnabled: Boolean,
+    customRingtoneUri: String?,
+    customRingtoneTitle: String?
+  ) -> Unit)? = null,
   onMoveToTrash: (taskId: String) -> Unit = {},
   slot2StartMinute: Int = 300,
   allDynamicTasks: List<RoutineTask> = emptyList(),
@@ -263,6 +276,7 @@ fun TaskModalBottomSheet(
   activeVoicePresetId: String = "natural_female"
 ) {
   val context = LocalContext.current
+  val appContext = context.applicationContext ?: context
   val haptic = LocalHapticFeedback.current
   val sheetState = rememberModalBottomSheetState(
     skipPartiallyExpanded = true
@@ -516,108 +530,146 @@ fun TaskModalBottomSheet(
     }
   }
 
-  // TTS Engine Setup
+  // Lazy TTS Engine Setup (uses applicationContext; only initialized when voice is enabled or preview requested)
   var ttsInstance by remember { mutableStateOf<TextToSpeech?>(null) }
   var isTtsReady by remember { mutableStateOf(false) }
   var isBengaliVoiceReady by remember { mutableStateOf(true) }
   var isSpeakingVoicePreview by remember { mutableStateOf(false) }
   var activeVoiceUtteranceId by remember { mutableStateOf<String?>(null) }
+  var ttsRequested by remember { mutableStateOf(isVoiceEnabled || isVoiceEnabledS1 || isVoiceEnabledS2) }
+  var pendingVoicePreview by remember { mutableStateOf<Triple<String, Float, String>?>(null) }
 
-  DisposableEffect(context) {
-    var currentTts: TextToSpeech? = null
-    var triedGoogleTtsFallback = false
-    var disposed = false
+  LaunchedEffect(isVoiceEnabled, isVoiceEnabledS1, isVoiceEnabledS2) {
+    if (isVoiceEnabled || isVoiceEnabledS1 || isVoiceEnabledS2) {
+      ttsRequested = true
+    }
+  }
 
-    val progressListener = object : UtteranceProgressListener() {
-      override fun onStart(utteranceId: String?) {
-        isSpeakingVoicePreview = true
-        activeVoiceUtteranceId = utteranceId
-      }
+  DisposableEffect(appContext, ttsRequested) {
+    if (!ttsRequested) {
+      onDispose {}
+    } else {
+      var currentTts: TextToSpeech? = null
+      var triedGoogleTtsFallback = false
+      var disposed = false
 
-      override fun onDone(utteranceId: String?) {
-        if (activeVoiceUtteranceId == null || activeVoiceUtteranceId == utteranceId) {
+      val progressListener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) {
+          isSpeakingVoicePreview = true
+          activeVoiceUtteranceId = utteranceId
+        }
+
+        override fun onDone(utteranceId: String?) {
+          if (activeVoiceUtteranceId == null || activeVoiceUtteranceId == utteranceId) {
+            isSpeakingVoicePreview = false
+            activeVoiceUtteranceId = null
+          }
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String?) {
+          isSpeakingVoicePreview = false
+          activeVoiceUtteranceId = null
+        }
+
+        override fun onError(utteranceId: String?, errorCode: Int) {
           isSpeakingVoicePreview = false
           activeVoiceUtteranceId = null
         }
       }
 
-      @Deprecated("Deprecated in Java")
-      override fun onError(utteranceId: String?) {
-        isSpeakingVoicePreview = false
-        activeVoiceUtteranceId = null
-      }
-
-      override fun onError(utteranceId: String?, errorCode: Int) {
-        isSpeakingVoicePreview = false
-        activeVoiceUtteranceId = null
-      }
-    }
-
-    fun createTts(enginePackage: String? = null) {
-      var created: TextToSpeech? = null
-      val listener = TextToSpeech.OnInitListener { status ->
-        if (disposed) {
-          try {
-            created?.shutdown()
-          } catch (_: Exception) {}
-          return@OnInitListener
-        }
-        val active = created ?: currentTts
-        if (status == TextToSpeech.SUCCESS && active != null) {
-          val bnAvailable = AutomationManager.isBengaliTtsAvailable(active)
-          if (!bnAvailable && !triedGoogleTtsFallback && AutomationManager.hasGoogleTtsEngine(context)) {
-            triedGoogleTtsFallback = true
+      fun createTts(enginePackage: String? = null) {
+        var created: TextToSpeech? = null
+        val listener = TextToSpeech.OnInitListener { status ->
+          if (disposed) {
             try {
-              active.shutdown()
+              created?.shutdown()
             } catch (_: Exception) {}
-            createTts("com.google.android.tts")
             return@OnInitListener
           }
-          AutomationManager.applyTtsLanguage(active, "", activeVoicePresetId)
-          active.setOnUtteranceProgressListener(progressListener)
-          currentTts = active
-          ttsInstance = active
-          isBengaliVoiceReady = bnAvailable
-          isTtsReady = true
-        } else if (!triedGoogleTtsFallback && AutomationManager.hasGoogleTtsEngine(context)) {
-          triedGoogleTtsFallback = true
-          try {
-            active?.shutdown()
-          } catch (_: Exception) {}
-          createTts("com.google.android.tts")
-        } else {
-          isBengaliVoiceReady = false
-          isTtsReady = false
+          val active = created ?: currentTts
+          if (status == TextToSpeech.SUCCESS && active != null) {
+            val bnAvailable = AutomationManager.isBengaliTtsAvailable(active)
+            if (!bnAvailable && !triedGoogleTtsFallback && AutomationManager.hasGoogleTtsEngine(appContext)) {
+              triedGoogleTtsFallback = true
+              try {
+                active.shutdown()
+              } catch (_: Exception) {}
+              createTts("com.google.android.tts")
+              return@OnInitListener
+            }
+            AutomationManager.applyTtsLanguage(active, "", activeVoicePresetId)
+            active.setOnUtteranceProgressListener(progressListener)
+            currentTts = active
+            ttsInstance = active
+            isBengaliVoiceReady = bnAvailable
+            isTtsReady = true
+            pendingVoicePreview?.let { (msg, vol, uttId) ->
+              pendingVoicePreview = null
+              AutomationManager.applyTtsLanguage(active, msg, activeVoicePresetId)
+              val params = Bundle().apply {
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0f, 1f))
+              }
+              active.speak(msg, TextToSpeech.QUEUE_FLUSH, params, uttId)
+            }
+          } else if (!triedGoogleTtsFallback && AutomationManager.hasGoogleTtsEngine(appContext)) {
+            triedGoogleTtsFallback = true
+            try {
+              active?.shutdown()
+            } catch (_: Exception) {}
+            createTts("com.google.android.tts")
+          } else {
+            isBengaliVoiceReady = false
+            isTtsReady = false
+            pendingVoicePreview = null
+          }
+        }
+        created = try {
+          if (enginePackage != null) {
+            TextToSpeech(appContext, listener, enginePackage)
+          } else {
+            TextToSpeech(appContext, listener)
+          }
+        } catch (_: Exception) {
+          null
+        }
+        if (created != null) {
+          created.setOnUtteranceProgressListener(progressListener)
+          currentTts = created
+          ttsInstance = created
         }
       }
-      created = try {
-        if (enginePackage != null) {
-          TextToSpeech(context, listener, enginePackage)
-        } else {
-          TextToSpeech(context, listener)
-        }
-      } catch (_: Exception) {
-        null
-      }
-      if (created != null) {
-        created.setOnUtteranceProgressListener(progressListener)
-        currentTts = created
-        ttsInstance = created
+
+      createTts(null)
+      onDispose {
+        disposed = true
+        isSpeakingVoicePreview = false
+        activeVoiceUtteranceId = null
+        pendingVoicePreview = null
+        isTtsReady = false
+        ttsInstance = null
+        try {
+          currentTts?.stop()
+          currentTts?.shutdown()
+        } catch (_: Exception) {}
+        try {
+          activeRingtone?.stop()
+        } catch (_: Exception) {}
       }
     }
+  }
 
-    createTts(null)
-    onDispose {
-      disposed = true
-      isSpeakingVoicePreview = false
-      activeVoiceUtteranceId = null
-      try {
-        currentTts?.stop()
-        currentTts?.shutdown()
-      } catch (_: Exception) {}
-      try {
-        activeRingtone?.stop()
-      } catch (_: Exception) {}
+  val speakVoicePreview: (String, Float, String) -> Unit = { msg, vol, utteranceId ->
+    val activeTts = ttsInstance
+    if (activeTts != null && isTtsReady) {
+      AutomationManager.applyTtsLanguage(activeTts, msg, activeVoicePresetId)
+      val params = Bundle().apply {
+        putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0f, 1f))
+      }
+      activeTts.speak(msg, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+    } else {
+      pendingVoicePreview = Triple(msg, vol, utteranceId)
+      ttsRequested = true
     }
   }
 
@@ -760,7 +812,25 @@ fun TaskModalBottomSheet(
       val calculatedFriDuration = (fridayDurationHours * 60 + fridayDurationMins).coerceAtLeast(15)
       val calculatedFriStart = fridayStartHour * 60 + fridayStartMinute
       if (isSlot5) {
-        onSaveSlot5(title.ifBlank { "Elastic Rubber Buffer" }, voiceMessage, selectedDays, enableDnd, 0)
+        val safeTitle = title.ifBlank { "Elastic Rubber Buffer" }
+        val safeDelay = dndDelayMinutes.coerceIn(0, 25)
+        if (onSaveSlot5Detailed != null) {
+          onSaveSlot5Detailed(
+            safeTitle,
+            voiceMessage,
+            selectedDays,
+            enableDnd,
+            safeDelay,
+            enableHaptic,
+            isVoiceEnabled,
+            voiceVolume,
+            isSoundAlertEnabled,
+            customRingtoneUri,
+            customRingtoneTitle
+          )
+        } else {
+          onSaveSlot5(safeTitle, voiceMessage, selectedDays, enableDnd, safeDelay)
+        }
       } else if (slotNum != null) {
         if (isSlot1) {
           val finalSleepDuration = calculatedDuration.coerceIn(240, 720) // 4h to 12h
@@ -785,7 +855,7 @@ fun TaskModalBottomSheet(
             null,
             null,
             voiceVolume,
-            0
+            dndDelayMinutes.coerceIn(0, 25)
           )
         } else {
           onSaveAnchorDetails(
@@ -808,7 +878,7 @@ fun TaskModalBottomSheet(
             if (isSlot3) calculatedFriDuration else null,
             if (isSlot3) fridayVoiceMessage.ifBlank { null } else null,
             voiceVolume,
-            if (isSlot1 || isSlot5) 0 else dndDelayMinutes.coerceIn(0, 25)
+            dndDelayMinutes.coerceIn(0, 25)
           )
         }
       }
@@ -1356,11 +1426,7 @@ fun TaskModalBottomSheet(
                   activeVoiceUtteranceId = null
                 } else {
                   val msg = voiceMessage.ifBlank { "${title.ifBlank { "Task" }} starting now" }
-                  AutomationManager.applyTtsLanguage(ttsInstance, msg, activeVoicePresetId)
-                  val params = Bundle().apply {
-                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f))
-                  }
-                  ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "voice_test_preview")
+                  speakVoicePreview(msg, voiceVolume, "voice_test_preview")
                 }
               },
               testButtonTestTag = "test_voice_button",
@@ -1554,9 +1620,7 @@ fun TaskModalBottomSheet(
                   activeVoiceUtteranceId = null
                 } else {
                   val msg = part1VoiceMessage.ifBlank { "${part1Title.ifBlank { "Session 1" }} starting now" }
-                  AutomationManager.applyTtsLanguage(ttsInstance, msg, activeVoicePresetId)
-                  val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolumeS1.coerceIn(0f, 1f)) }
-                  ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s1_tts")
+                  speakVoicePreview(msg, voiceVolumeS1, "s1_tts")
                 }
               },
               isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s1_tts",
@@ -1620,9 +1684,7 @@ fun TaskModalBottomSheet(
                   activeVoiceUtteranceId = null
                 } else {
                   val msg = part2VoiceMessage.ifBlank { "${part2Title.ifBlank { "Session 2" }} starting now" }
-                  AutomationManager.applyTtsLanguage(ttsInstance, msg, activeVoicePresetId)
-                  val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolumeS2.coerceIn(0f, 1f)) }
-                  ttsInstance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, "s2_tts")
+                  speakVoicePreview(msg, voiceVolumeS2, "s2_tts")
                 }
               },
               isSpeakingVoicePreview = isSpeakingVoicePreview && activeVoiceUtteranceId == "s2_tts",
@@ -2528,10 +2590,31 @@ private fun AnchorEditSection(
   selectedDays: Set<RoutineDay>,
   onSelectedDaysChange: (Set<RoutineDay>) -> Unit
 ) {
-  var hoursInput by remember(durationHours) { mutableStateOf(durationHours.toString()) }
-  var minsInput by remember(durationMins) { mutableStateOf(durationMins.toString()) }
-  var friHoursInput by remember(fridayDurationHours) { mutableStateOf(fridayDurationHours.toString()) }
-  var friMinsInput by remember(fridayDurationMins) { mutableStateOf(fridayDurationMins.toString()) }
+  var hoursInput by remember { mutableStateOf(durationHours.toString()) }
+  var minsInput by remember { mutableStateOf(durationMins.toString()) }
+  var friHoursInput by remember { mutableStateOf(fridayDurationHours.toString()) }
+  var friMinsInput by remember { mutableStateOf(fridayDurationMins.toString()) }
+
+  LaunchedEffect(durationHours) {
+    if ((hoursInput.toIntOrNull() ?: 0) != durationHours) {
+      hoursInput = durationHours.toString()
+    }
+  }
+  LaunchedEffect(durationMins) {
+    if ((minsInput.toIntOrNull() ?: 0) != durationMins) {
+      minsInput = durationMins.toString()
+    }
+  }
+  LaunchedEffect(fridayDurationHours) {
+    if ((friHoursInput.toIntOrNull() ?: 0) != fridayDurationHours) {
+      friHoursInput = fridayDurationHours.toString()
+    }
+  }
+  LaunchedEffect(fridayDurationMins) {
+    if ((friMinsInput.toIntOrNull() ?: 0) != fridayDurationMins) {
+      friMinsInput = fridayDurationMins.toString()
+    }
+  }
 
   val accentColor = when (slotNum) {
     1 -> Color(0xFF6366F1) // Deep Indigo
@@ -2904,8 +2987,8 @@ private fun AnchorEditSection(
       enableDnd = enableDnd,
       onEnableDndChange = onEnableDndChange,
       dndSwitchTestTag = "anchor_dnd_switch",
-      isDndDelayLockedZero = isSlot1 || isSlot5,
-      supportsDndDelay = !isSlot1 && !isSlot5,
+      isDndDelayLockedZero = false,
+      supportsDndDelay = true,
       dndDelayMinutes = dndDelayMinutes,
       onDndDelayMinutesChange = onDndDelayMinutesChange
     )
@@ -3945,7 +4028,12 @@ private fun LuxuryHardwareGrid(
             )
           }
         } else if (supportsDndDelay && enableDnd) {
-          var delayInputText by remember(dndDelayMinutes) { mutableStateOf(dndDelayMinutes.toString()) }
+          var delayInputText by remember { mutableStateOf(dndDelayMinutes.toString()) }
+          LaunchedEffect(dndDelayMinutes) {
+            if ((delayInputText.toIntOrNull() ?: 0) != dndDelayMinutes) {
+              delayInputText = dndDelayMinutes.toString()
+            }
+          }
           val delayFocusRequester = remember { FocusRequester() }
           Row(
             modifier = Modifier.fillMaxWidth(),

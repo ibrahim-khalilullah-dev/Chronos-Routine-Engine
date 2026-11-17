@@ -15,6 +15,30 @@ data class ScheduleResult(
   val totalGapsMinutes: Int
 )
 
+@Immutable
+data class ScheduleImpactItem(
+  val taskId: String,
+  val title: String,
+  val oldStartMinute: Int?,
+  val newStartMinute: Int?,
+  val oldDurationMinutes: Int,
+  val newDurationMinutes: Int,
+  val statusChange: String
+)
+
+sealed interface VerticalDropTarget {
+  data class InsertBeforeTask(val targetTaskId: String) : VerticalDropTarget
+  data class InsertAfterTask(val targetTaskId: String) : VerticalDropTarget
+  data class IntoGap(val targetStartMinute: Int) : VerticalDropTarget
+}
+
+@Immutable
+data class VerticalDropPreview(
+  val previewStartMinute: Int,
+  val previewEndMinute: Int,
+  val hitAnchorWall: Boolean
+)
+
 object SchedulerEngine {
 
   const val MIN_FLUID_TWIN_MINUTES = 45
@@ -569,6 +593,7 @@ object SchedulerEngine {
     // 3. Schedule Standard Dynamic Tasks
     val sortedStandardTasks = standardTasks.sortedWith(
       compareByDescending<RoutineTask> { it.isHighPriority }
+        .thenByDescending { it.manualPlacementOrder }
         .thenBy { it.originalStartTimeMinute ?: it.startTimeMinute }
     )
     val anchorGaps = findAvailableGaps(dayAnchors, interTaskBufferMinutes)
@@ -804,6 +829,558 @@ object SchedulerEngine {
       availableGaps = remainingGaps,
       totalScheduledMinutes = totalScheduled,
       totalGapsMinutes = totalGaps
+    )
+  }
+
+  /**
+   * Resolves effective anchor tasks for [day] (accounting for Friday Jumu'ah override on Slot 3).
+   */
+  private fun resolveEffectiveDayAnchors(anchors: List<RoutineTask>, day: RoutineDay): List<RoutineTask> {
+    val isFriday = day == RoutineDay.FRIDAY
+    return anchors.map { anchor ->
+      if (isFriday && anchor.slotNumber == 3) {
+        anchor.copy(
+          title = anchor.fridayTitle?.ifBlank { null } ?: anchor.title,
+          startTimeMinute = anchor.fridayStartTimeMinute ?: anchor.startTimeMinute,
+          durationMinutes = anchor.fridayDurationMinutes ?: anchor.durationMinutes
+        )
+      } else {
+        anchor
+      }
+    }
+  }
+
+  /**
+   * Finds the open anchor gap (startMinute..endMinute within 0..1440) enclosing [targetMinute].
+   */
+  fun findEnclosingAnchorBounds(
+    anchors: List<RoutineTask>,
+    targetMinute: Int,
+    day: RoutineDay = RoutineDay.today()
+  ): Pair<Int, Int> {
+    val dayAnchors = resolveEffectiveDayAnchors(anchors, day)
+    val anchorGaps = findAvailableGaps(dayAnchors, 0)
+    if (anchorGaps.isEmpty()) return 0 to 1440
+
+    val safeMin = ((targetMinute % 1440) + 1440) % 1440
+    val containing = anchorGaps.firstOrNull { safeMin in it.startMinute until it.endMinute }
+      ?: anchorGaps.firstOrNull { safeMin in it.startMinute..it.endMinute }
+      ?: anchorGaps.minByOrNull { Math.abs(safeMin - (it.startMinute + it.endMinute) / 2) }
+      ?: anchorGaps.first()
+
+    return containing.startMinute to containing.endMinute
+  }
+
+  /**
+   * Computes exact horizontal drag scrub bounds [minStart..maxStart] for [task] inside its
+   * current gap, protecting enclosing anchor walls and adjacent scheduled dynamic tasks
+   * (including their inter-task rest buffers).
+   */
+  fun computeHorizontalScrubBounds(
+    task: RoutineTask,
+    scheduledTasks: List<RoutineTask>,
+    anchors: List<RoutineTask>,
+    day: RoutineDay = RoutineDay.today()
+  ): IntRange {
+    val anchorBounds = findEnclosingAnchorBounds(anchors, task.startTimeMinute, day)
+    val otherTasks = scheduledTasks.filter {
+      it.id != task.id && it.type == TaskType.DYNAMIC
+    }
+    val dayAnchors = resolveEffectiveDayAnchors(anchors, day)
+    val freeGaps = findAvailableGaps(dayAnchors + otherTasks, 0)
+
+    val taskStart = ((task.startTimeMinute % 1440) + 1440) % 1440
+    val containingGap = freeGaps.firstOrNull { taskStart in it.startMinute until it.endMinute }
+      ?: freeGaps.firstOrNull { taskStart in it.startMinute..it.endMinute }
+      ?: return taskStart..taskStart
+
+    val minStart = maxOf(containingGap.startMinute, anchorBounds.first)
+    val maxEnd = minOf(containingGap.endMinute, anchorBounds.second)
+
+    val taskBuffer = if (task.type == TaskType.DYNAMIC) task.interTaskBufferMinutes.coerceIn(0, 30) else 0
+    val block = task.durationMinutes.coerceAtLeast(0) + taskBuffer
+    val maxStart = if (block == 0) {
+      (maxEnd - 1).coerceAtLeast(minStart)
+    } else {
+      (maxEnd - block).coerceAtLeast(minStart)
+    }
+    return minStart..maxStart
+  }
+
+  /**
+   * Pure reposition operation for drag scrubbing / vertical reordering.
+   * Returns Pair(updatedDynamicTasks, hitAnchorWall).
+   * - High Priority & Fluid Twin tasks are strictly fenced inside their enclosing anchor gap.
+   * - Normal Dynamic tasks can cross anchor walls vertically to reposition into other day gaps.
+   */
+  fun applyDragReposition(
+    allDynamicTasks: List<RoutineTask>,
+    taskId: String,
+    targetStartMinute: Int,
+    newManualOrder: Long,
+    anchors: List<RoutineTask>,
+    day: RoutineDay = RoutineDay.today()
+  ): Pair<List<RoutineTask>, Boolean> {
+    val target = allDynamicTasks.firstOrNull { it.id == taskId } ?: return allDynamicTasks to false
+    var hitAnchorWall = false
+    val clampedGlobalStart = targetStartMinute.coerceIn(0, 1439)
+
+    val finalStart = if (target.isHighPriority || target.isFluidTwin) {
+      val currentAnchorMinute = target.originalStartTimeMinute ?: target.startTimeMinute
+      val (gapStart, gapEnd) = findEnclosingAnchorBounds(anchors, currentAnchorMinute, day)
+      val minRequiredDur = if (target.isFluidTwin) {
+        target.fluidSafetyFloorMinutes.coerceAtLeast(1)
+      } else {
+        target.durationMinutes.coerceAtLeast(0)
+      }
+      val block = minRequiredDur + target.interTaskBufferMinutes.coerceIn(0, 30)
+      val maxAllowedStart = (gapEnd - block).coerceAtLeast(gapStart)
+
+      if (clampedGlobalStart < gapStart || clampedGlobalStart > maxAllowedStart) {
+        hitAnchorWall = true
+      }
+      clampedGlobalStart.coerceIn(gapStart, maxAllowedStart)
+    } else {
+      // Normal dynamic tasks can jump across anchors; if landing inside an anchor body, snap to nearest anchor gap edge
+      val dayAnchors = resolveEffectiveDayAnchors(anchors, day)
+      val anchorGaps = findAvailableGaps(dayAnchors, 0)
+      val block = target.durationMinutes.coerceAtLeast(0) + target.interTaskBufferMinutes.coerceIn(0, 30)
+      val insideGap = anchorGaps.firstOrNull { clampedGlobalStart in it.startMinute until it.endMinute }
+      if (insideGap != null) {
+        val maxInGap = (insideGap.endMinute - block).coerceAtLeast(insideGap.startMinute)
+        clampedGlobalStart.coerceIn(insideGap.startMinute, maxInGap)
+      } else {
+        val viableGap = anchorGaps.filter { it.durationMinutes >= block }
+          .minByOrNull { gap ->
+            val maxS = (gap.endMinute - block).coerceAtLeast(gap.startMinute)
+            val edge = clampedGlobalStart.coerceIn(gap.startMinute, maxS)
+            Math.abs(edge - clampedGlobalStart)
+          } ?: anchorGaps.minByOrNull { gap ->
+          Math.abs(clampedGlobalStart.coerceIn(gap.startMinute, gap.endMinute) - clampedGlobalStart)
+        }
+        if (viableGap != null) {
+          val maxS = (viableGap.endMinute - block).coerceAtLeast(viableGap.startMinute)
+          clampedGlobalStart.coerceIn(viableGap.startMinute, maxS)
+        } else {
+          clampedGlobalStart
+        }
+      }
+    }
+
+    val updated = allDynamicTasks.map { task ->
+      if (task.id == taskId) {
+        task.copy(
+          startTimeMinute = finalStart,
+          originalStartTimeMinute = finalStart,
+          manualPlacementOrder = newManualOrder
+        )
+      } else {
+        task
+      }
+    }
+    return updated to hitAnchorWall
+  }
+
+  /**
+   * Computes structural timeline impact diffs between [baseline] and [draft] for dynamic tasks.
+   */
+  fun computeScheduleImpactDiff(
+    baseline: ScheduleResult,
+    draft: ScheduleResult
+  ): List<ScheduleImpactItem> {
+    val baseScheduled = baseline.scheduledTasks.filter { it.type == TaskType.DYNAMIC }.associateBy { it.id }
+    val baseOverflow = baseline.overflowTasks.filter { it.type == TaskType.DYNAMIC }.associateBy { it.id }
+    val draftScheduled = draft.scheduledTasks.filter { it.type == TaskType.DYNAMIC }.associateBy { it.id }
+    val draftOverflow = draft.overflowTasks.filter { it.type == TaskType.DYNAMIC }.associateBy { it.id }
+
+    val allIds = (baseScheduled.keys + baseOverflow.keys + draftScheduled.keys + draftOverflow.keys).distinct()
+    val impacts = mutableListOf<ScheduleImpactItem>()
+
+    for (id in allIds) {
+      val bTask = baseScheduled[id] ?: baseOverflow[id]
+      val dTask = draftScheduled[id] ?: draftOverflow[id]
+      if (bTask == null && dTask == null) continue
+
+      val oldInOverflow = baseOverflow.containsKey(id)
+      val newInOverflow = draftOverflow.containsKey(id)
+      val oldStart = if (oldInOverflow || bTask == null) null else bTask.startTimeMinute
+      val newStart = if (newInOverflow || dTask == null) null else dTask.startTimeMinute
+      val oldDur = bTask?.durationMinutes ?: 0
+      val newDur = dTask?.durationMinutes ?: 0
+      val title = dTask?.title ?: bTask?.title ?: continue
+
+      if (oldStart == newStart && oldDur == newDur && oldInOverflow == newInOverflow) {
+        continue
+      }
+
+      val statusChange = when {
+        !oldInOverflow && newInOverflow -> "Moved to Overflow"
+        oldInOverflow && !newInOverflow && newStart != null ->
+          "Recovered at ${RoutineTask.formatTime(newStart)}"
+        oldStart != null && newStart != null && oldStart != newStart && oldDur != newDur ->
+          "Shifted ${RoutineTask.formatTime(oldStart)} → ${RoutineTask.formatTime(newStart)} (${oldDur}m → ${newDur}m)"
+        oldStart != null && newStart != null && oldStart != newStart ->
+          "Shifted ${RoutineTask.formatTime(oldStart)} → ${RoutineTask.formatTime(newStart)}"
+        oldDur != newDur ->
+          "Duration ${oldDur}m → ${newDur}m"
+        else -> "Repositioned"
+      }
+
+      impacts.add(
+        ScheduleImpactItem(
+          taskId = id,
+          title = title,
+          oldStartMinute = oldStart,
+          newStartMinute = newStart,
+          oldDurationMinutes = oldDur,
+          newDurationMinutes = newDur,
+          statusChange = statusChange
+        )
+      )
+    }
+
+    return impacts.sortedBy { it.newStartMinute ?: it.oldStartMinute ?: Int.MAX_VALUE }
+  }
+
+  /**
+   * Computes net free gap minutes between [task] and [nextTask] after subtracting [task]'s
+   * reserved inter-task buffer time. Returns 0 when the separation is completely covered by buffer.
+   */
+  fun computeNetFreeGapMinutes(task: RoutineTask, nextTask: RoutineTask): Int {
+    val prevBuffer = if (task.type == TaskType.DYNAMIC) task.interTaskBufferMinutes.coerceIn(0, 30) else 0
+    val effectivePrevEnd = task.startTimeMinute + task.durationMinutes + prevBuffer
+    if (effectivePrevEnd >= 1440 || nextTask.startTimeMinute <= effectivePrevEnd) return 0
+    return nextTask.startTimeMinute - effectivePrevEnd
+  }
+
+  /**
+   * Smart task swapping and cascading reposition for launcher-style vertical drops.
+   * Returns Pair(updatedDynamicTasks, hitAnchorWall).
+   */
+  fun applyVerticalDropReposition(
+    allDynamicTasks: List<RoutineTask>,
+    scheduledTasks: List<RoutineTask>,
+    taskId: String,
+    dropTarget: VerticalDropTarget,
+    baseManualOrder: Long,
+    anchors: List<RoutineTask>,
+    day: RoutineDay = RoutineDay.today()
+  ): Pair<List<RoutineTask>, Boolean> {
+    val draggedSource = allDynamicTasks.firstOrNull { it.id == taskId } ?: return allDynamicTasks to false
+    val draggedScheduled = scheduledTasks.firstOrNull { it.id == taskId }
+    val isFenced = draggedSource.isHighPriority || draggedSource.isFluidTwin
+    val draggedCurrStart = draggedScheduled?.startTimeMinute
+      ?: draggedSource.originalStartTimeMinute
+      ?: draggedSource.startTimeMinute
+    val draggedGap = findEnclosingAnchorBounds(anchors, draggedCurrStart, day)
+    val minDraggedDur = if (draggedSource.isFluidTwin) {
+      draggedSource.fluidSafetyFloorMinutes.coerceAtLeast(1)
+    } else {
+      draggedSource.durationMinutes.coerceAtLeast(0)
+    }
+    val draggedMinBlock = minDraggedDur + draggedSource.interTaskBufferMinutes.coerceIn(0, 30)
+    val draggedFullBlock = draggedSource.durationMinutes.coerceAtLeast(0) + draggedSource.interTaskBufferMinutes.coerceIn(0, 30)
+
+    when (dropTarget) {
+      is VerticalDropTarget.IntoGap -> {
+        return applyDragReposition(
+          allDynamicTasks = allDynamicTasks,
+          taskId = taskId,
+          targetStartMinute = dropTarget.targetStartMinute,
+          newManualOrder = baseManualOrder + 100L,
+          anchors = anchors,
+          day = day
+        )
+      }
+
+      is VerticalDropTarget.InsertBeforeTask,
+      is VerticalDropTarget.InsertAfterTask -> {
+        val targetTaskId = when (dropTarget) {
+          is VerticalDropTarget.InsertBeforeTask -> dropTarget.targetTaskId
+          is VerticalDropTarget.InsertAfterTask -> dropTarget.targetTaskId
+          is VerticalDropTarget.IntoGap -> return allDynamicTasks to false
+        }
+        if (targetTaskId == taskId) return allDynamicTasks to false
+        val targetScheduled = scheduledTasks.firstOrNull { it.id == targetTaskId }
+          ?: return allDynamicTasks to false
+
+        if (targetScheduled.type != TaskType.DYNAMIC) {
+          val rawProposed = if (dropTarget is VerticalDropTarget.InsertBeforeTask) {
+            (targetScheduled.startTimeMinute - draggedFullBlock).coerceAtLeast(0)
+          } else {
+            (targetScheduled.startTimeMinute + targetScheduled.durationMinutes) % 1440
+          }
+          return applyDragReposition(
+            allDynamicTasks = allDynamicTasks,
+            taskId = taskId,
+            targetStartMinute = rawProposed,
+            newManualOrder = baseManualOrder + 100L,
+            anchors = anchors,
+            day = day
+          )
+        }
+
+        val targetGap = findEnclosingAnchorBounds(anchors, targetScheduled.startTimeMinute, day)
+        if (isFenced && targetGap != draggedGap) {
+          val clampedEdge = if (targetScheduled.startTimeMinute < draggedGap.first) {
+            draggedGap.first
+          } else {
+            (draggedGap.second - draggedMinBlock).coerceAtLeast(draggedGap.first)
+          }
+          val (updated, _) = applyDragReposition(
+            allDynamicTasks = allDynamicTasks,
+            taskId = taskId,
+            targetStartMinute = clampedEdge,
+            newManualOrder = baseManualOrder + 100L,
+            anchors = anchors,
+            day = day
+          )
+          return updated to true
+        }
+
+        // Case A: Same Enclosing Anchor Gap -> in-gap reordering & intuitive swap
+        if (draggedGap == targetGap) {
+          val (gapStart, gapEnd) = draggedGap
+          val gapDynamicScheduled = scheduledTasks
+            .filter { it.type == TaskType.DYNAMIC && it.startTimeMinute >= gapStart && it.startTimeMinute < gapEnd }
+            .sortedBy { it.startTimeMinute }
+
+          val oldDraggedIdx = gapDynamicScheduled.indexOfFirst { it.id == taskId }
+          val oldTargetIdx = gapDynamicScheduled.indexOfFirst { it.id == targetTaskId }
+          if (oldDraggedIdx >= 0 && oldTargetIdx >= 0) {
+            val draggedItem = gapDynamicScheduled[oldDraggedIdx]
+            val withoutDragged = gapDynamicScheduled.filterNot { it.id == taskId }
+            val targetPos = withoutDragged.indexOfFirst { it.id == targetTaskId }
+            val insertPos = if (dropTarget is VerticalDropTarget.InsertBeforeTask) targetPos else targetPos + 1
+            val reordered = withoutDragged.toMutableList().apply { add(insertPos, draggedItem) }
+
+            val updatesById = mutableMapOf<String, Pair<Int, Long>>()
+
+            if (oldDraggedIdx < oldTargetIdx) {
+              // Dragged DOWN toward targetScheduled
+              if (dropTarget is VerticalDropTarget.InsertBeforeTask && oldTargetIdx == oldDraggedIdx + 1) {
+                val draggedEnd = draggedItem.startTimeMinute +
+                  draggedItem.durationMinutes.coerceAtLeast(0) +
+                  draggedItem.interTaskBufferMinutes.coerceIn(0, 30)
+                if (targetScheduled.startTimeMinute - draggedEnd <= 15) {
+                  // Adjacent contiguous neighbor with no wide gap: Eat -> InsertBefore(Bath) is already a no-op
+                  return allDynamicTasks to false
+                }
+              }
+
+              // Check if consecutive tasks across [oldDraggedIdx..oldTargetIdx] are contiguous (<= 15m)
+              var isContiguousSlice = true
+              for (i in oldDraggedIdx until oldTargetIdx) {
+                val prev = gapDynamicScheduled[i]
+                val next = gapDynamicScheduled[i + 1]
+                val prevEnd = prev.startTimeMinute + prev.durationMinutes.coerceAtLeast(0) + prev.interTaskBufferMinutes.coerceIn(0, 30)
+                if (next.startTimeMinute - prevEnd > 15) {
+                  isContiguousSlice = false
+                  break
+                }
+              }
+
+              if (isContiguousSlice) {
+                val affectedStartIdx = oldDraggedIdx
+                var cursor = gapDynamicScheduled[affectedStartIdx].startTimeMinute
+                for (i in affectedStartIdx until reordered.size) {
+                  val item = reordered[i]
+                  val buf = item.interTaskBufferMinutes.coerceIn(0, 30)
+                  val dur = item.durationMinutes.coerceAtLeast(0)
+                  val shouldPlaceAtCursor = (i <= insertPos) || (item.startTimeMinute < cursor)
+                  if (shouldPlaceAtCursor) {
+                    val safeStart = if (item.isHighPriority || item.isFluidTwin) {
+                      cursor.coerceIn(gapStart, (gapEnd - 1).coerceAtLeast(gapStart))
+                    } else {
+                      cursor.coerceIn(0, 1439)
+                    }
+                    updatesById[item.id] = safeStart to (baseManualOrder + 100L - (i - affectedStartIdx))
+                    cursor = safeStart + dur + buf
+                  } else {
+                    cursor = maxOf(cursor, item.startTimeMinute + dur + buf)
+                  }
+                }
+              } else if (dropTarget is VerticalDropTarget.InsertBeforeTask) {
+                // Wide open gap (> 15m) between oldDraggedIdx and targetScheduled, dragged DOWN to InsertBeforeTask(targetScheduled)
+                val prevBeforeTarget = if (targetPos > 0) withoutDragged[targetPos - 1] else null
+                val earliestAfterPrev = if (prevBeforeTarget != null) {
+                  prevBeforeTarget.startTimeMinute +
+                    prevBeforeTarget.durationMinutes.coerceAtLeast(0) +
+                    prevBeforeTarget.interTaskBufferMinutes.coerceIn(0, 30)
+                } else {
+                  gapStart
+                }
+                val openRoomBeforeTarget = targetScheduled.startTimeMinute - earliestAfterPrev
+                if (openRoomBeforeTarget >= draggedFullBlock) {
+                  val placedStart = (targetScheduled.startTimeMinute - draggedFullBlock)
+                    .coerceIn(gapStart, (gapEnd - draggedMinBlock).coerceAtLeast(gapStart))
+                  updatesById[draggedItem.id] = placedStart to (baseManualOrder + 100L)
+                } else {
+                  var cursor = targetScheduled.startTimeMinute
+                    .coerceIn(gapStart, (gapEnd - draggedMinBlock).coerceAtLeast(gapStart))
+                  for (i in insertPos until reordered.size) {
+                    val item = reordered[i]
+                    val buf = item.interTaskBufferMinutes.coerceIn(0, 30)
+                    val dur = item.durationMinutes.coerceAtLeast(0)
+                    val shouldPlaceAtCursor = (i == insertPos) || (item.startTimeMinute < cursor)
+                    if (shouldPlaceAtCursor) {
+                      val safeStart = if (item.isHighPriority || item.isFluidTwin) {
+                        cursor.coerceIn(gapStart, (gapEnd - 1).coerceAtLeast(gapStart))
+                      } else {
+                        cursor.coerceIn(0, 1439)
+                      }
+                      updatesById[item.id] = safeStart to (baseManualOrder + 100L - (i - insertPos))
+                      cursor = safeStart + dur + buf
+                    } else {
+                      cursor = maxOf(cursor, item.startTimeMinute + dur + buf)
+                    }
+                  }
+                }
+              } else {
+                // Non-contiguous jump down onto InsertAfterTask(targetScheduled)
+                val targetBuf = targetScheduled.interTaskBufferMinutes.coerceIn(0, 30)
+                var cursor = (targetScheduled.startTimeMinute + targetScheduled.durationMinutes + targetBuf)
+                  .coerceIn(gapStart, (gapEnd - draggedMinBlock).coerceAtLeast(gapStart))
+                for (i in insertPos until reordered.size) {
+                  val item = reordered[i]
+                  val buf = item.interTaskBufferMinutes.coerceIn(0, 30)
+                  val dur = item.durationMinutes.coerceAtLeast(0)
+                  val shouldPlaceAtCursor = (i == insertPos) || (item.startTimeMinute < cursor)
+                  if (shouldPlaceAtCursor) {
+                    val safeStart = if (item.isHighPriority || item.isFluidTwin) {
+                      cursor.coerceIn(gapStart, (gapEnd - 1).coerceAtLeast(gapStart))
+                    } else {
+                      cursor.coerceIn(0, 1439)
+                    }
+                    updatesById[item.id] = safeStart to (baseManualOrder + 100L - (i - insertPos))
+                    cursor = safeStart + dur + buf
+                  } else {
+                    cursor = maxOf(cursor, item.startTimeMinute + dur + buf)
+                  }
+                }
+              }
+            } else {
+              // Dragged UP toward earlier targetScheduled
+              if (dropTarget is VerticalDropTarget.InsertAfterTask && oldTargetIdx == oldDraggedIdx - 1) {
+                val targetEnd = targetScheduled.startTimeMinute +
+                  targetScheduled.durationMinutes.coerceAtLeast(0) +
+                  targetScheduled.interTaskBufferMinutes.coerceIn(0, 30)
+                if (draggedItem.startTimeMinute - targetEnd <= 15) {
+                  return allDynamicTasks to false
+                }
+              }
+
+              val affectedStartIdx = insertPos
+              val targetAnchorStart = if (dropTarget is VerticalDropTarget.InsertBeforeTask) {
+                targetScheduled.startTimeMinute
+              } else {
+                val targetBuf = targetScheduled.interTaskBufferMinutes.coerceIn(0, 30)
+                targetScheduled.startTimeMinute + targetScheduled.durationMinutes + targetBuf
+              }
+              val oldFirstStart = gapDynamicScheduled[affectedStartIdx].startTimeMinute
+              var cursor = if (dropTarget is VerticalDropTarget.InsertAfterTask &&
+                draggedItem.startTimeMinute - targetAnchorStart > 15
+              ) {
+                targetAnchorStart.coerceIn(gapStart, (gapEnd - 1).coerceAtLeast(gapStart))
+              } else {
+                minOf(oldFirstStart, targetAnchorStart).coerceIn(gapStart, (gapEnd - 1).coerceAtLeast(gapStart))
+              }
+
+              for (i in affectedStartIdx until reordered.size) {
+                val item = reordered[i]
+                val buf = item.interTaskBufferMinutes.coerceIn(0, 30)
+                val dur = item.durationMinutes.coerceAtLeast(0)
+                val shouldPlaceAtCursor = (i == affectedStartIdx) || (item.startTimeMinute < cursor)
+                if (shouldPlaceAtCursor) {
+                  val safeStart = if (item.isHighPriority || item.isFluidTwin) {
+                    cursor.coerceIn(gapStart, (gapEnd - 1).coerceAtLeast(gapStart))
+                  } else {
+                    cursor.coerceIn(0, 1439)
+                  }
+                  updatesById[item.id] = safeStart to (baseManualOrder + 100L - (i - affectedStartIdx))
+                  cursor = safeStart + dur + buf
+                } else {
+                  cursor = maxOf(cursor, item.startTimeMinute + dur + buf)
+                }
+              }
+            }
+
+            if (updatesById.isNotEmpty()) {
+              val updated = allDynamicTasks.map { task ->
+                val pair = updatesById[task.id]
+                if (pair != null) {
+                  task.copy(
+                    startTimeMinute = pair.first,
+                    originalStartTimeMinute = pair.first,
+                    manualPlacementOrder = pair.second
+                  )
+                } else {
+                  task
+                }
+              }
+              return updated to false
+            }
+          }
+        }
+
+        // Case B: Cross-Anchor Drop (Normal task moved into a different gap onto/before/after targetTask)
+        val (targetGapStart, targetGapEnd) = targetGap
+        val rawStart = if (dropTarget is VerticalDropTarget.InsertBeforeTask) {
+          targetScheduled.startTimeMinute
+        } else {
+          targetScheduled.startTimeMinute + targetScheduled.durationMinutes + targetScheduled.interTaskBufferMinutes.coerceIn(0, 30)
+        }
+        val maxInTargetGap = (targetGapEnd - draggedFullBlock).coerceAtLeast(targetGapStart)
+        val clampedStart = rawStart.coerceIn(targetGapStart, maxInTargetGap)
+
+        val updated = allDynamicTasks.map { task ->
+          if (task.id == taskId) {
+            task.copy(
+              startTimeMinute = clampedStart,
+              originalStartTimeMinute = clampedStart,
+              manualPlacementOrder = baseManualOrder + 100L
+            )
+          } else {
+            task
+          }
+        }
+        return updated to false
+      }
+    }
+  }
+
+  /**
+   * Computes exact preview start/end minutes and Anchor Wall flag for the glowing drop shadow
+   * using the exact same rules as [applyVerticalDropReposition].
+   */
+  fun previewVerticalDrop(
+    allDynamicTasks: List<RoutineTask>,
+    scheduledTasks: List<RoutineTask>,
+    taskId: String,
+    dropTarget: VerticalDropTarget,
+    anchors: List<RoutineTask>,
+    day: RoutineDay = RoutineDay.today()
+  ): VerticalDropPreview {
+    val dragged = allDynamicTasks.firstOrNull { it.id == taskId }
+      ?: scheduledTasks.firstOrNull { it.id == taskId }
+      ?: return VerticalDropPreview(0, 0, false)
+    val workingTasks = if (allDynamicTasks.any { it.id == taskId }) allDynamicTasks else allDynamicTasks + dragged
+    val (updated, hitWall) = applyVerticalDropReposition(
+      allDynamicTasks = workingTasks,
+      scheduledTasks = scheduledTasks,
+      taskId = taskId,
+      dropTarget = dropTarget,
+      baseManualOrder = 1L,
+      anchors = anchors,
+      day = day
+    )
+    val moved = updated.firstOrNull { it.id == taskId } ?: dragged
+    val startMin = moved.startTimeMinute
+    val endMin = (startMin + moved.durationMinutes) % 1440
+    return VerticalDropPreview(
+      previewStartMinute = startMin,
+      previewEndMinute = endMin,
+      hitAnchorWall = hitWall
     )
   }
 }

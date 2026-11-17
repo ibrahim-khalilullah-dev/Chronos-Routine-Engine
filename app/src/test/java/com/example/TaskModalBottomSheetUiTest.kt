@@ -1,12 +1,22 @@
 package com.example
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
 import com.example.model.TaskType
@@ -221,4 +231,186 @@ class TaskModalBottomSheetUiTest {
 
     assertEquals(12, savedTask?.dndDelayMinutes)
   }
+
+  @Test
+  fun `slot 1 and slot 5 anchors unlock custom DND delay input when DND enabled`() {
+    val slot5 = RoutineTask(
+      id = "anchor_slot_5",
+      title = "Break",
+      type = TaskType.ANCHOR_ELASTIC,
+      slotNumber = 5,
+      startTimeMinute = 1015,
+      durationMinutes = 65,
+      enableDnd = true,
+      dndDelayMinutes = 14
+    )
+    var savedSlot5Delay = -1
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        TaskModalBottomSheet(
+          initialTask = slot5,
+          onDismiss = {},
+          onSaveTask = {},
+          onSaveAnchorDetails = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+          onSaveSlot5 = { _, _, _, _, _ -> },
+          onSaveSlot5Detailed = { _, _, _, _, delay, _, _, _, _, _, _ -> savedSlot5Delay = delay }
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("anchor_dnd_delay_input").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("save_task_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(14, savedSlot5Delay)
+  }
+
+  @Test
+  fun `timeline screen displays countdown pill, free gap indicator in earliest mode, and pending edits dialog`() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    val t1 = RoutineTask(
+      id = "ui_gap_t1",
+      title = "Morning Deep Work",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420, // 07:00 AM - 08:00 AM (free gap 08:00..13:15 after)
+      durationMinutes = 60,
+      selectedDays = RoutineDay.allDays()
+    )
+    val result = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(t1),
+      activeDay = RoutineDay.today()
+    )
+    val impact = listOf(
+      com.example.engine.ScheduleImpactItem(
+        taskId = "ui_gap_t1",
+        title = "Morning Deep Work",
+        oldStartMinute = 420,
+        newStartMinute = 480,
+        oldDurationMinutes = 60,
+        newDurationMinutes = 60,
+        statusChange = "Shifted 07:00 AM → 08:00 AM"
+      )
+    )
+
+    var showPending by mutableStateOf(false)
+    var committed = false
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        com.example.ui.screens.TimelineScreen(
+          activeDay = RoutineDay.today(),
+          onSelectDay = {},
+          scheduleResult = result,
+          sleepDurationMinutes = 360,
+          currentMinute = 390, // 06:30 AM -> next task t1 at 07:00 AM => "30m"
+          isDndGranted = true,
+          activeAutomation = com.example.service.ActiveAutomationState(),
+          sortMode = com.example.ui.TimelineSortMode.EARLIEST_START,
+          deletedCount = 0,
+          onSelectSortMode = {},
+          onQuickAdjustAnchor = { _, _ -> },
+          onEditTask = {},
+          onMoveToTrash = {},
+          onOpenTrashBin = {},
+          onStopAutomation = {},
+          onRefreshDndPermission = {},
+          anchors = anchors,
+          hasPendingEdits = showPending,
+          pendingImpactDiff = impact,
+          onCommitPendingEdits = { committed = true },
+          onDiscardPendingEdits = { showPending = false }
+        )
+      }
+    }
+
+    // Normal mode: compact countdown pill & free gap indicator visible
+    composeTestRule.onNodeWithTag("next_task_countdown_pill").assertIsDisplayed()
+    composeTestRule.onNode(hasText("30m") and hasAnyAncestor(hasTestTag("next_task_countdown_pill"))).assertIsDisplayed()
+    composeTestRule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasTestTag("free_gap_indicator_ui_gap_t1"))
+    composeTestRule.onNodeWithTag("free_gap_indicator_ui_gap_t1").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("pending_edits_header_controls").assertDoesNotExist()
+
+    // Pending mode: header swaps to 3-button History / Apply / Discard controls
+    showPending = true
+    composeTestRule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToIndex(0)
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("next_task_countdown_pill").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("pending_edits_header_controls").assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("pending_impact_history_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("schedule_impact_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("impact_dialog_apply_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(true, committed)
+  }
+
+  @Test
+  fun `timeline screen hides free gap badge when covered by inter-task buffer and wraps late-night header countdown`() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // t1 at 06:00-07:00 (360..420) with 15m buffer (effective end 435); t2 starts at 07:15 (435) -> net gap == 0 (NO badge!)
+    // After t2 (07:15-07:45, 435..465, 0m buffer), Dhuhr starts at 13:15 (795) -> net gap == 330m ("5h 30m")!
+    val t1 = RoutineTask(
+      id = "buf_t1",
+      title = "Morning Warmup",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360,
+      durationMinutes = 60,
+      interTaskBufferMinutes = 15,
+      selectedDays = RoutineDay.allDays()
+    )
+    val t2 = RoutineTask(
+      id = "buf_t2",
+      title = "Deep Focus",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 435,
+      durationMinutes = 30,
+      interTaskBufferMinutes = 0,
+      selectedDays = RoutineDay.allDays()
+    )
+    val today = RoutineDay.today()
+    val result = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(t1, t2),
+      activeDay = today,
+      interTaskBufferMinutes = 0
+    )
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        com.example.ui.screens.TimelineScreen(
+          activeDay = today,
+          onSelectDay = {},
+          scheduleResult = result,
+          sleepDurationMinutes = 360,
+          // Late at night: 23:30 (1410m). Earliest scheduled task tomorrow is Fajr at 05:00 AM (300m) -> 300 + 1440 - 1410 = 330m = "5h 30m"
+          currentMinute = 1410,
+          isDndGranted = true,
+          activeAutomation = com.example.service.ActiveAutomationState(),
+          sortMode = com.example.ui.TimelineSortMode.EARLIEST_START,
+          deletedCount = 0,
+          onSelectSortMode = {},
+          onQuickAdjustAnchor = { _, _ -> },
+          onEditTask = {},
+          onMoveToTrash = {},
+          onOpenTrashBin = {},
+          onStopAutomation = {},
+          onRefreshDndPermission = {},
+          anchors = anchors
+        )
+      }
+    }
+
+    // Header countdown must wrap around to tomorrow's earliest task (Fajr at 05:00 -> 5h 30m)
+    composeTestRule.onNodeWithTag("next_task_countdown_pill").assertIsDisplayed()
+    composeTestRule.onNode(hasText("5h 30m") and hasAnyAncestor(hasTestTag("next_task_countdown_pill"))).assertIsDisplayed()
+
+    // Scroll to buf_t2: free_gap_indicator_buf_t1 must NOT exist (15m distance is 100% covered by buf_t1's 15m buffer)
+    composeTestRule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasTestTag("free_gap_indicator_buf_t2"))
+    composeTestRule.onNodeWithTag("free_gap_indicator_buf_t2").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("free_gap_indicator_buf_t1").assertDoesNotExist()
+  }
 }
+

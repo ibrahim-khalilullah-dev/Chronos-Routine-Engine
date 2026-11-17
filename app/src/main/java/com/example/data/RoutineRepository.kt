@@ -12,7 +12,10 @@ import com.example.ui.TimelineSortMode
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,9 +26,16 @@ class RoutineRepository(context: Context) {
   private val prefs: SharedPreferences =
     appContext.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
 
-  private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+  @OptIn(ExperimentalCoroutinesApi::class)
+  private val ioScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1) + SupervisorJob())
+  @Volatile
+  private var vaultPersistJob: Job? = null
 
   companion object {
+    @Volatile
+    private var hasCheckedStartupVault: Boolean = false
+
+    private const val VAULT_DEBOUNCE_MS = 400L
     private const val KEY_ANCHORS = "key_anchors_json"
     private const val KEY_DYNAMIC_TASKS = "key_dynamic_tasks_json"
     private const val KEY_SLEEP_DURATION = "key_sleep_duration_mins"
@@ -45,7 +55,14 @@ class RoutineRepository(context: Context) {
     if (prefs.getInt(KEY_BUFFER_DURATION, 0) == 5) {
       prefs.edit().putInt(KEY_BUFFER_DURATION, 0).apply()
     }
-    checkAndAutoRestoreVault()
+    if (!hasCheckedStartupVault) {
+      hasCheckedStartupVault = true
+      val hasAnchors = !prefs.getString(KEY_ANCHORS, null).isNullOrEmpty()
+      val hasDynamic = !prefs.getString(KEY_DYNAMIC_TASKS, null).isNullOrEmpty()
+      if (!hasAnchors || !hasDynamic) {
+        checkAndAutoRestoreVault()
+      }
+    }
   }
 
   /**
@@ -167,7 +184,9 @@ class RoutineRepository(context: Context) {
   }
 
   private fun persistVaultAsync() {
-    ioScope.launch {
+    vaultPersistJob?.cancel()
+    vaultPersistJob = ioScope.launch {
+      delay(VAULT_DEBOUNCE_MS)
       try {
         persistVaultInternal()
       } catch (_: Exception) {}
@@ -194,7 +213,7 @@ class RoutineRepository(context: Context) {
       put("dynamicTasks", if (!dynamicRaw.isNullOrEmpty()) JSONArray(dynamicRaw) else JSONArray())
       put("ratingHistory", if (!ratingHistoryRaw.isNullOrEmpty()) JSONArray(ratingHistoryRaw) else JSONArray())
     }
-    val content = vaultObj.toString(2)
+    val content = vaultObj.toString()
 
     // 1. App-specific external files root directory (guaranteed accessible)
     try {
@@ -398,7 +417,8 @@ class RoutineRepository(context: Context) {
 
   fun getDynamicTasks(): List<RoutineTask> {
     var rawJson = prefs.getString(KEY_DYNAMIC_TASKS, null)
-    if (rawJson.isNullOrEmpty()) {
+    if (rawJson.isNullOrEmpty() && !hasCheckedStartupVault) {
+      hasCheckedStartupVault = true
       if (checkAndAutoRestoreVault()) {
         rawJson = prefs.getString(KEY_DYNAMIC_TASKS, null)
       }
@@ -526,6 +546,7 @@ class RoutineRepository(context: Context) {
         put("isPausedTodayOnly", t.isPausedTodayOnly)
         put("dndDelayMinutes", t.dndDelayMinutes)
         if (t.originalStartTimeMinute != null) put("originalStartTimeMinute", t.originalStartTimeMinute)
+        if (t.manualPlacementOrder != 0L) put("manualPlacementOrder", t.manualPlacementOrder)
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -593,7 +614,8 @@ class RoutineRepository(context: Context) {
         pausedUntilDateMillis = if (obj.has("pausedUntilDateMillis")) obj.getLong("pausedUntilDateMillis") else null,
         isPausedTodayOnly = obj.optBoolean("isPausedTodayOnly", false),
         dndDelayMinutes = obj.optInt("dndDelayMinutes", 0).coerceIn(0, 25),
-        originalStartTimeMinute = if (obj.has("originalStartTimeMinute")) obj.getInt("originalStartTimeMinute") else null
+        originalStartTimeMinute = if (obj.has("originalStartTimeMinute")) obj.getInt("originalStartTimeMinute") else null,
+        manualPlacementOrder = obj.optLong("manualPlacementOrder", 0L)
       )
       list.add(task)
     }

@@ -59,8 +59,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -75,6 +80,7 @@ import com.example.model.ScheduleGap
 import com.example.ui.theme.AnchorBrush
 import com.example.ui.theme.AnchorGradientEnd
 import com.example.ui.theme.AnchorGradientStart
+import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.DynamicBrush
 import com.example.ui.theme.DynamicGradientEnd
@@ -683,6 +689,8 @@ fun DynamicTaskCard(
   task: RoutineTask,
   currentMinute: Int = -1,
   isToday: Boolean = true,
+  isDragging: Boolean = false,
+  isDragSourceGhost: Boolean = false,
   onEditClick: () -> Unit,
   onDeleteClick: ((RoutineTask) -> Unit)? = null,
   onRateTask: ((taskId: String, ratingPct: Int) -> Unit)? = null,
@@ -691,27 +699,41 @@ fun DynamicTaskCard(
   val haptic = LocalHapticFeedback.current
   val isActive = isTaskActiveAt(task, currentMinute, isToday)
 
-  Surface(
-    modifier = modifier
-      .fillMaxWidth()
-      .clip(RoundedCornerShape(24.dp))
-      .border(
-        BorderStroke(
-          width = if (isActive) 2.dp else 1.dp,
-          color = if (isActive) DynamicGradientEnd else OneUiBorder
-        ),
-        RoundedCornerShape(24.dp)
-      )
-      .testTag("dynamic_task_card_${task.id}"),
-    color = OneUiSurfaceElevated,
-    shape = RoundedCornerShape(24.dp),
-    tonalElevation = if (isActive) 7.dp else 3.dp
-  ) {
-    Column(
+  Box(modifier = modifier.fillMaxWidth()) {
+    Surface(
       modifier = Modifier
-        .background(DynamicSubtleBrush)
-        .padding(16.dp)
+        .fillMaxWidth()
+        .graphicsLayer {
+          alpha = if (isDragSourceGhost) 0.28f else 1f
+        }
+        .clip(RoundedCornerShape(24.dp))
+        .then(
+          if (isDragSourceGhost) {
+            Modifier
+          } else {
+            Modifier.border(
+              BorderStroke(
+                width = if (isDragging || isActive) 2.dp else 1.dp,
+                color = when {
+                  isDragging -> CyanAccent
+                  isActive -> DynamicGradientEnd
+                  else -> OneUiBorder
+                }
+              ),
+              RoundedCornerShape(24.dp)
+            )
+          }
+        )
+        .testTag("dynamic_task_card_${task.id}"),
+      color = OneUiSurfaceElevated,
+      shape = RoundedCornerShape(24.dp),
+      tonalElevation = if (isDragging || isActive) 8.dp else 3.dp
     ) {
+      Column(
+        modifier = Modifier
+          .background(DynamicSubtleBrush)
+          .padding(16.dp)
+      ) {
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -989,6 +1011,28 @@ fun DynamicTaskCard(
           }
         }
       }
+    }
+    }
+
+    if (isDragSourceGhost) {
+      Spacer(
+        modifier = Modifier
+          .matchParentSize()
+          .drawWithCache {
+            val radius = 24.dp.toPx()
+            val stroke = Stroke(
+              width = 1.5.dp.toPx(),
+              pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 12f), 0f)
+            )
+            onDrawBehind {
+              drawRoundRect(
+                color = CyanAccent.copy(alpha = 0.45f),
+                cornerRadius = CornerRadius(radius, radius),
+                style = stroke
+              )
+            }
+          }
+      )
     }
   }
 }

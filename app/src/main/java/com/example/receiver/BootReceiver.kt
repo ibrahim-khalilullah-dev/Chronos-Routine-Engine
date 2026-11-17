@@ -4,6 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.service.AutomationManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class BootReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
@@ -15,7 +18,21 @@ class BootReceiver : BroadcastReceiver() {
       action == "android.intent.action.TIME_SET" ||
       action == Intent.ACTION_TIMEZONE_CHANGED
     ) {
-      AutomationManager.rescheduleAllAlarms(context)
+      val appContext = context.applicationContext ?: context
+      val pendingResult: PendingResult? = goAsync()
+      if (pendingResult != null) {
+        CoroutineScope(Dispatchers.Default).launch {
+          try {
+            AutomationManager.rescheduleAllAlarms(appContext)
+          } finally {
+            try {
+              pendingResult.finish()
+            } catch (_: Exception) {}
+          }
+        }
+      } else {
+        AutomationManager.rescheduleAllAlarms(appContext)
+      }
     }
   }
 }

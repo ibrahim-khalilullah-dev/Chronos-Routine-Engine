@@ -4,8 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.RoutineRepository
+import com.example.engine.ScheduleImpactItem
 import com.example.engine.ScheduleResult
 import com.example.engine.SchedulerEngine
+import com.example.engine.VerticalDropTarget
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
 import com.example.model.TaskRatingRecord
@@ -21,7 +23,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -98,15 +102,20 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
 
   val activeAutomation: StateFlow<ActiveAutomationState> = RoutineAutomationService.serviceState
 
+  private val _pendingDraftTasks = MutableStateFlow<List<RoutineTask>?>(null)
+  val pendingDraftTasks: StateFlow<List<RoutineTask>?> = _pendingDraftTasks.asStateFlow()
+
+  private val _baselineSnapshotSchedule = MutableStateFlow<ScheduleResult?>(null)
+
+  val hasPendingEdits: StateFlow<Boolean> = _pendingDraftTasks
+    .map { it != null }
+    .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+  private var nextManualPlacementOrder: Long = System.currentTimeMillis()
+
   init {
-    val restored = repository.checkAndAutoRestoreVault()
-    val rawTasks = repository.getDynamicTasks()
-    _dynamicTasks.value = rawTasks
-    if (restored) {
-      refreshFromRepository()
-    }
     // Populate permanent task ratings into cache
-    val history = repository.getTaskRatingHistory()
+    val history = _taskRatingHistory.value
     for (r in history) {
       com.example.ui.components.taskRatingCache[r.taskId] = r.ratingPct
     }
@@ -119,26 +128,34 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         if (currentDay != lastKnownDay) {
           lastKnownDay = currentDay
           _activeDay.value = currentDay
-          repository.setActiveDay(currentDay)
-
-          // Reset any expired isPausedTodayOnly tasks
-          val updatedDynamics = _dynamicTasks.value.map {
-            if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
-          }
-          if (updatedDynamics != _dynamicTasks.value) {
-            _dynamicTasks.value = updatedDynamics
-            repository.saveDynamicTasks(updatedDynamics)
+          withContext(Dispatchers.IO) {
+            repository.setActiveDay(currentDay)
           }
 
-          val updatedAnchors = _anchors.value.map {
-            if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
-          }
-          if (updatedAnchors != _anchors.value) {
-            _anchors.value = updatedAnchors
-            repository.saveAnchors(updatedAnchors)
-          }
+          scheduleMutex.withLock {
+            // Reset any expired isPausedTodayOnly tasks
+            val updatedDynamics = _dynamicTasks.value.map {
+              if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
+            }
+            val dynamicsChanged = updatedDynamics != _dynamicTasks.value
+            if (dynamicsChanged) {
+              _dynamicTasks.value = updatedDynamics
+            }
 
-          AutomationManager.rescheduleAllAlarms(getApplication())
+            val updatedAnchors = _anchors.value.map {
+              if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
+            }
+            val anchorsChanged = updatedAnchors != _anchors.value
+            if (anchorsChanged) {
+              _anchors.value = updatedAnchors
+            }
+
+            withContext(Dispatchers.IO) {
+              if (dynamicsChanged) repository.saveDynamicTasks(updatedDynamics)
+              if (anchorsChanged) repository.saveAnchors(updatedAnchors)
+              AutomationManager.rescheduleAllAlarms(getApplication())
+            }
+          }
         }
         delay(15000L) // Refresh every 15 seconds
       }
@@ -177,19 +194,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   val rawScheduleResult: StateFlow<ScheduleResult> = combine(
     _anchors,
     _dynamicTasks,
+    _pendingDraftTasks,
     _activeDay,
     _bufferMinutes
-  ) { currentAnchors, currentDynamics, day, buffer ->
-    val activeDynamics = currentDynamics.filter { !it.isDeleted }
-    withContext(Dispatchers.Default) {
-      SchedulerEngine.scheduleDay(
-        anchors = currentAnchors,
-        dynamicTasks = activeDynamics,
-        activeDay = day,
-        interTaskBufferMinutes = buffer
-      )
-    }
-  }.flowOn(Dispatchers.Default).stateIn(
+  ) { currentAnchors, currentDynamics, draftDynamics, day, buffer ->
+    val activeDynamics = (draftDynamics ?: currentDynamics).filter { !it.isDeleted }
+    SchedulerEngine.scheduleDay(
+      anchors = currentAnchors,
+      dynamicTasks = activeDynamics,
+      activeDay = day,
+      interTaskBufferMinutes = buffer
+    )
+  }.distinctUntilChanged().flowOn(Dispatchers.Default).stateIn(
     scope = viewModelScope,
     started = SharingStarted.Eagerly,
     initialValue = SchedulerEngine.scheduleDay(
@@ -200,46 +216,155 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     )
   )
 
+  private val activeSortMinuteTicker = combine(_sortMode, _currentMinute) { sort, currMin ->
+    if (sort == TimelineSortMode.ACTIVE_FIRST) currMin else -1
+  }.distinctUntilChanged()
+
   val scheduleResult: StateFlow<ScheduleResult> = combine(
     rawScheduleResult,
     _sortMode,
-    _currentMinute,
+    activeSortMinuteTicker,
     _activeDay
   ) { rawResult, sort, currMin, day ->
-    withContext(Dispatchers.Default) {
-      val sortedScheduled = when (sort) {
-        TimelineSortMode.EARLIEST_START -> rawResult.scheduledTasks.sortedBy { it.startTimeMinute }
-        TimelineSortMode.LATEST_START -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute }
-        TimelineSortMode.LONGEST_DURATION -> rawResult.scheduledTasks.sortedByDescending { it.durationMinutes }
-        TimelineSortMode.SHORTEST_DURATION -> rawResult.scheduledTasks.sortedBy { it.durationMinutes }
-        TimelineSortMode.ACTIVE_FIRST -> {
-          val isToday = day == RoutineDay.today()
-          val active = rawResult.scheduledTasks.filter { com.example.ui.components.isTaskActiveAt(it, currMin, isToday) }
-          val upcoming = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute >= currMin }.sortedBy { it.startTimeMinute }
-          val completed = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute < currMin }.sortedBy { it.startTimeMinute }
-          active + upcoming + completed
-        }
-        TimelineSortMode.HORIZON_REVERSE -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute + it.durationMinutes }
-        TimelineSortMode.ANCHORS_TOP -> {
-          val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
-            it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
-          }
-          anchorsList.sortedBy { it.slotNumber ?: 0 } + dynamicsList.sortedBy { it.startTimeMinute }
-        }
-        TimelineSortMode.ANCHORS_BOTTOM -> {
-          val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
-            it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
-          }
-          dynamicsList.sortedBy { it.startTimeMinute } + anchorsList.sortedBy { it.slotNumber ?: 0 }
-        }
+    val sortedScheduled = when (sort) {
+      TimelineSortMode.EARLIEST_START -> rawResult.scheduledTasks.sortedBy { it.startTimeMinute }
+      TimelineSortMode.LATEST_START -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute }
+      TimelineSortMode.LONGEST_DURATION -> rawResult.scheduledTasks.sortedByDescending { it.durationMinutes }
+      TimelineSortMode.SHORTEST_DURATION -> rawResult.scheduledTasks.sortedBy { it.durationMinutes }
+      TimelineSortMode.ACTIVE_FIRST -> {
+        val isToday = day == RoutineDay.today()
+        val active = rawResult.scheduledTasks.filter { com.example.ui.components.isTaskActiveAt(it, currMin, isToday) }
+        val upcoming = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute >= currMin }.sortedBy { it.startTimeMinute }
+        val completed = rawResult.scheduledTasks.filter { !com.example.ui.components.isTaskActiveAt(it, currMin, isToday) && it.startTimeMinute < currMin }.sortedBy { it.startTimeMinute }
+        active + upcoming + completed
       }
-      rawResult.copy(scheduledTasks = sortedScheduled)
+      TimelineSortMode.HORIZON_REVERSE -> rawResult.scheduledTasks.sortedByDescending { it.startTimeMinute + it.durationMinutes }
+      TimelineSortMode.ANCHORS_TOP -> {
+        val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
+          it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
+        }
+        anchorsList.sortedBy { it.slotNumber ?: 0 } + dynamicsList.sortedBy { it.startTimeMinute }
+      }
+      TimelineSortMode.ANCHORS_BOTTOM -> {
+        val (anchorsList, dynamicsList) = rawResult.scheduledTasks.partition {
+          it.type == TaskType.ANCHOR_SLEEP || it.type == TaskType.ANCHOR_STANDARD || it.type == TaskType.ANCHOR_ELASTIC
+        }
+        dynamicsList.sortedBy { it.startTimeMinute } + anchorsList.sortedBy { it.slotNumber ?: 0 }
+      }
     }
-  }.flowOn(Dispatchers.Default).stateIn(
+    rawResult.copy(scheduledTasks = sortedScheduled)
+  }.distinctUntilChanged().flowOn(Dispatchers.Default).stateIn(
     scope = viewModelScope,
     started = SharingStarted.Eagerly,
     initialValue = rawScheduleResult.value
   )
+
+  val pendingImpactDiff: StateFlow<List<ScheduleImpactItem>> = combine(
+    _baselineSnapshotSchedule,
+    rawScheduleResult,
+    _pendingDraftTasks
+  ) { baseline, currentSchedule, draft ->
+    if (baseline == null || draft == null) {
+      emptyList()
+    } else {
+      SchedulerEngine.computeScheduleImpactDiff(baseline, currentSchedule)
+    }
+  }.distinctUntilChanged().flowOn(Dispatchers.Default).stateIn(
+    scope = viewModelScope,
+    started = SharingStarted.Eagerly,
+    initialValue = emptyList()
+  )
+
+  fun previewDragTaskMove(
+    taskId: String,
+    targetStartMinute: Int,
+    onAnchorWallHit: (() -> Unit)? = null
+  ) {
+    viewModelScope.launch {
+      scheduleMutex.withLock {
+        if (_baselineSnapshotSchedule.value == null) {
+          _baselineSnapshotSchedule.value = rawScheduleResult.value
+        }
+        val workingTasks = _pendingDraftTasks.value ?: _dynamicTasks.value
+        val currentAnchors = _anchors.value
+        val day = _activeDay.value
+        nextManualPlacementOrder = maxOf(nextManualPlacementOrder + 1L, System.currentTimeMillis())
+        val order = nextManualPlacementOrder
+
+        val (updatedTasks, hitWall) = withContext(Dispatchers.Default) {
+          SchedulerEngine.applyDragReposition(
+            allDynamicTasks = workingTasks,
+            taskId = taskId,
+            targetStartMinute = targetStartMinute,
+            newManualOrder = order,
+            anchors = currentAnchors,
+            day = day
+          )
+        }
+        _pendingDraftTasks.value = updatedTasks
+        if (hitWall) {
+          onAnchorWallHit?.invoke()
+        }
+      }
+    }
+  }
+
+  fun previewVerticalDropMove(
+    taskId: String,
+    dropTarget: VerticalDropTarget,
+    onAnchorWallHit: (() -> Unit)? = null
+  ) {
+    viewModelScope.launch {
+      scheduleMutex.withLock {
+        val currentSchedule = rawScheduleResult.value
+        if (_baselineSnapshotSchedule.value == null) {
+          _baselineSnapshotSchedule.value = currentSchedule
+        }
+        val workingTasks = _pendingDraftTasks.value ?: _dynamicTasks.value
+        val currentAnchors = _anchors.value
+        val day = _activeDay.value
+        nextManualPlacementOrder = maxOf(nextManualPlacementOrder + 200L, System.currentTimeMillis())
+        val baseOrder = nextManualPlacementOrder
+
+        val (updatedTasks, hitWall) = withContext(Dispatchers.Default) {
+          SchedulerEngine.applyVerticalDropReposition(
+            allDynamicTasks = workingTasks,
+            scheduledTasks = currentSchedule.scheduledTasks,
+            taskId = taskId,
+            dropTarget = dropTarget,
+            baseManualOrder = baseOrder,
+            anchors = currentAnchors,
+            day = day
+          )
+        }
+        _pendingDraftTasks.value = updatedTasks
+        if (hitWall) {
+          onAnchorWallHit?.invoke()
+        }
+      }
+    }
+  }
+
+  fun commitPendingEdits() {
+    if (_pendingDraftTasks.value == null) return
+    viewModelScope.launch {
+      scheduleMutex.withLock {
+        val draft = _pendingDraftTasks.value ?: return@withLock
+        _dynamicTasks.value = draft
+        _pendingDraftTasks.value = null
+        _baselineSnapshotSchedule.value = null
+        withContext(Dispatchers.IO) {
+          repository.saveDynamicTasks(draft)
+          AutomationManager.rescheduleAllAlarms(getApplication())
+        }
+      }
+    }
+  }
+
+  fun discardPendingEdits() {
+    _pendingDraftTasks.value = null
+    _baselineSnapshotSchedule.value = null
+  }
 
   fun selectTab(tab: NavigationTab) {
     _activeTab.value = tab
@@ -315,8 +440,10 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           )
         }
         _anchors.value = updated
-        repository.saveAnchors(updated)
-        AutomationManager.rescheduleAllAlarms(getApplication())
+        withContext(Dispatchers.IO) {
+          repository.saveAnchors(updated)
+          AutomationManager.rescheduleAllAlarms(getApplication())
+        }
       }
     }
   }
@@ -326,11 +453,13 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       scheduleMutex.withLock {
         val mins = (hours * 60).toInt().coerceIn(240, 720)
         _sleepDurationMinutes.value = mins
-        repository.setSleepDurationMinutes(mins)
         val recalculated = SchedulerEngine.calculateAnchors(_anchors.value, mins)
         _anchors.value = recalculated
-        repository.saveAnchors(recalculated)
-        AutomationManager.rescheduleAllAlarms(getApplication())
+        withContext(Dispatchers.IO) {
+          repository.setSleepDurationMinutes(mins)
+          repository.saveAnchors(recalculated)
+          AutomationManager.rescheduleAllAlarms(getApplication())
+        }
       }
     }
   }
@@ -356,6 +485,11 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
+        if (slotNumber == 1) {
+          // Slot 1 (Reverse Sleep) is strictly protected and cannot be paused
+          return@withLock
+        }
+
         val now = System.currentTimeMillis()
         val pausedUntil = when {
           indefinitely -> null
@@ -374,13 +508,11 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           else -> null
         }
 
-        if (slotNumber == 1) {
-          // Slot 1 (Reverse Sleep) is strictly protected and cannot be paused
-          return@launch
-        }
-
         val affectedIds = mutableListOf<String>()
         val targetIsAnchor = isAnchor || slotNumber != null || _anchors.value.any { it.id == taskId }
+        var anchorsToSave: List<RoutineTask>? = null
+        var dynamicsToSave: List<RoutineTask>? = null
+
         if (targetIsAnchor) {
           val targetSlot = slotNumber ?: _anchors.value.firstOrNull { it.id == taskId }?.slotNumber
           val updated = _anchors.value.map { task ->
@@ -396,7 +528,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
             }
           }
           _anchors.value = updated
-          repository.saveAnchors(updated)
+          anchorsToSave = updated
         } else {
           val updated = _dynamicTasks.value.map { task ->
             if (task.id == taskId || task.parentTaskId == taskId) {
@@ -411,13 +543,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
             }
           }
           _dynamicTasks.value = updated
-          repository.saveDynamicTasks(updated)
+          dynamicsToSave = updated
         }
-        AutomationManager.cancelTaskAlarms(getApplication(), taskId)
-        affectedIds.forEach { affectedId ->
-          AutomationManager.releaseDndIfHeldByTask(getApplication(), affectedId)
+
+        withContext(Dispatchers.IO) {
+          anchorsToSave?.let { repository.saveAnchors(it) }
+          dynamicsToSave?.let { repository.saveDynamicTasks(it) }
+          AutomationManager.cancelTaskAlarms(getApplication(), taskId)
+          affectedIds.forEach { affectedId ->
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), affectedId)
+          }
+          AutomationManager.rescheduleAllAlarms(getApplication())
         }
-        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -426,6 +563,9 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     viewModelScope.launch {
       scheduleMutex.withLock {
         val targetIsAnchor = isAnchor || slotNumber != null || _anchors.value.any { it.id == taskId }
+        var anchorsToSave: List<RoutineTask>? = null
+        var dynamicsToSave: List<RoutineTask>? = null
+
         if (targetIsAnchor) {
           val targetSlot = slotNumber ?: _anchors.value.firstOrNull { it.id == taskId }?.slotNumber
           val updated = _anchors.value.map { task ->
@@ -440,7 +580,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
             }
           }
           _anchors.value = updated
-          repository.saveAnchors(updated)
+          anchorsToSave = updated
         } else {
           val updated = _dynamicTasks.value.map { task ->
             if (task.id == taskId || task.parentTaskId == taskId) {
@@ -454,9 +594,14 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
             }
           }
           _dynamicTasks.value = updated
-          repository.saveDynamicTasks(updated)
+          dynamicsToSave = updated
         }
-        AutomationManager.rescheduleAllAlarms(getApplication())
+
+        withContext(Dispatchers.IO) {
+          anchorsToSave?.let { repository.saveAnchors(it) }
+          dynamicsToSave?.let { repository.saveDynamicTasks(it) }
+          AutomationManager.rescheduleAllAlarms(getApplication())
+        }
       }
     }
   }
@@ -466,7 +611,13 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     voiceMessage: String,
     selectedDays: Set<RoutineDay> = RoutineDay.allDays(),
     enableDnd: Boolean = false,
-    dndDelayMinutes: Int = 0
+    dndDelayMinutes: Int = 0,
+    enableHaptic: Boolean = true,
+    isVoiceEnabled: Boolean = true,
+    voiceVolume: Float = 1.0f,
+    isSoundAlertEnabled: Boolean = true,
+    customRingtoneUri: String? = null,
+    customRingtoneTitle: String? = null
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
@@ -477,7 +628,13 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
               voiceMessage = voiceMessage,
               selectedDays = selectedDays,
               enableDnd = enableDnd,
-              dndDelayMinutes = dndDelayMinutes
+              dndDelayMinutes = dndDelayMinutes.coerceIn(0, 25),
+              enableHaptic = enableHaptic,
+              isVoiceEnabled = isVoiceEnabled,
+              voiceVolume = voiceVolume.coerceIn(0f, 1f),
+              isSoundAlertEnabled = isSoundAlertEnabled,
+              customRingtoneUri = customRingtoneUri,
+              customRingtoneTitle = customRingtoneTitle
             )
           } else {
             task
@@ -485,13 +642,15 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         }
         val recalculated = SchedulerEngine.calculateAnchors(current, _sleepDurationMinutes.value)
         _anchors.value = recalculated
-        repository.saveAnchors(recalculated)
-        if (!enableDnd) {
-          recalculated.firstOrNull { it.slotNumber == 5 }?.let {
-            AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
+        withContext(Dispatchers.IO) {
+          repository.saveAnchors(recalculated)
+          if (!enableDnd) {
+            recalculated.firstOrNull { it.slotNumber == 5 }?.let {
+              AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
+            }
           }
+          AutomationManager.rescheduleAllAlarms(getApplication())
         }
-        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -524,7 +683,6 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         if (slotNumber == 1) {
           activeSleepMins = durationMinutes.coerceIn(240, 720)
           _sleepDurationMinutes.value = activeSleepMins
-          repository.setSleepDurationMinutes(activeSleepMins)
         }
         val current = _anchors.value.map { task ->
           if (task.slotNumber == slotNumber) {
@@ -547,7 +705,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
               fridayDurationMinutes = if (slotNumber == 3) fridayDurationMinutes else task.fridayDurationMinutes,
               fridayVoiceMessage = if (slotNumber == 3) fridayVoiceMessage else task.fridayVoiceMessage,
               voiceVolume = voiceVolume,
-              dndDelayMinutes = if (slotNumber == 1 || slotNumber == 5) 0 else dndDelayMinutes.coerceIn(0, 25)
+              dndDelayMinutes = dndDelayMinutes.coerceIn(0, 25)
             )
           } else {
             task
@@ -555,13 +713,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         }
         val recalculated = SchedulerEngine.calculateAnchors(current, activeSleepMins)
         _anchors.value = recalculated
-        repository.saveAnchors(recalculated)
-        if (!enableDnd) {
-          recalculated.firstOrNull { it.slotNumber == slotNumber }?.let {
-            AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
+        withContext(Dispatchers.IO) {
+          if (slotNumber == 1) {
+            repository.setSleepDurationMinutes(activeSleepMins)
           }
+          repository.saveAnchors(recalculated)
+          if (!enableDnd) {
+            recalculated.firstOrNull { it.slotNumber == slotNumber }?.let {
+              AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
+            }
+          }
+          AutomationManager.rescheduleAllAlarms(getApplication())
         }
-        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -569,15 +732,19 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun saveDynamicTask(task: RoutineTask) {
     viewModelScope.launch {
       scheduleMutex.withLock {
+        _pendingDraftTasks.value = null
+        _baselineSnapshotSchedule.value = null
         val birthStart = task.originalStartTimeMinute ?: task.startTimeMinute
         val list = _dynamicTasks.value.filter { it.id != task.id && it.parentTaskId != task.id }.toMutableList()
         list.add(task.copy(originalStartTimeMinute = birthStart, isDeleted = false, deletedTimestamp = null))
         _dynamicTasks.value = list
-        repository.saveDynamicTasks(list)
-        if (!task.enableDnd || task.isCurrentlyPaused()) {
-          AutomationManager.releaseDndIfHeldByTask(getApplication(), task.id)
+        withContext(Dispatchers.IO) {
+          repository.saveDynamicTasks(list)
+          if (!task.enableDnd || task.isCurrentlyPaused()) {
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), task.id)
+          }
+          AutomationManager.rescheduleAllAlarms(getApplication())
         }
-        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -585,6 +752,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun saveFluidTwin(request: FluidTwinSaveRequest) {
     viewModelScope.launch {
       scheduleMutex.withLock {
+        _pendingDraftTasks.value = null
+        _baselineSnapshotSchedule.value = null
         val twinId = request.existingTwinId?.ifBlank { null } ?: "fluid_${UUID.randomUUID().toString().take(8)}"
         val actualP1Title = request.part1Title.ifBlank { "${request.title} (Part 1)" }
         val actualP2Title = request.part2Title.ifBlank { "${request.title} (Part 2)" }
@@ -666,16 +835,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         list.add(part1)
         list.add(part2)
         _dynamicTasks.value = list
-        repository.saveDynamicTasks(list)
-        request.sourceSingleTaskId?.let { sourceId ->
-          AutomationManager.cancelTaskAlarms(getApplication(), sourceId)
-          AutomationManager.releaseDndIfHeldByTask(getApplication(), sourceId)
+        withContext(Dispatchers.IO) {
+          repository.saveDynamicTasks(list)
+          request.sourceSingleTaskId?.let { sourceId ->
+            AutomationManager.cancelTaskAlarms(getApplication(), sourceId)
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), sourceId)
+          }
+          if (!request.enableDnd) {
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), part1.id)
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), part2.id)
+          }
+          AutomationManager.rescheduleAllAlarms(getApplication())
         }
-        if (!request.enableDnd) {
-          AutomationManager.releaseDndIfHeldByTask(getApplication(), part1.id)
-          AutomationManager.releaseDndIfHeldByTask(getApplication(), part2.id)
-        }
-        AutomationManager.rescheduleAllAlarms(getApplication())
       }
     }
   }
@@ -683,16 +854,24 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun moveToTrash(taskId: String) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        val updated = repository.softDeleteTask(taskId)
+        _pendingDraftTasks.value = null
+        _baselineSnapshotSchedule.value = null
+        val (updated, deleted) = withContext(Dispatchers.IO) {
+          val u = repository.softDeleteTask(taskId)
+          val d = repository.getDeletedTasks()
+          AutomationManager.cancelTaskAlarms(getApplication(), taskId)
+          AutomationManager.releaseDndIfHeldByTask(getApplication(), taskId)
+          u to d
+        }
         _dynamicTasks.value = updated
-        _deletedTasks.value = repository.getDeletedTasks()
-        AutomationManager.cancelTaskAlarms(getApplication(), taskId)
-        AutomationManager.releaseDndIfHeldByTask(getApplication(), taskId)
+        _deletedTasks.value = deleted
 
         if (_activeAutomationStateIsTask(taskId)) {
           stopActiveAutomation()
         }
-        AutomationManager.rescheduleAllAlarms(getApplication())
+        withContext(Dispatchers.IO) {
+          AutomationManager.rescheduleAllAlarms(getApplication())
+        }
       }
     }
   }
@@ -700,18 +879,27 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun deleteBothFluidTwinParts(twinId: String) {
     viewModelScope.launch {
       scheduleMutex.withLock {
+        _pendingDraftTasks.value = null
+        _baselineSnapshotSchedule.value = null
         val twins = _dynamicTasks.value.filter { it.fluidTwinId == twinId }
         twins.forEach { task ->
-          repository.softDeleteTask(task.id)
-          AutomationManager.cancelTaskAlarms(getApplication(), task.id)
-          AutomationManager.releaseDndIfHeldByTask(getApplication(), task.id)
           if (_activeAutomationStateIsTask(task.id)) {
             stopActiveAutomation()
           }
         }
-        _dynamicTasks.value = repository.getDynamicTasks()
-        _deletedTasks.value = repository.getDeletedTasks()
-        AutomationManager.rescheduleAllAlarms(getApplication())
+        val (updated, deleted) = withContext(Dispatchers.IO) {
+          twins.forEach { task ->
+            repository.softDeleteTask(task.id)
+            AutomationManager.cancelTaskAlarms(getApplication(), task.id)
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), task.id)
+          }
+          val u = repository.getDynamicTasks()
+          val d = repository.getDeletedTasks()
+          AutomationManager.rescheduleAllAlarms(getApplication())
+          u to d
+        }
+        _dynamicTasks.value = updated
+        _deletedTasks.value = deleted
       }
     }
   }
@@ -719,6 +907,8 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun deleteTwinAndAbsorbTime(taskToDeleteId: String, partnerTaskId: String) {
     viewModelScope.launch {
       scheduleMutex.withLock {
+        _pendingDraftTasks.value = null
+        _baselineSnapshotSchedule.value = null
         val taskToDelete = _dynamicTasks.value.firstOrNull { it.id == taskToDeleteId && !it.isDeleted }
         val partnerTask = _dynamicTasks.value.firstOrNull { it.id == partnerTaskId && !it.isDeleted }
         if (taskToDelete != null && partnerTask != null) {
@@ -732,22 +922,40 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
             fluidTotalPoolMinutes = null,
             fluidSafetyFloorMinutes = 0
           )
-          repository.softDeleteTask(taskToDeleteId)
-          AutomationManager.cancelTaskAlarms(getApplication(), taskToDeleteId)
-          AutomationManager.releaseDndIfHeldByTask(getApplication(), taskToDeleteId)
           if (_activeAutomationStateIsTask(taskToDeleteId)) {
             stopActiveAutomation()
           }
+          val (updatedList, deleted) = withContext(Dispatchers.IO) {
+            repository.softDeleteTask(taskToDeleteId)
+            AutomationManager.cancelTaskAlarms(getApplication(), taskToDeleteId)
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), taskToDeleteId)
 
-          val updatedList = repository.getDynamicTasks().map {
-            if (it.id == partnerTaskId) updatedPartner else it
+            val list = repository.getDynamicTasks().map {
+              if (it.id == partnerTaskId) updatedPartner else it
+            }
+            repository.saveDynamicTasks(list)
+            val d = repository.getDeletedTasks()
+            AutomationManager.rescheduleAllAlarms(getApplication())
+            list to d
           }
-          repository.saveDynamicTasks(updatedList)
           _dynamicTasks.value = updatedList
-          _deletedTasks.value = repository.getDeletedTasks()
-          AutomationManager.rescheduleAllAlarms(getApplication())
+          _deletedTasks.value = deleted
         } else if (taskToDelete != null) {
-          moveToTrash(taskToDeleteId)
+          val (updated, deleted) = withContext(Dispatchers.IO) {
+            val u = repository.softDeleteTask(taskToDeleteId)
+            val d = repository.getDeletedTasks()
+            AutomationManager.cancelTaskAlarms(getApplication(), taskToDeleteId)
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), taskToDeleteId)
+            u to d
+          }
+          _dynamicTasks.value = updated
+          _deletedTasks.value = deleted
+          if (_activeAutomationStateIsTask(taskToDeleteId)) {
+            stopActiveAutomation()
+          }
+          withContext(Dispatchers.IO) {
+            AutomationManager.rescheduleAllAlarms(getApplication())
+          }
         }
       }
     }
@@ -756,32 +964,38 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun restoreFromTrash(taskId: String) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        var updated = repository.restoreTask(taskId)
-        val restoredTask = updated.firstOrNull { it.id == taskId }
-        if (restoredTask != null && restoredTask.isFluidTwin && !restoredTask.fluidTwinId.isNullOrBlank()) {
-          val hasActivePartner = updated.any {
-            it.fluidTwinId == restoredTask.fluidTwinId && it.id != restoredTask.id && !it.isDeleted
-          }
-          if (!hasActivePartner) {
-            updated = updated.map {
-              if (it.id == restoredTask.id) {
-                it.copy(
-                  isFluidTwin = false,
-                  fluidTwinId = null,
-                  fluidTwinPart = null,
-                  fluidTotalPoolMinutes = null,
-                  fluidSafetyFloorMinutes = 0
-                )
-              } else {
-                it
-              }
+        _pendingDraftTasks.value = null
+        _baselineSnapshotSchedule.value = null
+        val (updated, deleted) = withContext(Dispatchers.IO) {
+          var u = repository.restoreTask(taskId)
+          val restoredTask = u.firstOrNull { it.id == taskId }
+          if (restoredTask != null && restoredTask.isFluidTwin && !restoredTask.fluidTwinId.isNullOrBlank()) {
+            val hasActivePartner = u.any {
+              it.fluidTwinId == restoredTask.fluidTwinId && it.id != restoredTask.id && !it.isDeleted
             }
-            repository.saveDynamicTasks(updated)
+            if (!hasActivePartner) {
+              u = u.map {
+                if (it.id == restoredTask.id) {
+                  it.copy(
+                    isFluidTwin = false,
+                    fluidTwinId = null,
+                    fluidTwinPart = null,
+                    fluidTotalPoolMinutes = null,
+                    fluidSafetyFloorMinutes = 0
+                  )
+                } else {
+                  it
+                }
+              }
+              repository.saveDynamicTasks(u)
+            }
           }
+          val d = repository.getDeletedTasks()
+          AutomationManager.rescheduleAllAlarms(getApplication())
+          u to d
         }
         _dynamicTasks.value = updated
-        _deletedTasks.value = repository.getDeletedTasks()
-        AutomationManager.rescheduleAllAlarms(getApplication())
+        _deletedTasks.value = deleted
       }
     }
   }
@@ -789,9 +1003,13 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun purgePermanently(taskId: String) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        val updated = repository.purgeTaskPermanently(taskId)
+        val (updated, deleted) = withContext(Dispatchers.IO) {
+          val u = repository.purgeTaskPermanently(taskId)
+          val d = repository.getDeletedTasks()
+          u to d
+        }
         _dynamicTasks.value = updated
-        _deletedTasks.value = repository.getDeletedTasks()
+        _deletedTasks.value = deleted
       }
     }
   }
@@ -799,7 +1017,9 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun emptyTrash() {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        val updated = repository.purgeAllDeletedTasks()
+        val updated = withContext(Dispatchers.IO) {
+          repository.purgeAllDeletedTasks()
+        }
         _dynamicTasks.value = updated
         _deletedTasks.value = emptyList()
       }
@@ -823,23 +1043,22 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        // If restoring backup configuration
-        if (backupSleepMinutes != null) {
-          val syncedSleep = backupSleepMinutes.coerceIn(240, 720)
+        _pendingDraftTasks.value = null
+        _baselineSnapshotSchedule.value = null
+        val syncedSleep = when {
+          backupSleepMinutes != null -> backupSleepMinutes.coerceIn(240, 720)
+          parsedAnchors.any { it.slotNumber == 1 } ->
+            parsedAnchors.first { it.slotNumber == 1 }.durationMinutes.coerceIn(240, 720)
+          else -> null
+        }
+        if (syncedSleep != null) {
           _sleepDurationMinutes.value = syncedSleep
-          repository.setSleepDurationMinutes(syncedSleep)
-        } else {
-          parsedAnchors.firstOrNull { it.slotNumber == 1 }?.let { slot1 ->
-            val syncedSleep = slot1.durationMinutes.coerceIn(240, 720)
-            _sleepDurationMinutes.value = syncedSleep
-            repository.setSleepDurationMinutes(syncedSleep)
-          }
         }
         backupBufferMinutes?.let { buf ->
           _bufferMinutes.value = buf.coerceIn(0, 30)
-          repository.setBufferMinutes(_bufferMinutes.value)
         }
-        if (parsedAnchors.isNotEmpty()) {
+
+        val recalculatedAnchors = if (parsedAnchors.isNotEmpty()) {
           val currentAnchors = _anchors.value.toMutableList()
           for (parsed in parsedAnchors) {
             val idx = currentAnchors.indexOfFirst { it.slotNumber == parsed.slotNumber }
@@ -849,26 +1068,41 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
               currentAnchors.add(parsed)
             }
           }
-          val recalculated = SchedulerEngine.calculateAnchors(currentAnchors, _sleepDurationMinutes.value)
-          _anchors.value = recalculated
-          repository.saveAnchors(recalculated)
+          SchedulerEngine.calculateAnchors(currentAnchors, _sleepDurationMinutes.value).also {
+            _anchors.value = it
+          }
+        } else {
+          null
         }
 
         val normalizedNewTasks = newTasks.map {
           it.copy(originalStartTimeMinute = it.originalStartTimeMinute ?: it.startTimeMinute)
         }
+        val oldTasks = if (replaceExisting) _dynamicTasks.value else emptyList()
         val list = if (replaceExisting) {
-          _dynamicTasks.value.forEach {
-            AutomationManager.cancelTaskAlarms(getApplication(), it.id)
-            AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
-          }
           normalizedNewTasks
         } else {
           _dynamicTasks.value.filter { !it.isDeleted } + normalizedNewTasks
         }
         _dynamicTasks.value = list
-        repository.saveDynamicTasks(list)
-        AutomationManager.rescheduleAllAlarms(getApplication())
+
+        withContext(Dispatchers.IO) {
+          if (syncedSleep != null) {
+            repository.setSleepDurationMinutes(syncedSleep)
+          }
+          backupBufferMinutes?.let {
+            repository.setBufferMinutes(_bufferMinutes.value)
+          }
+          recalculatedAnchors?.let {
+            repository.saveAnchors(it)
+          }
+          oldTasks.forEach {
+            AutomationManager.cancelTaskAlarms(getApplication(), it.id)
+            AutomationManager.releaseDndIfHeldByTask(getApplication(), it.id)
+          }
+          repository.saveDynamicTasks(list)
+          AutomationManager.rescheduleAllAlarms(getApplication())
+        }
       }
     }
   }

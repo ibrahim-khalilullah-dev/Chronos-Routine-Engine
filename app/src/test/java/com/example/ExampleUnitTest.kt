@@ -729,5 +729,573 @@ class ExampleUnitTest {
     assertEquals(15, reparsed.validTasks[3].dndDelayMinutes)
     assertEquals(0, reparsed.validTasks[4].dndDelayMinutes)
   }
+
+  @Test
+  fun testConsoleParserUnlocksDndDelayForSlot1AndSlot5() {
+    val script = """
+      ANCHOR | 1 | Night Sleep | 23:00 | 360 | Y | 15 | Y | Sleep now
+      ANCHOR | 5 | Break | 16:55 | 65 | Y | 20 | Y | Break time
+      ANCHOR | 2 | Fajr | 05:00 | 35 | N | 12 | Y | Fajr
+    """.trimIndent()
+
+    val parsed = ConsoleParser.parse(script)
+    assertEquals(0, parsed.errorCount)
+    assertEquals(3, parsed.parsedAnchors.size)
+
+    val slot1 = parsed.parsedAnchors.first { it.slotNumber == 1 }
+    val slot5 = parsed.parsedAnchors.first { it.slotNumber == 5 }
+    val slot2 = parsed.parsedAnchors.first { it.slotNumber == 2 }
+
+    assertTrue(slot1.enableDnd)
+    assertEquals("Slot 1 must preserve custom DND delay when DND is enabled", 15, slot1.dndDelayMinutes)
+    assertTrue(slot5.enableDnd)
+    assertEquals("Slot 5 must preserve custom DND delay when DND is enabled", 20, slot5.dndDelayMinutes)
+    assertFalse(slot2.enableDnd)
+    assertEquals("Disabled DND must zero out dndDelayMinutes", 0, slot2.dndDelayMinutes)
+  }
+
+  @Test
+  fun testSchedulerHorizontalScrubBoundsProtectsAnchorsAndNeighbors() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Anchor 2 ends at 05:35 (335m); Anchor 3 starts at 13:15 (795m)
+    val neighbor = RoutineTask(
+      id = "neighbor_1",
+      title = "Morning Blocker",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 480, // 08:00 AM
+      durationMinutes = 60,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val target = RoutineTask(
+      id = "scrub_target",
+      title = "Scrubbable Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 390, // 06:30 AM
+      durationMinutes = 40,
+      interTaskBufferMinutes = 10, // needs 50m block total
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val scheduled = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(target, neighbor),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    ).scheduledTasks
+
+    val scheduledTarget = scheduled.first { it.id == "scrub_target" }
+    val bounds = com.example.engine.SchedulerEngine.computeHorizontalScrubBounds(
+      task = scheduledTarget,
+      scheduledTasks = scheduled,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+
+    assertEquals("Min bound must respect Slot 2 end (335m)", 335, bounds.first)
+    assertEquals("Max bound must stop before neighbor at 480m leaving 40m + 10m buffer", 430, bounds.last)
+  }
+
+  @Test
+  fun testSchedulerDragRepositionFencesHighPriorityAndFluidTwinsAndAllowsNormalCrossAnchor() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Gap 2-3: 335..795; Gap 3-4: 830..990 (Monday)
+    val highPriority = RoutineTask(
+      id = "hp_drag",
+      title = "High Priority Focus",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420,
+      originalStartTimeMinute = 420,
+      durationMinutes = 45,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val fluidTwin = RoutineTask(
+      id = "twin_drag_p1",
+      title = "Twin Focus",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 480,
+      originalStartTimeMinute = 480,
+      durationMinutes = 30,
+      isFluidTwin = true,
+      fluidTwinId = "twin_drag",
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 60,
+      fluidSafetyFloorMinutes = 15,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val normalTask = RoutineTask(
+      id = "norm_drag",
+      title = "Normal Flexible",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 540,
+      originalStartTimeMinute = 540,
+      durationMinutes = 30,
+      isHighPriority = false,
+      isFluidTwin = false,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val list = listOf(highPriority, fluidTwin, normalTask)
+
+    // Attempt to drag High Priority past Slot 3 (into 860m = 14:20) -> fenced inside 335..795
+    val (hpUpdated, hpHitWall) = com.example.engine.SchedulerEngine.applyDragReposition(
+      allDynamicTasks = list,
+      taskId = "hp_drag",
+      targetStartMinute = 860,
+      newManualOrder = 100L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertTrue("High-Priority task must signal Anchor Wall hit", hpHitWall)
+    assertEquals(750, hpUpdated.first { it.id == "hp_drag" }.startTimeMinute) // 795 - 45
+
+    // Attempt to drag Fluid Twin past Slot 3 (into 860m) -> fenced inside 335..795
+    val (twinUpdated, twinHitWall) = com.example.engine.SchedulerEngine.applyDragReposition(
+      allDynamicTasks = list,
+      taskId = "twin_drag_p1",
+      targetStartMinute = 860,
+      newManualOrder = 101L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertTrue("Fluid Twin must signal Anchor Wall hit", twinHitWall)
+    assertTrue(twinUpdated.first { it.id == "twin_drag_p1" }.startTimeMinute <= 780) // 795 - 15 floor
+
+    // Attempt to drag Normal task across Slot 3 into Gap 3-4 (860m) -> allowed across anchors
+    val (normUpdated, normHitWall) = com.example.engine.SchedulerEngine.applyDragReposition(
+      allDynamicTasks = list,
+      taskId = "norm_drag",
+      targetStartMinute = 860,
+      newManualOrder = 102L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertFalse("Normal task can jump across anchors without hitting fence", normHitWall)
+    val movedNorm = normUpdated.first { it.id == "norm_drag" }
+    assertEquals(860, movedNorm.startTimeMinute)
+    assertEquals(102L, movedNorm.manualPlacementOrder)
+  }
+
+  @Test
+  fun testSchedulerComputeScheduleImpactDiffReportsShiftsAndOverflow() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    val t1 = RoutineTask(
+      id = "impact_1",
+      title = "First Sprint",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420,
+      originalStartTimeMinute = 420,
+      durationMinutes = 60,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val t2 = RoutineTask(
+      id = "impact_2",
+      title = "Second Sprint",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 500,
+      originalStartTimeMinute = 500,
+      durationMinutes = 45,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val baseline = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(t1, t2),
+      activeDay = RoutineDay.MONDAY
+    )
+
+    // Move t1 right onto 500m with higher manualPlacementOrder so t2 shifts around it
+    val movedList = listOf(
+      t1.copy(startTimeMinute = 500, originalStartTimeMinute = 500, manualPlacementOrder = 999L),
+      t2
+    )
+    val draft = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = movedList,
+      activeDay = RoutineDay.MONDAY
+    )
+
+    val diffs = com.example.engine.SchedulerEngine.computeScheduleImpactDiff(baseline, draft)
+    assertTrue("Impact diff must detect both moved and displaced tasks", diffs.size >= 2)
+    val diff1 = diffs.first { it.taskId == "impact_1" }
+    val diff2 = diffs.first { it.taskId == "impact_2" }
+    assertEquals(420, diff1.oldStartMinute)
+    assertEquals(500, diff1.newStartMinute)
+    assertEquals(500, diff2.oldStartMinute)
+    assertTrue("Displaced task should no longer start at 500", diff2.newStartMinute != 500)
+  }
+
+  @Test
+  fun testComputeNetFreeGapMinutesExcludesInterTaskBuffer() {
+    val taskWithBuffer = RoutineTask(
+      id = "gap_buf_1",
+      title = "Buffered Work",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360, // 06:00 AM
+      durationMinutes = 60,  // Ends 07:00 AM (420m)
+      interTaskBufferMinutes = 15, // Effective end = 435m (07:15 AM)
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val nextExactAfterBuffer = RoutineTask(
+      id = "gap_buf_2",
+      title = "Immediately After Buffer",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 435, // 07:15 AM -> distance 15m covered completely by buffer
+      durationMinutes = 30,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val nextOverlap = nextExactAfterBuffer.copy(id = "gap_buf_3", startTimeMinute = 430)
+    val nextWithRealGap = nextExactAfterBuffer.copy(id = "gap_buf_4", startTimeMinute = 495) // 08:15 AM -> 60m net gap
+
+    assertEquals(
+      "Gap completely covered by interTaskBufferMinutes must return 0",
+      0,
+      com.example.engine.SchedulerEngine.computeNetFreeGapMinutes(taskWithBuffer, nextExactAfterBuffer)
+    )
+    assertEquals(
+      0,
+      com.example.engine.SchedulerEngine.computeNetFreeGapMinutes(taskWithBuffer, nextOverlap)
+    )
+    assertEquals(
+      "Net free gap must subtract reserved buffer time cleanly",
+      60,
+      com.example.engine.SchedulerEngine.computeNetFreeGapMinutes(taskWithBuffer, nextWithRealGap)
+    )
+  }
+
+  @Test
+  fun testApplyVerticalDropRepositionSwapsEatAndBathInBothDirections() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Gap 2-3: 335..795
+    val eat = RoutineTask(
+      id = "eat_task",
+      title = "Eat",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420, // 07:00 - 08:00
+      originalStartTimeMinute = 420,
+      durationMinutes = 60,
+      interTaskBufferMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val bath = RoutineTask(
+      id = "bath_task",
+      title = "Bath",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 480, // 08:00 - 08:30 (+10m buffer)
+      originalStartTimeMinute = 480,
+      durationMinutes = 30,
+      interTaskBufferMinutes = 10,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val baseline = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(eat, bath),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+
+    // Direction 1: Drag UP (Bath InsertBeforeTask Eat) -> [Bath 420..450, Eat 460..520]
+    val (swappedUpList, hitWallUp) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = listOf(eat, bath),
+      scheduledTasks = baseline.scheduledTasks,
+      taskId = "bath_task",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertBeforeTask("eat_task"),
+      baseManualOrder = 500L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertFalse(hitWallUp)
+    val scheduledUp = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = swappedUpList,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val upBath = scheduledUp.scheduledTasks.first { it.id == "bath_task" }
+    val upEat = scheduledUp.scheduledTasks.first { it.id == "eat_task" }
+    assertEquals(420, upBath.startTimeMinute)
+    assertEquals(460, upEat.startTimeMinute)
+
+    // Direction 2: Drag DOWN (Eat InsertAfterTask Bath) -> [Bath 420..450, Eat 460..520]
+    val (swappedDownList, hitWallDown) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = listOf(eat, bath),
+      scheduledTasks = baseline.scheduledTasks,
+      taskId = "eat_task",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertAfterTask("bath_task"),
+      baseManualOrder = 600L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertFalse(hitWallDown)
+    val scheduledDown = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = swappedDownList,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val downBath = scheduledDown.scheduledTasks.first { it.id == "bath_task" }
+    val downEat = scheduledDown.scheduledTasks.first { it.id == "eat_task" }
+    assertEquals(420, downBath.startTimeMinute)
+    assertEquals(460, downEat.startTimeMinute)
+
+    val impactDiff = com.example.engine.SchedulerEngine.computeScheduleImpactDiff(baseline, scheduledDown)
+    assertTrue("Impact diff must report both swapped Eat and Bath tasks", impactDiff.any { it.taskId == "bath_task" } && impactDiff.any { it.taskId == "eat_task" })
+  }
+
+  @Test
+  fun testApplyVerticalDropRepositionCrossAnchorCascadingAndFencing() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Gap 2-3: 335..795; Gap 3-4: 830..990 (Monday)
+    val highPriority = RoutineTask(
+      id = "hp_vdrop",
+      title = "Locked High Priority",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420,
+      originalStartTimeMinute = 420,
+      durationMinutes = 45,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val fluidTwin = RoutineTask(
+      id = "twin_vdrop_p1",
+      title = "Locked Fluid Twin",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 500,
+      originalStartTimeMinute = 500,
+      durationMinutes = 30,
+      isFluidTwin = true,
+      fluidTwinId = "twin_vdrop",
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 60,
+      fluidSafetyFloorMinutes = 15,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val normalTask = RoutineTask(
+      id = "norm_vdrop",
+      title = "Movable Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 600,
+      originalStartTimeMinute = 600,
+      durationMinutes = 30,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val afternoonTarget = RoutineTask(
+      id = "gap34_blocker",
+      title = "Afternoon Session",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 840, // 02:00 PM in Gap 3-4 (830..990)
+      originalStartTimeMinute = 840,
+      durationMinutes = 45,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val allTasks = listOf(highPriority, fluidTwin, normalTask, afternoonTarget)
+    val baseline = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = allTasks,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+
+    // 1. High priority vertical drop across Slot 3 -> clamped inside Gap 2-3 with hitAnchorWall = true
+    val (hpUpdated, hpHitWall) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = allTasks,
+      scheduledTasks = baseline.scheduledTasks,
+      taskId = "hp_vdrop",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertBeforeTask("gap34_blocker"),
+      baseManualOrder = 100L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertTrue("High-priority cross-anchor vertical drop must hit Anchor Wall", hpHitWall)
+    val hpEnd = hpUpdated.first { it.id == "hp_vdrop" }.startTimeMinute + 45
+    assertTrue("High-priority must remain inside Gap 2-3 (<= 795)", hpEnd <= 795)
+
+    // 2. Fluid Twin vertical drop across Slot 3 -> clamped inside Gap 2-3 with hitAnchorWall = true
+    val (twinUpdated, twinHitWall) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = allTasks,
+      scheduledTasks = baseline.scheduledTasks,
+      taskId = "twin_vdrop_p1",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertBeforeTask("gap34_blocker"),
+      baseManualOrder = 200L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertTrue("Fluid Twin cross-anchor vertical drop must hit Anchor Wall", twinHitWall)
+    assertTrue(twinUpdated.first { it.id == "twin_vdrop_p1" }.startTimeMinute <= 780)
+
+    // 3. Normal task cross-anchor drop before gap34_blocker -> lands at 840m and cascades afternoonTarget down!
+    val (normUpdated, normHitWall) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = allTasks,
+      scheduledTasks = baseline.scheduledTasks,
+      taskId = "norm_vdrop",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertBeforeTask("gap34_blocker"),
+      baseManualOrder = 300L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertFalse("Normal task can cross anchors freely", normHitWall)
+    val reScheduled = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = normUpdated,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val movedNorm = reScheduled.scheduledTasks.first { it.id == "norm_vdrop" }
+    val cascadedTarget = reScheduled.scheduledTasks.first { it.id == "gap34_blocker" }
+    assertEquals(840, movedNorm.startTimeMinute)
+    assertTrue(
+      "Existing afternoon task at 840m must cascade past dropped normal task (>= 870m)",
+      cascadedTarget.startTimeMinute >= 870
+    )
+  }
+
+  @Test
+  fun testLiveNetFreeGapRecalculationDuringHorizontalScrub() {
+    val prevTask = RoutineTask(
+      id = "scrub_prev",
+      title = "Prev Session",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360, // 06:00 - 07:00
+      durationMinutes = 60,
+      interTaskBufferMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val middleTask = RoutineTask(
+      id = "scrub_mid",
+      title = "Sliding Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420, // 07:00 - 07:30
+      durationMinutes = 30,
+      interTaskBufferMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val nextTask = RoutineTask(
+      id = "scrub_next",
+      title = "Next Session",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 453, // 07:33 -> 3m gap below middleTask initially
+      durationMinutes = 30,
+      interTaskBufferMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    // Forward horizontal scrub across 3m slack: bottom shrinks 3->2->1->0 while top grows 0->1->2->3
+    val expectedTopForward = listOf(0, 1, 2, 3)
+    val expectedBottomForward = listOf(3, 2, 1, 0)
+    for (offset in 0..3) {
+      val liveMid = middleTask.copy(startTimeMinute = 420 + offset)
+      assertEquals(
+        expectedTopForward[offset],
+        com.example.engine.SchedulerEngine.computeNetFreeGapMinutes(prevTask, liveMid)
+      )
+      assertEquals(
+        expectedBottomForward[offset],
+        com.example.engine.SchedulerEngine.computeNetFreeGapMinutes(liveMid, nextTask)
+      )
+    }
+
+    // Reverse horizontal scrub back: top shrinks 3->2->1->0 while bottom grows 0->1->2->3
+    for (offset in 3 downTo 0) {
+      val liveMid = middleTask.copy(startTimeMinute = 420 + offset)
+      assertEquals(offset, com.example.engine.SchedulerEngine.computeNetFreeGapMinutes(prevTask, liveMid))
+      assertEquals(3 - offset, com.example.engine.SchedulerEngine.computeNetFreeGapMinutes(liveMid, nextTask))
+    }
+  }
+
+  @Test
+  fun testApplyVerticalDropRepositionWideGapDownwardInsertBeforeTask() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Gap 2-3: 335..795
+    val morningTask = RoutineTask(
+      id = "wide_morning",
+      title = "Morning Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360, // 06:00 - 06:30
+      originalStartTimeMinute = 360,
+      durationMinutes = 30,
+      interTaskBufferMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val noonTask = RoutineTask(
+      id = "wide_noon",
+      title = "Noon Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 660, // 11:00 - 11:30 (270m wide gap after Morning Task)
+      originalStartTimeMinute = 660,
+      durationMinutes = 30,
+      interTaskBufferMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val baseline1 = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(morningTask, noonTask),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+
+    // Drag morningTask DOWN across 270m wide gap onto InsertBeforeTask(wide_noon):
+    // Must land right BEFORE wide_noon at 10:30 (630m), NOT snap back to 06:00 (360m)!
+    val (updatedOpenRoom, hitWall1) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = listOf(morningTask, noonTask),
+      scheduledTasks = baseline1.scheduledTasks,
+      taskId = "wide_morning",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertBeforeTask("wide_noon"),
+      baseManualOrder = 800L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertFalse(hitWall1)
+    val reschedOpen = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = updatedOpenRoom,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val movedMorning = reschedOpen.scheduledTasks.first { it.id == "wide_morning" }
+    val keptNoon = reschedOpen.scheduledTasks.first { it.id == "wide_noon" }
+    assertEquals("Wide-gap downward InsertBeforeTask must place task directly before target", 630, movedMorning.startTimeMinute)
+    assertEquals("Noon target remains untouched when open room above fits", 660, keptNoon.startTimeMinute)
+
+    // Now place a blocker at 10:35-10:50 (635..650), leaving only 10m above wide_noon (< 30m needed):
+    // Dragging morningTask DOWN onto InsertBeforeTask(wide_noon) must place morningTask at 11:00 (660) and push noonTask to 11:30 (690).
+    val blockerAboveNoon = RoutineTask(
+      id = "pre_noon_blocker",
+      title = "Pre-Noon Checkin",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 635,
+      originalStartTimeMinute = 635,
+      durationMinutes = 15,
+      interTaskBufferMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val threeTasks = listOf(morningTask, blockerAboveNoon, noonTask)
+    val baseline2 = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = threeTasks,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val (updatedTightRoom, hitWall2) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = threeTasks,
+      scheduledTasks = baseline2.scheduledTasks,
+      taskId = "wide_morning",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertBeforeTask("wide_noon"),
+      baseManualOrder = 900L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertFalse(hitWall2)
+    val reschedTight = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = updatedTightRoom,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertEquals(660, reschedTight.scheduledTasks.first { it.id == "wide_morning" }.startTimeMinute)
+    assertEquals(690, reschedTight.scheduledTasks.first { it.id == "wide_noon" }.startTimeMinute)
+  }
 }
+
+
 

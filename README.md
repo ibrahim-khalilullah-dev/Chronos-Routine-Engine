@@ -9,7 +9,7 @@
   <a href="https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk" download="chronos.apk">
     <img src="https://img.shields.io/badge/Download-APK%20(Direct%20Install)-10B981?style=for-the-badge&logo=android&logoColor=white&labelColor=0B0E14" height="54" alt="Download Chronos APK" style="border-radius: 20px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);" />
   </a>
-  <p><sub>Direct one-tap APK installation • Android 8.0 to 16 • 100% Offline</sub></p>
+  <p><sub>v1.1 • Direct one-tap APK installation • Android 7.0 to 16 • 100% Offline</sub></p>
   <br/>
 </div>
 
@@ -34,28 +34,31 @@ Chronos anchors human circadian rhythms across 7 immovable daily boundaries. Dyn
 
 | Slot | Anchor Name | Default Time | Duration | Hardware Automations & Circadian Function |
 | :---: | :--- | :---: | :---: | :--- |
-| **Slot 1** | **Sleep** | 11:00 PM | 360m (6h) | **Reverse Sleep Tracker:** Automatically calculated backwards from Slot 2 wake time: `((Slot 2 - Sleep + 1440) % 1440)`. DND active (0m delay). Voice: *"ঘুমানোর সময় হয়েছে।"* |
-| **Slot 2** | **Fajr** | 05:40 AM | 20m | Circadian metabolic baseline & morning wakefulness anchor. 5m DND delay timer. Voice: *"ফজরের সালাতের সময়।"* |
-| **Slot 3** | **Dhuhr** | 01:25 PM | 25m | Midday cognitive peak boundary. 5m DND delay timer. Features **Friday Jumu'ah Dual Mode**. Voice: *"জোহরের সালাতের সময়।"* |
-| **Slot 4** | **Asr** | 04:15 PM | 15m | Afternoon restoration anchor defining the upper bound of Slot 5. 5m DND delay timer. Voice: *"আসরের সালাতের সময়।"* |
-| **Slot 5** | **Break / Free** | 04:30 PM → 05:15 PM | 45m | **Accordion Rubber Buffer:** Dynamically absorbs drift between Slot 4 and Slot 6 with a strict 15m safety floor. 7-day weekly recurrence selector. Voice: *"বিকেলের ফ্রি টাইম।"* |
-| **Slot 6** | **Maghrib** | 05:25 PM | 20m | Evening cognitive decompression threshold. 5m DND delay timer. Voice: *"মাগরিবের সালাতের সময়।"* |
-| **Slot 7** | **Isha** | 07:45 PM | 25m | Melatonin onset preparation and pre-sleep sanctuary. 5m DND delay timer. Voice: *"এশার সালাতের সময়।"* |
+| **Slot 1** | **Sleep** | 11:00 PM | 360m (6h) | **Reverse Sleep Tracker:** Automatically calculated backwards from Slot 2 wake time: `((Slot 2 - Sleep + 1440) % 1440)`. DND active (0m delay; customizable 0–25m). Voice: *"ঘুমানোর সময় হয়েছে।"* |
+| **Slot 2** | **Fajr** | 05:00 AM | 35m | Circadian metabolic baseline & morning wakefulness anchor. 8m DND delay timer. Voice: *"ফজরের সময় হয়েছে।"* |
+| **Slot 3** | **Dhuhr** | 01:15 PM | 35m | Midday cognitive peak boundary. 8m DND delay timer. Features **Friday Jumu'ah Dual Mode**. Voice: *"যোহরের সময় হয়েছে।"* |
+| **Slot 4** | **Asr** | 04:30 PM | 25m | Afternoon restoration anchor defining the upper bound of Slot 5. 10m DND delay timer. Voice: *"আসরের সময় হয়েছে।"* |
+| **Slot 5** | **Break** | 04:55 PM → 06:00 PM | 65m | **Accordion Rubber Buffer:** Dynamically absorbs drift between Slot 4 and Slot 6 with a strict 15m safety floor, full hardware alerts/ringtones, customizable 0–25m DND delay, and 7-day recurrence selector. Voice: *"বিরতির সময় হয়েছে।"* |
+| **Slot 6** | **Maghrib** | 06:00 PM | 30m | Evening cognitive decompression threshold. 5m DND delay timer. Voice: *"মাগরিবের সময় হয়েছে।"* |
+| **Slot 7** | **Isha** | 08:00 PM | 35m | Melatonin onset preparation and pre-sleep sanctuary. 10m DND delay timer. Voice: *"এশার সময় হয়েছে।"* |
+
+*All 7 Anchors—including Slot 1 (Sleep) and Slot 5 (Elastic Buffer)—support configurable `0–25m` Auto DND Delay timers.*
 
 ---
 
 ### 2. Slot 3 Friday Jumu'ah Dual Mode 🕌
 On Fridays, Slot 3 autonomously transforms into dedicated Jumu'ah mode without disrupting Saturday–Thursday configurations:
-- **Autonomous Timing:** Custom start time (default `12:30 PM` / 750m) and expanded duration (default `2h` = 120m).
-- **Dedicated Voice Annunciation:** Audio-ducked Bengali voice briefing (*"জুমার সালাতের সময়।"*) with a 5-minute delayed DND timer.
+- **Autonomous Timing & Lockscreen Accuracy:** Custom start time (default `12:30 PM` / 750m), expanded duration (default `2h` = 120m), and accurate Friday duration & end-time rendering on lock-screen notifications (`Ends at 02:30 PM`).
+- **Dedicated Voice Annunciation & Honored DND Delay:** Audio-ducked Bengali voice briefing (*"জুমার সময় হয়েছে।"*) while strictly honoring the user's configured DND delay (`0–25m`).
 - **Dynamic Re-alignment:** Friday dynamic tasks automatically conform around the expanded Jumu'ah window with zero schedule collision.
 
 ---
 
-### 3. Slot 5 Accordion Elastic Buffer & Weekly Recurrence
+### 3. Slot 5 Accordion Elastic Buffer, Hardware Alerts & Weekly Recurrence
 Slot 5 functions as a self-balancing mathematical shock absorber spanning from Slot 4 End to Slot 6 Start:
 - **Dynamic Recalculation:** When Slot 4 or Slot 6 moves, Slot 5 automatically stretches or contracts, absorbing daily shifts without displacing dynamic tasks.
 - **Protected 15-Minute Floor:** Can never be squeezed below 15 minutes, guaranteeing decompression time.
+- **Full Hardware Alert Persistence:** Slot 5 persists custom phone ringtones, sound alert & voice toggles, voice volume, haptic pulse, and `0–25m` Auto DND Delay seamlessly.
 - **7-Day Recurrence Selector:** Enable or disable Slot 5 per day. When deactivated on any designated day, **100% of the Slot 4 → Slot 6 interval is liberated** for high-leverage dynamic tasks with zero artificial buffers.
 
 ---
@@ -78,31 +81,32 @@ Link two distinct routine sessions under a shared total duration pool (2m up to 
 
 ---
 
-### 6. Deep-Sleep Immune, Task-Owned DND (`ACTION_APPLY_DND`) 🌙
-- **Exact RTC Hardware Wakeup:** Delayed DND triggers (`0–25m` delay after task start, available on Anchors, Single Dynamic Tasks, and Fluid Twins) bypass Android Doze and OEM battery-killer freezes by registering a dedicated `setAlarmClock()` alarm (`ACTION_APPLY_DND`) in `AlarmManager` only when the delayed trigger falls strictly before `endMillis`, and `ACTION_END_TASK` uses `setAlarmClock()` whenever DND is enabled.
-- **Task-Owned DND, Stale Trigger Rejection & Reconciliation:** Persists the active DND owner task ID synchronously (`commit()`), rejects stale `ACTION_APPLY_DND` triggers when `EXTRA_TASK_END_MILLIS` has already elapsed or the task is deleted/paused, reconciles and clears stale DND locks during `rescheduleAllAlarms()` (`dayOffset = -1..0`), and prevents mid-transition DND flicker when a zero-delay follow-up DND task starts immediately at boundary.
-- **Automatic State Restoration:** Restores previous system interruption filter upon task conclusion.
+### 6. Single-Earliest `setAlarmClock()` Promotion & Task-Owned DND (`ACTION_APPLY_DND`) 🌙
+- **Zero Broadcast Storm Hardware Wakeups:** Instead of registering dozens of simultaneous `setAlarmClock()` SystemUI triggers, `AutomationManager.rescheduleAllAlarms()` promotes **only the single earliest upcoming alarm** across Start, bounded Delayed DND (`dndDelayMinutes` strictly before `endMillis`), and DND-End to `AlarmManager.setAlarmClock()`, while registering all remaining alarms across `dayOffset in -1..6` via `setExactAndAllowWhileIdle()`.
+- **Async Receiver Execution (`goAsync()`):** `RoutineAlarmReceiver` and `BootReceiver` offload alarm promotion and rescheduling onto coroutine workers under `goAsync()`, preventing main-thread broadcast stalls or ANRs on low-memory devices.
+- **Task-Owned DND, Stale Trigger Rejection & Reconciliation:** Persists the active DND owner task ID synchronously (`commit()`), rejects stale `ACTION_APPLY_DND` triggers when `EXTRA_TASK_END_MILLIS` has already elapsed or the task is deleted/paused, reconciles stale DND locks across `dayOffset = -1..0`, restores previous interruption filter cleanly on task end, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.
 
 ---
 
-### 7. Live Countdown Banner & Auto-Day Transition ⏱️
-- **Real-Time Timeline Countdown:** Dynamic header card showing a live ticking countdown to the next scheduled task or anchor, complete with active-task progress bars.
-- **Zero-Click Midnight Day-Shift:** Background date monitor automatically shifts the inspected day to the new day at 00:00 without requiring user reload or manual interaction.
+### 7. Minimalist Header Countdown Pill & Auto-Day Transition ⏱️
+- **Clean Top-Right Countdown Pill:** Opposite the `"Chronos"` header title, a compact frosted countdown pill ticks down to the next scheduled task or anchor—wrapping smoothly past midnight to tomorrow's earliest slot late at night (`+1440 - currentMinute`)—with zero duplicate lower countdown banners cluttering the feed.
+- **Smart Pending Edit Swap:** Whenever interactive timeline drag edits are staged, the header pill cleanly transforms into the compact 3-button drag confirmation bar (`History`, `Apply`, `Discard`).
+- **Zero-Click Midnight Day-Shift:** Background date monitor automatically shifts the inspected day to the new day at 00:00 and resets `isPausedTodayOnly` flags cleanly.
 
 ---
 
-### 8. Lockscreen Notifications, Security & 12-Persona Bilingual TTS 🔔
-- **Lock-Screen Privacy & Visibility:** Lockscreen notifications (`VISIBILITY_PUBLIC`) prominently display exact task completion times (e.g., `Ends at 10:45 AM`), while opening the Chronos UI from a locked device always respects the device PIN/biometric lock.
-- **12-Option Bilingual Dropdown Voice Persona Studio:** Choose from 12 completely free offline bilingual Bengali & English voice profiles in **Settings** via a sleek collapsible dropdown (`Female (5)`, `Youth 10–15y (3)` boy & girl voices, `Male & Studio (4)`), complete with a custom BN/EN live test input (auto-detecting language with ready-made per-persona sample phrases), instant Play/Stop previews, a confirmation dialog before applying changes, and automatic persistence across `SharedPreferences` and `chronos_vault.json`.
-- **Smart Bengali & English TTS Routing:** Automatically detects Bengali Unicode (`\u0980..\u09FF`) vs. English announcements, switches TTS language/voice dynamically (`bn-BD` / `bn-IN` / `en-US`), applies native male pitch compensation (`nativeMalePitch`), falls back to Google TTS (`com.google.android.tts`) when the default engine lacks Bengali support, and provides a 1-tap voice-pack install prompt if offline Bengali TTS data is missing.
-- **Decoupled Alert Channels:** Haptic vibration (`enableHaptic`), notification chimes (`isSoundAlertEnabled`, with in-studio Play/Stop ringtone preview), and audio-ducked `TextToSpeech` voice briefings (`isVoiceEnabled`, using a cancellable 1500ms delay when chimes are active) operate independently.
+### 8. Silent Notification Channel, Custom Ringtone Playback & Lazy Self-Releasing TTS 🔔
+- **Silent Notification Channel (`chronos_automation_silent_channel`):** Foreground service notifications explicitly configure `setSound(null, null)` and `enableVibration(false)` so the OS notification channel never double-chimes alongside task audio, while displaying lock-screen timing (`VISIBILITY_PUBLIC`, e.g., `Ends at 10:45 AM`) and respecting device PIN/biometric locks.
+- **`USAGE_ALARM` Custom Ringtone & `MediaPlayer` Fallback:** User-selected phone ringtones play directly on `AudioAttributes.USAGE_ALARM` via `RingtoneManager`, falling back seamlessly to `MediaPlayer` if a vendor URI refuses direct Ringtone playback.
+- **Lazy Self-Releasing TTS & 25s WakeLock Cap:** `RoutineAutomationService` initializes `TextToSpeech(applicationContext)` strictly when `isVoiceEnabled == true`, immediately executes `stop()` and `shutdown()` inside `UtteranceProgressListener.onDone` / `onError` or a 20-second safety timeout so Google TTS (~150MB RAM) unbinds immediately, caps WakeLocks at `25_000L` (25 seconds), and runs with `START_NOT_STICKY` lifecycle safety.
+- **Zero-Leak 12-Persona Bilingual TTS & Studio Previews:** Choose from 12 offline BN/EN voice profiles in Settings (`Female (5)`, `Youth 10–15y (3)`, `Male & Studio (4)`), with custom BN/EN test text, `bn-BD`/`en-US` auto-detection, Google TTS (`com.google.android.tts`) fallback, and safe `applicationContext` previews in Task Studio and Settings.
 
 ---
 
 ### 9. 3-Mode Task Pause & Vacation Engine 🌴
 Manage temporary routine suspensions without deleting configured tasks:
 - **Pause for Today Only:** Suspends the task for the remainder of today; automatically reactivates tomorrow at 00:00.
-- **Pause for N Days:** Enter a custom day count (e.g., 5 days); counts down and automatically re-engages on day N+1.
+- **Pause for N Days:** Enter a custom day count (e.g. 5 days); counts down and automatically re-engages on day N+1.
 - **Pause Indefinitely:** Holds the task in suspension until manually resumed via a 1-tap Amber badge.
 - **Dynamic Gap Liberation:** Pausing any task opens up 100% of its scheduled interval as an open gap for other tasks.
 
@@ -110,19 +114,35 @@ Manage temporary routine suspensions without deleting configured tasks:
 
 ### 10. Deep-Sleep 7-Day Perpetual Alarm Engine 🛡️
 - **Overnight & Non-Overflow Scheduling:** `AutomationManager.rescheduleAllAlarms()` reconciles stale DND state and evaluates each active task across `dayOffset in -1..6` (`endMillis > now` for yesterday/today so overnight tasks like `23:00 → 05:00` retain their morning `ACTION_END_TASK` across midnight rollover), registering its earliest upcoming non-overflow occurrence in `AlarmManager`.
-- **Deep Doze Immunity:** Alarms survive aggressive OEM battery cleaners and multi-day deep Doze without requiring the user to open or foreground the app.
-- **Universal Clock & Boot Resynchronization:** Registers pending alarms using `setExactAndAllowWhileIdle` and `setAlarmClock` immediately upon reboot (`BOOT_COMPLETED`), application update (`MY_PACKAGE_REPLACED`), time change (`ACTION_TIME_SET`), and timezone change (`ACTION_TIMEZONE_CHANGED`).
+- **Single-Earliest System Alarm + Exact Horizon:** Promotes the earliest upcoming occurrence to `setAlarmClock()` for Doze piercing while keeping all subsequent horizon alarms on `setExactAndAllowWhileIdle()`, preventing alarm broadcast storms on 4GB RAM Samsung One UI devices.
+- **Universal Clock & Boot Resynchronization:** Resynchronizes alarms asynchronously via `goAsync()` immediately upon reboot (`BOOT_COMPLETED`), application update (`MY_PACKAGE_REPLACED`), time change (`ACTION_TIME_SET`), and timezone change (`ACTION_TIMEZONE_CHANGED`).
 
 ---
 
-### 11. 60/120 FPS Fluid Engine & Performance Architecture ⚡
-- **Decoupled Clock Ticker:** The 15-second clock ticker (`_currentMinute`) is completely decoupled from `SchedulerEngine.scheduleDay()`. Timeline computation executes strictly when routine data mutates and runs on `Dispatchers.Default`, eliminating unnecessary layout remeasurement and main-thread lag.
-- **Stable Item Keys:** LazyColumn recycling uses stable domain keys (`task.id`), completely eliminating element recreation and scroll stutter.
-- **Zero Stutter Layout:** Redundant layout passes and nested animation loops have been pruned for pristine 60/120 FPS fluid interaction.
+### 11. 60/120 FPS Fluid Engine & 4GB RAM Performance Architecture ⚡
+- **Off-Main-Thread Mutations & Throttled Vault Persistence:** `RoutineViewModel` executes repository saves and alarm rescheduling inside `scheduleMutex` on `Dispatchers.IO`, debounces 4-tier `chronos_vault.json` disk writes (`400ms` on serialized single-thread `ioScope`), and guards startup vault auto-restore so preferences are never re-parsed redundantly.
+- **Decoupled Ticker & `distinctUntilChanged` Sort Pipeline:** The 15-second clock ticker (`_currentMinute`) is decoupled from `SchedulerEngine.scheduleDay()`, and `activeSortMinuteTicker` emits updates only when `TimelineSortMode.ACTIVE_FIRST` is active.
+- **Smooth Placement Gliding & Stable Keys:** `LazyColumn` uses stable domain keys (`task.id`) and native `Modifier.animateItem` spring placement animations with zero infinite remeasure loops.
 
 ---
 
-### 12. Monospace Obsidian Terminal Studio CLI Engine (v2) 💻
+### 12. Corner Stopwatch Net Free-Time Gap Telemetry ⏱️
+- **Right-Aligned Obsidian Pill (`EARLIEST_START`):** Between consecutive cards with open breathing room, a sleek compact capsule (`#161E2E`, `1.dp` `#334155` border) with a crisp stopwatch icon displays exact open free time (e.g., `3m`, `1h 10m`).
+- **Buffer-Excluded Precision Math:** Powered by `SchedulerEngine.computeNetFreeGapMinutes()`, reserved `interTaskBufferMinutes` on dynamic tasks are cleanly subtracted from raw chronological spacing and the pill automatically hides whenever `netGapMinutes <= 0`.
+- **Real-Time Live Scrub Recalculation:** During horizontal scrubbing, adjacent corner gap pills recalculate live frame-by-frame (`3m` → `2m` → `1m` → hidden at `0m`) while the surrounding list order remains locked with zero layout jumping.
+
+---
+
+### 13. Interactive Launcher-Grade Drag Scheduling & Schedule Impact Diff 🎯
+- **Outer-Container Gesture Architecture (`PointerEventPass.Initial`):** Long-press any dynamic task card (safe tap margin preserves the top-right Edit pencil and native scrolling) to enter dual-axis drag mode:
+  - **Horizontal Scrubbing:** Speed-sensitive fine scrubbing gliders move the card minute-by-minute within computed free bounds (`computeHorizontalScrubBounds`), strictly locking horizontal motion if surrounding gap is `0m`.
+  - **Vertical Reordering & Frame-Rate Edge Auto-Scroll:** Drag vertically across the timeline with an elevated floating overlay card, `withFrameNanos`-driven velocity-scaled edge auto-scroll, dimmed dashed **Source Shadow** (`alpha = 0.28`) at origin, animated full-card-height **Destination Drop Shadow** protected by `±8dp` anti-ping-pong hysteresis, neighbor card gliding via `Modifier.animateItem`, and a zero-blink settling handoff on release.
+- **Anchor Fencing vs. Cross-Anchor & Swap Cascade:** High Priority and Fluid Twin tasks clamp cleanly at enclosing **Anchor Walls** (`Anchor Wall` indicator), while Normal dynamic tasks can jump across anchors, land inside open gaps, or swap and cascade adjacent neighbors cleanly via `manualPlacementOrder`.
+- **Non-Destructive Preview & Impact Diff Modal:** Staged drag changes swap the header countdown pill for a 3-button review bar (`[History]` diff modal listing exact task shifts & overflows, `[Check]` Apply & reschedule alarms, `[Close]` Discard cleanly).
+
+---
+
+### 14. Monospace Obsidian Terminal Studio CLI Engine (v2) 💻
 A developer-first, high-throughput monospace Obsidian terminal console with real-time debounced syntax parsing (250ms), active metrics diagnostic card, collapsible error accordion, and clickable inline context-aware ghost auto-prediction:
 - **`ANCHOR` Directive:** `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Message | [FriTitle | FriStart | FriDur | FriMsg] | [Days | Sound(Y/N) | VoiceVol(0-100)]`.
 - **`TWIN` Directive:** `TWIN | TotalPool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND(Y/N) | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1Voice(Y/N) | P2Voice(Y/N) | P1Vol | P2Vol | Sound | DndDelay(0-25)]`.
@@ -134,11 +154,11 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 
 ---
 
-### 13. Unified Obsidian Task Studio & Dual-Session Voice Architecture 🎙️
+### 15. Unified Obsidian Task Studio & Dual-Session Voice Architecture 🎙️
 - **Unified Luxury Parity Across All Modes:** Normal Tasks, Fluid Twin Split sessions, and all 7 Circadian Anchors share one cohesive Samsung One UI 8.5 Obsidian Studio aesthetic (`#101727` → `#0A0E18` glass gradient cards, `#070B13` recessed time/duration wells, glowing Material 3 custom `16.dp` circular slider thumbs, `36.dp` stepper badges, and streamlined Slot 1 / Slot 5 editors free of redundant description clutter).
 - **Header Quick-Pill Ergonomics & Mutual Exclusivity:** Direct header-integrated `Priority` and `Split` interactive toggle pills use `AnimatedVisibility` mutual exclusivity during task creation—enabling `Priority` smoothly hides `Split`, and engaging `Split` cleanly hides `Priority`—while editing an existing single task hides `Split` and keeps `Priority` editable.
 - **Compact 3-Box Matrix, `00` Defaults & Anti-Clipping Stepper Wells:** Uniform `START TIME`, `HOURS`, `MINS`, and `SAFETY` wells use `widthIn`-constrained `BasicTextField` inputs (`00` placeholders) with external `h`/`m`/`±` unit suffixes so symbols never clip, `"Born: <time>"` markers when displaced, a `"ENDING TIME"` (or `"TARGET SLEEP QUOTA"` for Slot 1) summary row, and a clean single-checkmark Save CTA.
-- **Unified Hardware Grid, `0–25m` DND Delay & Ringtone Preview:** `Category` selector, `FLEXIBLE` & `BUFFER TIME` row, `TASK ALERTS` (with Play/Stop ringtone preview), `AUTO DND` (with `0–25m` Delay stepper across Single Dynamic Tasks, Split Twins, and Anchors), and `RECURRENCE SCHEDULE` render uniformly across all modes.
+- **Unified Hardware Grid, `0–25m` DND Delay & Ringtone Preview:** `Category` selector, `FLEXIBLE` & `BUFFER TIME` row, `TASK ALERTS` (with Play/Stop ringtone preview), `AUTO DND` (with `0–25m` Delay stepper across Single Dynamic Tasks, Split Twins, and all 7 Anchors), and `RECURRENCE SCHEDULE` render uniformly across all modes.
 - **Full Dual-Session Voice Studio & Split Typing Safety:** Both Session 1 and Session 2 inside Split mode feature independent voice ON/OFF switches, custom per-session Safety Floors, collapsible speech message inputs, interactive Play/Stop TTS preview toggles synced to the active Settings Voice Persona, and 0%–100% volume sliders, while preserving manual empty/zero editing without jarring `pool / 2` auto-fills or mid-keystroke snap-backs.
 - **Zero Auto-Splitting Architecture:** Tasks fit intact within available circadian gaps or cleanly route to the Overflow Pool without unexpected fragmentation.
 
@@ -148,15 +168,16 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 
 | Layer | Technology | Rationale & Responsibility |
 | :--- | :--- | :--- |
-| **Language** | Kotlin 2.0.21 | Modern type-safe language with coroutines and immutable data structures |
-| **UI Framework** | Jetpack Compose (M3 1.4.0) | Declarative UI following Samsung One UI 8.5 ergonomics and AMOLED palette |
-| **Concurrency** | Coroutines & Mutex | Thread-safe async dispatch and serialized scheduling execution via `Mutex` |
+| **Language** | Kotlin 2.2.10 | Modern type-safe language with coroutines and immutable data structures |
+| **Build System** | AGP 9.1.1 (Gradle Kotlin DSL) | Android 16 (API 36) compilation toolchain with Compose & KSP |
+| **UI Framework** | Jetpack Compose (BOM 2024.09.00 / M3 1.4.0) | Declarative UI following Samsung One UI 8.5 ergonomics and AMOLED palette |
+| **Concurrency** | Coroutines & Mutex | Thread-safe async dispatch (`Dispatchers.IO`/`Default`) and serialized `scheduleMutex` execution |
 | **Reactive State** | StateFlow & collectAsState | Unidirectional Data Flow (UDF) delivering instantaneous screen updates |
-| **Local Storage** | SharedPreferences & Multi-Tier Vault | Rapid memory-mapped JSON storage backed by 4-tier disk file persistence |
-| **Background Work** | Foreground Service (`mediaPlayback`) | Uninterrupted execution during voice briefings and DND transitions |
-| **Alarm Precision** | `AlarmManager.setAlarmClock()` | Infallible wakeups immune to OEM battery optimizations and Doze suppression |
-| **Audio Telemetry** | `TextToSpeech` & `AudioManager` | Audio-ducked voice notifications with localized multilingual speech support |
-| **Testing** | Robolectric 4.14.1 & JUnit | Fast JVM-level integration and Critical User Journey (CUJ) testing |
+| **Local Storage** | SharedPreferences & Multi-Tier Vault | Memory-mapped JSON storage backed by 400ms debounced 4-tier `chronos_vault.json` |
+| **Background Work** | Foreground Service (`START_NOT_STICKY`) | Uninterrupted execution with 25s WakeLock cap and self-releasing TTS |
+| **Alarm Precision** | `setAlarmClock()` + `setExactAndAllowWhileIdle()` | Single-earliest Doze-piercing wakeups + 7-day horizon without broadcast storms |
+| **Audio Telemetry** | Lazy `TextToSpeech` & `RingtoneManager` | `USAGE_ALARM` ringtone + `MediaPlayer` fallback, audio ducking, 12 BN/EN personas |
+| **Testing** | Robolectric 4.16.1 & JUnit | Fast JVM-level Compose UI, drag/drop math, and CUJ integration testing |
 
 ---
 
@@ -192,9 +213,10 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## 📱 System & Device Specifications
 
-- **Minimum SDK:** Android 8.0 (API Level 24)
+- **App Release Version:** v1.1 (`versionCode = 2`)
+- **Minimum SDK:** Android 7.0 (API Level 24)
 - **Target / Tested SDK:** Android 15 / 16 (API Level 35 & 36 Ready)
-- **Runtime Memory Footprint:** < 65MB RAM (zero background leaks, zero memory polling)
+- **Runtime Memory Footprint:** < 65MB RAM (lazy self-releasing TTS, single-earliest `setAlarmClock()`, zero background leaks)
 - **Primary Reference Hardware:** Samsung Galaxy A24 (SM-A245N), MediaTek Helio G99, 4GB RAM, One UI 6.x / 7.x / 8.5
 
 ---

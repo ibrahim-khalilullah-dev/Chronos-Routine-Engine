@@ -1,11 +1,12 @@
 # CHRONOS ENGINE: COMPREHENSIVE ARCHITECTURAL CONTEXT MAP & BLUEPRINT
 
-**Platform Target:** Android 8.0+ (API Level 26–36)  
-**Core Language:** Kotlin 2.0.21 (JVM Toolchain 21)  
-**UI Toolkit:** Jetpack Compose (Material Design 3 v1.4.0, Samsung One UI 8.5 Ergonomics)  
+**Version:** 1.1 (`versionCode = 2`)  
+**Platform Target:** Android 7.0+ (API Level 24–36)  
+**Core Language:** Kotlin 2.2.10 (AGP 9.1.1, JVM Toolchain 11/21)  
+**UI Toolkit:** Jetpack Compose (BOM 2024.09.00, Material Design 3 v1.4.0, Samsung One UI 8.5 Ergonomics)  
 **Architecture Pattern:** Clean Architecture + MVVM (Unidirectional Data Flow) + Reactive StateFlow + Mutex Concurrency  
-**Data Persistence:** SharedPreferences (Fast JSON serialization) + Multi-Tier Offline File Vault (Zero-Click Recovery)  
-**Hardware & System APIs:** AlarmManager (`setAlarmClock`, exact RTC `ACTION_APPLY_DND`), NotificationManager (Priority DND Filter), TextToSpeech (Transient Audio Ducking), PowerManager (Partial WakeLock), VibratorManager  
+**Data Persistence:** SharedPreferences (Fast JSON serialization) + 400ms Debounced 4-Tier Offline Vault (Zero-Click Recovery)  
+**Hardware & System APIs:** AlarmManager (Single-Earliest `setAlarmClock()` Promotion + `setExactAndAllowWhileIdle()` 7-day horizon), `goAsync()` BroadcastReceivers, NotificationManager (Silent Channel `chronos_automation_silent_channel` & Priority DND Filter), Lazy Self-Releasing `TextToSpeech` + `RingtoneManager` (`USAGE_ALARM` + `MediaPlayer` fallback), PowerManager (`25s` Partial WakeLock cap), VibratorManager  
 **Privacy & Network:** 100% Offline, Zero Cloud Dependencies, Zero Analytics, No Hardcoded Secrets  
 
 ---
@@ -20,28 +21,29 @@
                                             |
                                             v
                                   [ BootReceiver.kt ]
+                                  (goAsync() Coroutine Offload)
                                             |
                                             v
                         +----------------------------------------+
                         |        [ AutomationManager.kt ]        |
-                        |   - setAlarmClock() scheduling         |
-                        |   - Exact RTC ACTION_APPLY_DND alarms  |
-                        |   - DND Interruption Filter Policy     |
-                        |   - Battery Whitelist Management       |
+                        |   - Single-earliest setAlarmClock()    |
+                        |   - setExactAndAllowWhileIdle() 7-day  |
+                        |   - Task-owned DND + Stale Reconcile   |
+                        |   - 12 Bilingual Voice Personas        |
                         +---------+--------------------+---------+
                                   |                    |
                                   v                    v
                       [ RoutineAlarmReceiver.kt ]      |
-                      - ACTION_START_TASK              |
-                      - ACTION_END_TASK                |
-                      - ACTION_APPLY_DND               |
+                      - goAsync() Alarm Promotion      |
+                      - ACTION_START_TASK / END_TASK   |
+                      - Stale-Guarded ACTION_APPLY_DND |
                                   |                    |
                                   v                    |
                  [ RoutineAutomationService.kt ]       |
-                 - MediaPlayback Foreground Service    |
-                 - TextToSpeech (Audio Ducking)        |
-                 - Deep-Sleep Immune DND triggers      |
-                 - Lockscreen Notification with EndsAt |
+                 - START_NOT_STICKY Foreground Service |
+                 - Silent Notification Channel         |
+                 - USAGE_ALARM Ringtone / MediaPlayer  |
+                 - Lazy Self-Releasing TTS + 25s Wake  |
                                   |                    |
                                   v                    |
                  +----------------+----------------+   |
@@ -54,29 +56,30 @@
 |                                                                        |
 |  [ MainActivity.kt ]                                                   |
 |    - Single-activity container, WindowInsets edge-to-edge              |
-|    - Bottom Navigation (Timeline, Add Task, Automation, Settings)      |
+|    - Bottom Navigation + Floating Speed-Dial (Manual / Terminal / Doc) |
+|    - Canonical task resolution & drag preview/commit/discard wiring    |
 |                                                                        |
 |  [ RoutineViewModel.kt ]                                              |
-|    - Holds reactive UI state (StateFlow)                               |
-|    - Decoupled rawScheduleResult on Dispatchers.Default from 15s clock |
-|    - Lightweight sorting StateFlow derived without re-scheduling       |
-|    - Enforces thread-safe mutations via Mutex (scheduleMutex)          |
-|    - Coordinates SchedulerEngine and RoutineRepository                |
-|    - Midnight date rollover auto-shift monitor                         |
-|    - Fluid Twin Absorption engine (Delete Both / Absorb Time)         |
+|    - Reactive StateFlow + Dispatchers.IO off-Main-Thread mutations     |
+|    - Decoupled rawScheduleResult + distinctUntilChanged active sort    |
+|    - Non-destructive _pendingDraftTasks + pendingImpactDiff StateFlows |
+|    - Mutex-serialized drag scrub / vertical drop / Fluid Twin absorb   |
+|    - Midnight date rollover monitor & PausedTodayOnly auto-reset       |
 |                                                                        |
 |  Screens:                                                              |
-|    ├── TimelineScreen.kt        (Stable task.id recycling, 60/120 FPS) |
+|    ├── TimelineScreen.kt        (Outer PointerEventPass.Initial drag,  |
+|    │                             Source/Dest Shadows, Corner Gap Pill, |
+|    │                             Header Countdown, 60/120 FPS glide)   |
 |    ├── AutomationCenterScreen.kt(Hardware telemetry & diagnostics)     |
-|    ├── SettingsScreen.kt        (24h Donut dial, Voice Persona Studio, pause)|
-|    ├── ConsoleTerminalScreen.kt (540dp Obsidian Studio, 1-click Copy, metrics)|
+|    ├── SettingsScreen.kt        (24h Donut dial, Voice Persona, Pause) |
+|    ├── ConsoleTerminalScreen.kt (540dp Obsidian Studio, metrics, CLI)  |
 |    └── TrashBinScreen.kt        (Soft-delete bin & 30-day purge)       |
 |                                                                        |
 |  Sheets & Components:                                                  |
-|    ├── TaskModalBottomSheet.kt  (Unified Obsidian studio, Priority/Split, TTS)|
-|    ├── AnchorEditBottomSheet.kt (Circadian fine-tuner, voice toggle switch)  |
-|    ├── ChronosArchitectureGuideSheet.kt (In-app broadsheet doc)        |
-|    └── OneUiCards.kt            (Anchor/Dynamic/Overflow cards)        |
+|    ├── TaskModalBottomSheet.kt  (Unified Obsidian Studio, Split, TTS)  |
+|    ├── AnchorEditBottomSheet.kt (Circadian fine-tuner, voice switch)   |
+|    ├── ChronosArchitectureGuideSheet.kt (VOL. IX Broadsheet Doc)       |
+|    └── OneUiCards.kt            (Anchor/Dynamic/Overflow + Source Ghost)|
 +-----------------------------------+------------------------------------+
                                     |
                                     v
@@ -84,23 +87,17 @@
 |                            DOMAIN ENGINE                               |
 |                                                                        |
 |  [ SchedulerEngine.kt ]                                                |
-|    - 7 Immutable Circadian Anchors with hard mathematical boundaries    |
-|    - Slot 1 Reverse Sleep Calculator: ((Slot 2 - Sleep + 1440) % 1440)  |
-|    - Slot 3 Friday Jumu'ah Dual Mode (12:30 PM, 120m, 5m DND delay)    |
-|    - Slot 5 Accordion Elastic Buffer (bridges Slot 4 End -> Slot 6)    |
-|    - High Priority Anchor Wall Fence (restricts to enclosing gap)      |
-|    - Fluid Twin Tasks (Communicating vessels hydraulic duration pool)  |
-|    - Custom Schedule Flexibility (0..30m) & Rest Buffer (0..30m)       |
-|    - Unfragmented Placement & Overflow Pool Routing (zero auto-split)  |
+|    - 7 Immutable Anchors + Slot 1 Reverse Sleep + Friday Jumu'ah       |
+|    - Slot 5 Elastic Buffer (15m floor, full alerts & 0-25m DND delay)  |
+|    - High Priority & Fluid Twin Anchor Wall Fencing + Birth-Time Return|
+|    - Net Free Gap math, Scrub Bounds, Vertical Drop & Impact Diff      |
 |                                                                        |
 |  [ ConsoleParser.kt ]                                                  |
-|    - Grammatical pipe parser for ANCHOR, TWIN, and DYNAMIC directives  |
-|    - Pre-packaged authentic Bengali circadian template                 |
-|    - Real-time line diagnostics and inline ghost prediction            |
+|    - Pipe parser for ANCHOR, TWIN, and DYNAMIC (v2) directives         |
+|    - Clean headerless birth-time backup script exporter                |
 |                                                                        |
 |  [ RoutineTask.kt ]                                                    |
-|    - Core domain entities: RoutineTask, TaskType, RoutineDay,          |
-|      TaskRatingRecord, ScheduleGap                                     |
+|    - Domain models incl. originalStartTimeMinute & manualPlacementOrder|
 +-----------------------------------+------------------------------------+
                                     |
                                     v
@@ -109,14 +106,9 @@
 |                                                                        |
 |  [ RoutineRepository.kt ]                                              |
 |    - SharedPreferences (chronos_routine_prefs): fast JSON storage      |
-|    - 4-Tier Offline Vault (chronos_vault.json):                        |
-|        1. App-specific external files root                             |
-|        2. Primary Public Documents directory (/Documents/ChronosBackup)|
-|        3. App-specific external documents directory                    |
-|        4. Internal app private storage (/data/user/0/.../files)        |
-|    - Zero-click automatic restore on fresh installation                |
-|    - 90-Day Task Rating History with rolling decay auto-purge          |
-|    - 30-Day Trash Bin soft-delete auto-purge                           |
+|    - 400ms Debounced ioScope 4-Tier Offline Vault (chronos_vault.json) |
+|    - Guarded one-time hasCheckedStartupVault restore on launch         |
+|    - 90-Day Task Rating History & 30-Day Trash Bin auto-purge          |
 +------------------------------------------------------------------------+
 ```
 
@@ -131,8 +123,8 @@
 - **Key Specifications:** Contains `!chronos.apk` to ensure the release APK at the root directory is tracked for direct one-tap installation and raw CDN distribution.
 
 #### `/chronos.apk`
-- **Purpose:** Production-ready debug/release APK placed directly at the repository root for zero-click downloads.
-- **Key Specifications:** Directly accessible via raw GitHub CDN (`https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk`) and exempted from gitignore (`!chronos.apk`), enabling direct browser downloads and 1-tap installation without 404 errors.
+- **Purpose:** Compiled v1.1 APK placed directly at the repository root for zero-click downloads (`versionCode = 2`, `versionName = "1.1"`).
+- **Key Specifications:** Directly accessible via raw GitHub CDN (`https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk`) and exempted from gitignore (`!chronos.apk`), enabling seamless in-place upgrades over v1.0.
 
 #### `/build.gradle.kts`
 - **Purpose:** Top-level project Gradle build script.
@@ -149,7 +141,7 @@
 #### `/gradle/libs.versions.toml`
 - **Purpose:** Centralized Version Catalog managing all dependencies and plugins.
 - **Key Elements:**
-  - `versions`: AGP (8.9.0), Kotlin (2.0.21), Compose BOM (2025.02.00), Room (2.6.1), Retrofit (2.11.0), Moshi (1.15.2), Robolectric (4.14.1).
+  - `versions`: AGP (9.1.1), Kotlin (2.2.10), Compose BOM (2024.09.00), Material3 (1.4.0), Room (2.7.0), Retrofit (2.12.0), Moshi (1.15.2), Robolectric (4.16.1).
   - `libraries`: Compose UI/Material3/Icons, Lifecycle, Room KTX/Compiler, Coroutines, OkHttp, Retrofit.
   - `plugins`: Android Application, Kotlin Compose, KSP, Secrets, Google Services.
 
@@ -165,7 +157,7 @@
 - **Purpose:** Shell script utilizing ImageMagick `convert` to produce multi-density squircle and round launcher icons (`mdpi` to `xxxhdpi`).
 
 #### `/README.md`
-- **Purpose:** Public-facing comprehensive project documentation, feature manual, and luxury One UI 8.5 download portal.
+- **Purpose:** Public-facing comprehensive project documentation, v1.1 feature manual, and direct APK download portal.
 
 #### `/PROJECT.md` (This File)
 - **Purpose:** Authoritative AI context map, architectural specification, and engineering blueprint.
@@ -182,6 +174,7 @@
   - `compileSdk`: 36 (minor API level 1)
   - `minSdk`: 24 (Android 7.0)
   - `targetSdk`: 36 (Android 16 Ready)
+  - `versionCode`: 2 / `versionName`: `"1.1"`
   - `buildFeatures`: `compose = true`, `buildConfig = true`
   - `signingConfigs`: Configured with `debugConfig` using `${rootDir}/debug.keystore`.
 
@@ -210,7 +203,7 @@
     * Core fields: `id`, `title`, `type`, `slotNumber`, `startTimeMinute` (0..1439), `originalStartTimeMinute` (nullable birth time preserved across displacements), `durationMinutes`, `selectedDays`, `isDeleted`, `deletedTimestamp`.
     * Telemetry & Voice: `voiceMessage`, `enableDnd`, `dndDelayMinutes` (0..25m), `enableHaptic`, `isVoiceEnabled`, `voiceVolume`, `isSoundAlertEnabled`, `customRingtoneUri`, `customNotificationTitle`, `customNotificationBody`.
     * Fluid Twins: `isFluidTwin`, `fluidTwinId`, `fluidTwinPart` (1 or 2), `fluidTotalPoolMinutes`, `fluidSafetyFloorMinutes`.
-    * Flexibility & Splitting: `allowSplitting`, `isHighPriority`, `customFlexibilityMinutes` (0..30m), `toleranceMinutes`, `interTaskBufferMinutes` (0..30m).
+    * Flexibility, Priority & Drag Scheduling: `allowSplitting`, `isHighPriority`, `customFlexibilityMinutes` (0..30m), `toleranceMinutes`, `interTaskBufferMinutes` (0..30m), `manualPlacementOrder` (`Long` monotonic tie-breaker updated on manual drag placement).
     * Friday Slot 3 Overrides: `fridayTitle`, `fridayStartTimeMinute`, `fridayDurationMinutes`, `fridayVoiceMessage`.
     * Vacation & Pause: `isPausedTodayOnly`, `pausedUntilDateMillis`, `isPausedIndefinitely`.
     * Computed properties: `endTimeMinute`, `formattedStartTime`, `formattedEndTime`, `formattedDuration`, `notificationDisplayTitle`, `notificationDisplayBody`, `daysRemainingInTrash`, `isCurrentlyPaused()`.
@@ -220,15 +213,15 @@
 ### Data & Persistence Layer (`app/src/main/java/com/example/data/`)
 
 #### `RoutineRepository.kt`
-- **Purpose:** Central data repository managing active routines, persistence in `SharedPreferences`, and multi-tier offline disk backups.
+- **Purpose:** Central data repository managing active routines, persistence in `SharedPreferences`, and debounced multi-tier offline disk backups.
 - **Key Responsibilities:**
   - Fast Memory-Mapped Storage: Stores JSON arrays for anchors (`key_anchors_json`), dynamic tasks (`key_dynamic_tasks_json`), ratings (`key_task_rating_history_json`), voice persona (`key_voice_preset_id`), and preferences in private `SharedPreferences`.
-  - 4-Tier Offline Vault (`chronos_vault.json`):
+  - 400ms Debounced 4-Tier Offline Vault (`chronos_vault.json`): Uses a serialized single-thread `ioScope` (`Dispatchers.IO.limitedParallelism(1)`) and `VAULT_DEBOUNCE_MS = 400L` (`persistVaultAsync()`) so rapid successive saves coalesce into a single background write across:
     1. App external files directory (`context.getExternalFilesDir(null)/ChronosBackup/`).
     2. Shared public Documents directory (`/storage/emulated/0/Documents/ChronosBackup/`).
     3. Fallback app external documents directory (`context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)/ChronosBackup/`).
     4. Private internal storage (`context.filesDir/ChronosBackup/`).
-  - Zero-Click Auto-Restore (`checkAndAutoRestoreVault()`): Automatically scans for an existing vault on app launch; if preferences are empty or missing, restores all anchors, dynamic tasks, ratings, `voicePresetId`, and sleep/buffer settings without user intervention.
+  - Guarded One-Time Auto-Restore (`hasCheckedStartupVault` / `checkAndAutoRestoreVault()`): Scans once per process launch when preferences are empty; avoids redundant disk reads on subsequent repository instances.
   - Soft-Delete Management: `softDeleteTask()`, `restoreTask()`, `purgeTaskPermanently()`, `purgeAllDeletedTasks()`, and auto-purging tasks older than 30 days (`PURGE_THRESHOLD_MILLIS`).
   - Quantified Self Retention: `recordTaskRating()` and `getTaskRatingHistory()` managing 90-day rating records with rolling expiration.
 
@@ -237,22 +230,24 @@
 ### Scheduling & Parsing Engines (`app/src/main/java/com/example/engine/`)
 
 #### `SchedulerEngine.kt`
-- **Purpose:** Pure mathematical scheduling engine calculating gaps, placing dynamic tasks, managing fluid twins, and enforcing circadian anchor invariants.
+- **Purpose:** Pure mathematical scheduling engine calculating gaps, placing dynamic tasks, managing fluid twins, computing interactive drag bounds/drops, and enforcing circadian anchor invariants.
 - **Key Invariants:**
   - `fluidSafetyFloorMinutes` (per-session): Optional minimum duration floor (`0`..session duration, 1m minimum for non-zero sessions), supporting `<45m` Fluid Twins down to 2m pools while respecting per-part rest buffers.
   - `MIN_ELASTIC_BUFFER_MINUTES = 15`: Safety floor for the Slot 5 elastic buffer.
-  - **Zero Auto-Splitting Architecture:** Tasks are never fragmented or split automatically into chunks. If a dynamic task cannot fit into available circadian gaps (taking into account user flexibility tolerance), it is routed intact to the Overflow Pool for user inspection and manual rearrangement.
-- **Key Functions:**
-  - `createDefaultAnchors(sleepDurationMinutes)`: Factory creating the 7 default circadian anchors.
-  - `calculateAnchors(anchors, sleepDurationMinutes)`: Evaluates dynamic dependencies. Automatically updates Slot 1 bedtime when Slot 2 wake-up moves (with full modulo 1440 midnight-crossing safety), and recalibrates Slot 5 duration when Slot 4 or Slot 6 moves.
-  - `adjustAnchor(anchors, slotNumber, deltaMinutes, sleepDurationMinutes)`: Quick-adjusts any anchor by ±5m increments and cascades recalculation.
-  - `findAvailableGaps(committedTasks, interTaskBufferMinutes)`: Computes unallocated 24-hour time slots taking into account individual inter-task rest buffers.
-  - `scheduleDay(anchors, dynamicTasks, activeDay, interTaskBufferMinutes)`: Primary scheduling pipeline handling Friday Jumu'ah swapping, fluid twin balancing, high-priority anchor wall fencing, schedule flexibility tolerance, unfragmented overflow handling, and **Birth-Time Auto-Return** (sorting and placing around `originalStartTimeMinute ?: startTimeMinute` and preserving `originalStartTimeMinute` on all scheduled & overflow copies so displaced tasks automatically return to their birth slot when blocking tasks clear).
+  - **Zero Auto-Splitting Architecture:** Tasks are never fragmented or split automatically into chunks. If a dynamic task cannot fit into available circadian gaps (taking into account user flexibility tolerance), it is routed intact to the Overflow Pool.
+- **Key Functions & Types:**
+  - `createDefaultAnchors(sleepDurationMinutes)` / `calculateAnchors()` / `adjustAnchor()`: Manages the 7 anchors (`11:00 PM` Sleep, `05:00 AM` Fajr 35m/8m, `01:15 PM` Dhuhr 35m/8m + Fri Jumu'ah `12:30 PM` 120m, `04:30 PM` Asr 25m/10m, `04:55 PM` Break 65m, `06:00 PM` Maghrib 30m/5m, `08:00 PM` Isha 35m/10m).
+  - `findAvailableGaps(committedTasks, interTaskBufferMinutes)`: Computes unallocated 24-hour time slots accounting for per-task rest buffers without bleeding across anchor boundaries.
+  - `scheduleDay(anchors, dynamicTasks, activeDay, interTaskBufferMinutes)`: Places anchors, Friday Jumu'ah overrides, Fluid Twins, and standard dynamic tasks sorted by `isHighPriority DESC`, `manualPlacementOrder DESC`, and `originalStartTimeMinute ASC` (preserving Birth-Time Auto-Return across schedule shifts).
+  - `computeNetFreeGapMinutes(task, nextTask)`: Computes exact net open minutes between two consecutive scheduled tasks after subtracting the earlier task's `interTaskBufferMinutes`.
+  - `findEnclosingAnchorBounds()` & `computeHorizontalScrubBounds()`: Calculates exact non-overlapping horizontal scrub `[minStart..maxStart]` limits inside enclosing anchor walls and adjacent dynamic blocks.
+  - `applyDragReposition()`, `applyVerticalDropReposition()`, `previewVerticalDrop()`, & `VerticalDropTarget` (`InsertBeforeTask`, `InsertAfterTask`, `IntoGap`): Handles high-priority/twin anchor wall fencing (`hitAnchorWall`), cross-anchor placement, wide-gap insertion before/after targets, adjacent contiguous swaps/cascades, and monotonic `manualPlacementOrder` priority assignment.
+  - `computeScheduleImpactDiff(baseline, draft)` -> `List<ScheduleImpactItem>`: Computes human-readable diff summaries for the Schedule Impact Preview dialog before committing pending drag edits.
 
 #### `ConsoleParser.kt`
 - **Purpose:** Grammatical bulk CLI interpreter converting plaintext monospace pipe scripts into strongly typed `RoutineTask` collections.
 - **Directives Supported:**
-  - `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Duration(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message | [FriOverrides] | [Days | Sound | VoiceVol]` (canonical `"anchor_slot_$slot"` IDs).
+  - `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | DndDelay(0-25) | Voice(Y/N) | Message | [FriOverrides] | [Days | Sound | VoiceVol]` (canonical `"anchor_slot_$slot"` IDs).
   - `TWIN | TotalPool(m) | Part1Title | Part1Start | Part1Dur | Part1Voice | Part2Title | Part2Start | Part2Dur | Part2Voice | DND(Y/N) | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1VoiceYN | P2VoiceYN | P1Vol | P2Vol | Sound | DndDelay]`.
   - `DYNAMIC | Name | Duration(m) | Start(HH:mm) | DND(Y/N) | Days | Voice(Y/N) | Message | Flex | Rest | Priority | Category | [VoiceVol | Sound | DndDelay]` (and prefix-free equivalent).
 - **Clean Headerless Backup Export (`generateRoutineScript()`):** Outputs purely live `ANCHOR`, `TWIN`, and `DYNAMIC` directives with zero `#` comment headers or blank separator lines, exporting `originalStartTimeMinute ?: startTimeMinute` and `dndDelayMinutes` (`0–25m`, forced `0` when DND is off) while `parse()` retains backward-compatible handling for legacy `# SLEEP_MINUTES=` / `# BUFFER_MINUTES=` headers and populates `originalStartTimeMinute` on parsed tasks.
@@ -266,80 +261,71 @@
 #### `AutomationManager.kt`
 - **Purpose:** System-level automation coordinator for alarms, DND policy, audio telemetry, and power management.
 - **Key Capabilities:**
-  - `setAlarmClock()` & Bounded Delayed DND: Schedules task start alarms, delayed `ACTION_APPLY_DND` alarms (via `setAlarmClock()` only when `dndTriggerMillis > now && dndTriggerMillis < endMillis`, tagged with `EXTRA_TASK_END_MILLIS`), and DND-enabled `ACTION_END_TASK` alarms to bypass Samsung One UI aggressive app sleep and Doze restrictions.
+  - **Single-Earliest `setAlarmClock()` Promotion + Exact Horizon:** Evaluates active tasks across `dayOffset in -1..6` inside `rescheduleAllAlarmsAt()`, collects all `PlannedAlarmItem` entries, and promotes **only the single earliest upcoming alarm** (`earliestAlarmClockMillis` across Start, bounded Delayed DND, and DND-End) to `AlarmManager.setAlarmClock()`, registering all subsequent future triggers via `setExactAndAllowWhileIdle()` to prevent SystemUI alarm broadcast storms while still guaranteeing midnight-crossing accuracy and Doze immunity.
+  - **Slot 3 Friday Lockscreen Fidelity:** `buildTaskAlarmsForOccurrence()` applies Friday title, duration (`fridayDurationMinutes`), voice message, and accurate Friday end time while honoring the user's configured `dndDelayMinutes` (`0–25m`).
   - `cancelTaskAlarms(context, taskId)` / `pendingIntent.cancel()`: Cancels pending start, end, and DND alarms cleanly when tasks end or are rescheduled.
-  - `calculateNextOccurrenceMillis(task, activeDay)`: Calculates the exact timestamp of the upcoming task occurrence, iterating forward up to 7 days to match `task.selectedDays`.
-  - `setDndMode(context, enabled, taskId)` / `reconcileStaleDndState(context)` / `releaseDndIfHeldByTask()` / `hasZeroDelayFollowUpDndTask()`: Persists the active DND owner task ID synchronously (`commit()`), reconciles and clears stale DND owners across `dayOffset = -1..0` whenever no active DND window is running, releases DND only for its owner, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.
-  - `VOICE_PRESETS` & 12 Bilingual Voice Personas: Defines 12 free offline bilingual BN/EN personas across Female (5: `natural_female`, `calm_female`, `sweet_melodic_female`, `executive_female`, `night_sanctuary_female`), Youth 10–15y (3: `teen_girl`, `cheerful_kid_girl`, `teen_boy`), and Male & Studio (4: `deep_male`, `crisp_male`, `mentor_male`, `neutral_studio`) via `VoicePreset` + `getVoicePreset()`, including `category`, `nativeMalePitch`, and `defaultSampleText`. `containsBengali()` / `isBengaliTtsAvailable()` / `applyTtsLanguage(tts, text, voicePresetId)` detect Bengali Unicode (`\u0980..\u09FF`), select matching `bn-BD`/`bn-IN` or `en-US` voices by preferred gender, apply smart `nativeMalePitch` compensation when native male voices are selected alongside pitch/speech-rate tuning, and provide Google TTS (`"com.google.android.tts"`) discovery.
-  - `rescheduleAllAlarms(context)`: Runs `reconcileStaleDndState(context)` first, evaluates active tasks across `dayOffset in -1..6` (`endMillis > now` for `dayOffset <= 0`, `startMillis > now` for `dayOffset > 0`) so overnight tasks keep today's `ACTION_END_TASK` after midnight rollover, and registers each task's earliest upcoming non-overflow occurrence in `AlarmManager` (also purging legacy `slot_1..7` alarms).
+  - `calculateNextOccurrenceMillis(task, activeDay)`: Calculates upcoming task occurrence timestamps across up to 7 days matching `task.selectedDays`.
+  - `setDndMode()` / `reconcileStaleDndState()` / `releaseDndIfHeldByTask()` / `hasZeroDelayFollowUpDndTask()`: Persists active DND owner ID synchronously (`commit()`), reconciles stale DND owners across `dayOffset = -1..0`, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.
+  - `VOICE_PRESETS` & 12 Bilingual Voice Personas: 12 offline bilingual BN/EN personas (`female`, `youth`, `male`) with pitch/speechRate profiles, `nativeMalePitch` compensation, `containsBengali()`, and `"com.google.android.tts"` fallback discovery.
 
 #### `RoutineAutomationService.kt`
-- **Purpose:** Foreground service with `mediaPlayback` type providing lockscreen notifications, decoupled haptic/chime/TTS alerts, and task-owned DND transitions.
+- **Purpose:** `START_NOT_STICKY` foreground service (`mediaPlayback`) providing silent-channel lockscreen notifications, `USAGE_ALARM` ringtones, haptic pulses, lazy self-releasing TTS, and task-owned DND transitions.
 - **Key Implementations:**
-  - Decoupled Alerts & Cancellable Delay: `enableHaptic`, `isSoundAlertEnabled`, and `isVoiceEnabled` execute independently with a cancellable `mainHandler` 1500ms delay between chime and TTS speech.
-  - Smart Bilingual TTS & Voice Persona Playback: Reads the user's persisted `getVoicePresetId()` from `RoutineRepository`, passes it to `AutomationManager.applyTtsLanguage()` in `onInit()` and `speakMessage()`, and automatically falls back to `"com.google.android.tts"` if the default TTS engine lacks Bengali voice support or fails initialization.
-  - Lockscreen Notification with Ending Times: Displays formatted completion times (`notificationDisplayBody`, e.g. `Ends at 10:45 AM`) with `VISIBILITY_PUBLIC`.
-  - Audio Focus Ducking: Obtains `AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` so media volume gracefully lowers during voice briefings.
-  - WakeLock Protection: Acquires a partial wake lock with a 3-minute safety limit.
-  - State Broadcasting: Emits `ActiveAutomationState` to `RoutineViewModel` via a static `MutableStateFlow`.
+  - **Lazy Self-Releasing TTS & 25s WakeLock Cap:** Does NOT allocate `TextToSpeech` in `onCreate()`. Instantiates `TextToSpeech(applicationContext, this)` strictly when `isVoiceEnabled == true` via `triggerLazyTtsSpeech()`, then immediately executes `releaseTtsEngine()` (`stop()`, `shutdown()`, `tts = null`, abandon audio focus, release WakeLock) in `UtteranceProgressListener.onDone` / `onError`, when `!isVoiceEnabled`, or on a `20_000L` (`TTS_SAFETY_TIMEOUT_MS`) handler watchdog—ensuring `com.google.android.tts` RAM unbinds immediately. WakeLocks are capped at `WAKELOCK_MAX_TIMEOUT_MS = 25_000L` and null-intent restarts immediately release and `stopSelf()`.
+  - **Silent Channel & `USAGE_ALARM` Ringtone Playback:** Creates `chronos_automation_silent_channel` with `setSound(null, null)` and `enableVibration(false)` (`VISIBILITY_PUBLIC`), preventing OS double-chimes while `playTaskRingtone()` plays custom user ringtones directly via `RingtoneManager` on `AudioAttributes.USAGE_ALARM` with automatic `MediaPlayer` fallback.
+  - **Decoupled Alerts & Audio Ducking:** Haptic vibration, ringtone chimes, and delayed TTS (`1500ms` cancellable delay when sound alert is enabled) execute independently with `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`.
 
 #### `RoutineAlarmReceiver.kt`
 - **Purpose:** `BroadcastReceiver` invoked by `AlarmManager` for `ACTION_START_TASK`, `ACTION_END_TASK`, and `ACTION_APPLY_DND`.
-- **Action:** Starts `RoutineAutomationService` on task start, guards `ACTION_APPLY_DND` against expired `EXTRA_TASK_END_MILLIS` and deleted/paused/DND-disabled tasks before engaging Priority DND via `AutomationManager.setDndMode()` + `RoutineAutomationService.onDndApplied()`, and guards `ACTION_END_TASK` DND teardown against owner mismatch and zero-delay follow-ups.
+- **Action:** Starts `RoutineAutomationService` on task start and offloads `AutomationManager.rescheduleAllAlarms()` (as well as `handleApplyDnd()` and `handleEndTask()`) to `CoroutineScope(Dispatchers.Default)` inside `goAsync()` (`PendingResult.finish()`), guarding `ACTION_APPLY_DND` against expired `EXTRA_TASK_END_MILLIS` and guarding DND teardown against owner mismatch or zero-delay follow-ups.
 
 #### `BootReceiver.kt`
 - **Purpose:** System event receiver ensuring schedule persistence across device state transitions.
 - **Listened Intents:** `BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`, `QUICKBOOT_POWERON`, `TIME_SET`, `TIMEZONE_CHANGED`.
-- **Action:** Invokes `AutomationManager.rescheduleAllAlarms(context)`.
+- **Action:** Uses `goAsync()` + `CoroutineScope(Dispatchers.Default)` to invoke `AutomationManager.rescheduleAllAlarms(appContext)` safely off the main thread.
 
 ---
 
 ### UI Layer (`app/src/main/java/com/example/ui/`)
 
 #### `MainActivity.kt`
-- **Purpose:** Root Android `ComponentActivity` configuring edge-to-edge window insets, runtime notification permission requests, and the primary One UI bottom navigation shell.
+- **Purpose:** Root Android `ComponentActivity` configuring edge-to-edge window insets, runtime notification permission requests, the One UI bottom navigation shell, Floating Speed-Dial menu (`Manual Form`, `Terminal`, `Documentation`), canonical task resolution (for all 7 anchors and `originalStartTimeMinute`), and non-destructive timeline drag callbacks (`previewDragTaskMove`, `previewVerticalDropMove`, `commitPendingEdits`, `discardPendingEdits`).
 - **Destinations Managed:** `TIMELINE`, `CONSOLE`, `AUTOMATION`, `SETTINGS`, `TRASH`.
 
 #### `RoutineViewModel.kt`
-- **Purpose:** Core ViewModel orchestrating UI state, concurrent task scheduling, and user interactions.
+- **Purpose:** Core ViewModel orchestrating UI state, concurrent task scheduling, non-destructive drag previews, and user interactions.
 - **Key Implementations:**
-  - Concurrency: Uses Kotlin `Mutex` (`scheduleMutex`) to ensure scheduling re-computations and repository mutations are strictly serialized without race conditions.
-  - Midnight Rollover Monitor: Autonomous date observer in `viewModelScope` that triggers automatic day-switch to `RoutineDay.today()` at 00:00 midnight.
-  - Voice Persona State: Exposes reactive `voicePresetId: StateFlow<String>` synchronized on repository refresh and updated via `updateVoicePreset(presetId)`.
-  - Fluid Twin Persistence & Absorption Engine:
-    * `saveFluidTwin(...)`: Persists linked twin parts with shared hardware alerts, DND, recurrence days, flexibility, rest buffer, and independent per-session voice toggles/volumes (`part1IsVoiceEnabled`, `part2IsVoiceEnabled`, `part1VoiceVolume`, `part2VoiceVolume`).
-    * `deleteBothFluidTwinParts(twinId)`: Moves both linked twin parts to the Trash Bin.
-    * `deleteTwinAndAbsorbTime(deletedTaskId)`: Soft-deletes the selected part, liberates its allocated minutes, absorbs them into the surviving twin partner, unlinks it from the twin pool (`isFluidTwin = false`), and converts it into a standard dynamic task with the full consolidated pool duration.
+  - **Off-Main-Thread Mutex Mutations & `distinctUntilChanged` Pipeline:** Wraps mutations under `scheduleMutex` with repository/alarm persistence executing on `Dispatchers.IO`; `rawScheduleResult` and `scheduleResult` evaluate on `Dispatchers.Default` with `distinctUntilChanged()`, and `activeSortMinuteTicker` emits clock updates only when `TimelineSortMode.ACTIVE_FIRST` is active.
+  - **Interactive Drag Preview & Impact Diff State:** Holds `_pendingDraftTasks`, `_baselineSnapshotSchedule`, `hasPendingEdits`, and derived `pendingImpactDiff`; exposes `previewDragTaskMove()`, `previewVerticalDropMove()`, `commitPendingEdits()`, and `discardPendingEdits()` alongside monotonic `nextManualPlacementOrder`.
+  - **Midnight Rollover Monitor & Full Slot 5 Hardware Updates:** Autonomous date observer in `viewModelScope` switches `activeDay` at 00:00 and clears `isPausedTodayOnly`; `updateSlot5Protected()` persists Slot 5 ringtone URI/title, sound alert, voice toggle/volume, haptic, and `0–25m` DND delay.
+  - **Fluid Twin Persistence & Absorption Engine:** Coordinates `saveFluidTwin()`, `deleteBothFluidTwinParts()`, and `deleteTwinAndAbsorbTime()`.
 
 #### `OneUiCards.kt` (`ui/components/`)
 - **Purpose:** Visual timeline card components conforming to Samsung One UI 8.5 guidelines (`#0B0E14` AMOLED obsidian palette, `#0A0F1D` surfaces, `#1E2C45` borders).
-- **Stability & Matrix Alignment:** Completely removed `Modifier.animateContentSize()` from `AnchorSlotCard`, `DynamicTaskCard`, and `OverflowTaskCard` container roots to eliminate infinite remeasure loops during fast scrolls. Displays concise flexibility (`±Xm`) and zero-floor rest buffer badges seamlessly synchronized with the task studio.
+- **Drag Visuals & Stability:** Avoids `animateContentSize()` on card roots; supports `isDragging` glow emphasis and `isDragSourceGhost` on `DynamicTaskCard` to render the dimmed Source Shadow (`alpha = 0.28f`) + `drawWithCache` dashed `CyanAccent` border at the origin index during vertical reordering.
 
 #### `TaskModalBottomSheet.kt` (`ui/components/`)
-- **Purpose:** Full-featured creation and editing bottom sheet for Dynamic Tasks, Fluid Twin pairs, and all 7 Circadian Anchors with unified Obsidian Luxury Studio parity.
-- **Unified Obsidian Glass Architecture & Clean Anchors:** Normal Tasks, Split Twins (`DualSessionCard`), and all 7 Anchors share the same obsidian glass gradient (`#101727` → `#0A0E18`), recessed `#070B13` wells, `LuxuryTimeDurationRow`, `LuxuryBottomSummaryRow` (`ENDING TIME` / `TARGET SLEEP QUOTA`), `LuxuryVoiceStudioCard` (M3 1.4.0 custom `16.dp` glowing circular thumb & `4.dp` track), and `LuxuryHardwareGrid` (`TASK ALERTS` + `AUTO DND`). Redundant Slot 1 `"REVERSE BEDTIME CALCULATION"` and Slot 5 `"ACCORDION BUFFER GUARANTEE"` info cards are removed, header titles apply `weight(1f)` + `TextOverflow.Ellipsis`, and bottom scroll clearance is `112.dp`.
-- **Mutually Exclusive Header Pills & Edit Guard:** Houses `Priority` (`AnimatedVisibility(visible = !isFluidTwinMode)`) and `Split` (`AnimatedVisibility(visible = !isEditing && !isHighPriority)`) interactive header pills so High Priority anchor-fencing and Fluid Twin splitting remain mutually exclusive during creation, while existing single tasks keep `Priority` editable without converting into Split mode and existing Fluid Twins display a static `TWIN` badge.
-- **Anti-Clipping 2x2 Widget Hierarchy:** Standardizes Row 1 (`FLEXIBLE` & `BUFFER TIME`) and Row 2 (`TASK ALERTS` & `AUTO DND`) to uniform `heightIn(min = 124.dp)` squircle cards (`#0A0F1D`/`#101727` studio framing, `36.dp` recessed `#070B13` value pills with outer `Row` + `widthIn` input wells in `LuxuryTimeDurationRow` and steppers to prevent `h`/`m`/`±` symbol clipping, and `28.dp` `-`/`+` glass buttons). `FLEXIBLE` (0–30m in ±5m steps) and `BUFFER TIME` (0–30m precision scale: `0..5` in 1m steps, `5..30` in 5m steps) treat `0` as disabled with no redundant switches, and `save_task_button` renders a single clean checkmark CTA.
-- **Unified Hardware Integration, Universal DND Delay & Recurrence:** `TASK ALERTS`, `AUTO DND` (with `0–25m` `DND Delay` enabled across Single Dynamic Tasks, Split Fluid Twins, and Anchors 2/3/4/6/7), and `RECURRENCE SCHEDULE` render uniformly while preserving all existing `testTag`s.
-- **Dual-Session Voice Studio & Split Typing Safety (`DualSessionCard`):** Both Session 1 and Session 2 include independent voice ON/OFF switches (`isVoiceEnabledS1`/`S2`), collapsible custom voice message fields, interactive Play/Stop TTS preview toggles tracked per utterance ID (`"s1_tts"`, `"s2_tts"`) via `UtteranceProgressListener`, and 0%–100% volume sliders (`voiceVolumeS1`/`S2`). Changing Total Pool leaves empty Session 1/2 inputs untouched (no `pool / 2` auto-fill) and clearing a session duration does not snap back to `1` mid-typing (`triggerSave()` validates `>= 1m`).
-- **Live Interactive `UtteranceProgressListener` TTS Briefing Player & Voice Persona Sync:** Accepts `activeVoicePresetId` and wires it to all 6 `AutomationManager.applyTtsLanguage()` preview sites across Dynamic Tasks, Fluid Twins, and Anchors (including Friday Jumu'ah mode), with `"com.google.android.tts"` fallback and missing-Bengali-voice install prompt (`ACTION_INSTALL_TTS_DATA`).
+- **Purpose:** Full-featured creation and editing bottom sheet for Dynamic Tasks, Fluid Twin pairs, and all 7 Circadian Anchors (using `applicationContext` `TextToSpeech` for zero-leak previews).
+- **Unified Obsidian Glass Architecture & Clean Anchors:** Normal Tasks, Split Twins (`DualSessionCard`), and all 7 Anchors share the `#101727` → `#0A0E18` obsidian glass gradient, recessed `#070B13` wells, universal `0–25m` Auto DND Delay across all modes (including Slot 1 & Slot 5), Ringtone Preview (`MediaPlayer`), and interactive `UtteranceProgressListener` TTS briefing player synced to `activeVoicePresetId`.
 
 #### `AnchorEditBottomSheet.kt` (`ui/components/`)
-- **Purpose:** Dedicated modal editor for fine-tuning circadian anchor properties and hardware automations.
-- **Slot Invariants & Luxury Layout:** Preserves reverse sleep arithmetic for Slot 1, Friday Jumu'ah overrides for Slot 3, and elasticity bounds for Slot 5.
-- **Voice Announcement Architecture:** Houses dedicated ON/OFF switches (`anchor_voice_switch` and `friday_voice_switch`), collapsing voice inputs when disabled and ensuring complete parity with `TaskModalBottomSheet`.
+- **Purpose:** Dedicated modal editor for fine-tuning circadian anchor properties and hardware automations (using `applicationContext` `TextToSpeech` with zero leak on dismiss).
+
+#### `ChronosArchitectureGuideSheet.kt` (`ui/components/`)
+- **Purpose:** `"THE CHRONOS GAZETTE"` VOL. IX (`v1.1`) in-app newspaper broadsheet documentation displaying live anchor status + Dispatches I through X (including Launcher-Grade Drag Scheduling and Minimalist Countdown & Net Free-Time Gap Telemetry).
 
 #### `TimelineScreen.kt` (`ui/screens/`)
-- **Purpose:** Primary application screen displaying the circadian timeline for any selected day.
-- **Crash-Proof Scrolling:** Uses composite unique keys in `LazyColumn` (`${task.id}_${task.slotNumber ?: ""}_${task.startTimeMinute}_$index`) to prevent duplicate key crashes, alongside keyed `derivedStateOf` for jump buttons.
-- **Live Countdown Banner:** Displays active task progress and real-time countdown to the next circadian boundary.
+- **Purpose:** Primary application screen displaying the circadian timeline, minimalist header countdown, corner gap pills, and launcher-grade drag-and-drop editing.
+- **Minimalist Header Countdown Pill (`OneUiHeader`):** Replaces the deprecated lower `LiveCountdownTimerBanner`; displays a single top-right pill opposite `"Chronos"` (wrapping across midnight to tomorrow's earliest task late at night) and swaps seamlessly to the 3-button confirmation bar (`pending_impact_history_button`, `pending_commit_button`, `pending_discard_button`) + `schedule_impact_dialog` when edits are staged.
+- **Corner Stopwatch Free-Time Gap Pills:** Under `EARLIEST_START`, renders right-aligned obsidian capsules (`#161E2E`, `Icons.Outlined.Timer`, `testTag = "free_gap_indicator_${task.id}"`) displaying `SchedulerEngine.computeNetFreeGapMinutes()`, hidden when `<= 0m` and updating frame-by-frame during horizontal scrubbing.
+- **Outer-Container Launcher Drag (`PointerEventPass.Initial`):** Tracks horizontal speed-sensitive scrubbing (locked when free room is `0m`) and vertical reordering with `withFrameNanos` edge auto-scroll, elevated `floating_drag_card_overlay`, dimmed Source Shadow + full-card-height animated `DestinationDropShadowSlot` (`±8dp` anti-ping-pong hysteresis), `Modifier.animateItem` placement animations, `drag_live_time_overlay`, `anchor_wall_toast`, and zero-blink settling guard (`isSettlingVerticalDrop`).
+- **Crash-Proof Recycling:** Uses stable `key = { _, task -> task.id }` in `LazyColumn` and keyed `derivedStateOf` jump pills (`jump_to_top_button`, `jump_to_active_button`).
 
 #### `ConsoleTerminalScreen.kt` (`ui/screens/`)
-- **Purpose:** Power-user monospace CLI bulk routine editor.
-- **Features:** Cleaned Quick Action Bar highlighting the glowing cyan "Template" button, flex-safe Real-Time Syntax Validation Card (`weight(1f, fill = false)` with non-wrapping line count), and gradient action buttons.
+- **Purpose:** Power-user monospace CLI bulk routine editor (using headerless birth-time exports for live backup sync).
 
 #### `SettingsScreen.kt` (`ui/screens/`)
-- **Features:** 24-Hour Circadian Donut Dial, collapsible **Voice Persona Studio** dropdown (`voice_dropdown_trigger`, custom BN/EN test field `voice_persona_test_input` with auto language detection, category filter chips `All (12)` / `Female (5)` / `Youth 10–15y (3)` / `Male & Studio (4)`, 12 selectable voice rows with live Play/Stop preview buttons + `"com.google.android.tts"` fallback, and `Confirm Voice Persona?` `AlertDialog`), 3-Mode Task Pause & Vacation Engine, and Quantified Self 90-day history with category accordions.
+- **Features:** 24-Hour Circadian Donut Dial, collapsible **Voice Persona Studio** dropdown (`voice_dropdown_trigger`, `applicationContext` `TextToSpeech` previews with `com.google.android.tts` fallback, custom BN/EN test field `voice_persona_test_input`, 12 voice profiles, and `Confirm Voice Persona?` `AlertDialog`), 3-Mode Task Pause & Vacation Engine, and Quantified Self 90-day history.
 
 #### `AutomationCenterScreen.kt` (`ui/screens/`)
 - **Features:** Hardware telemetry dashboard, DND permission status, battery optimization whitelist helper, and TTS voice preview.
@@ -373,6 +359,18 @@ $$D_{\text{surviving}} = P, \quad \text{isFluidTwin} = \text{false}, \quad \text
 For any task where `isHighPriority = true`, its scheduled interval $[t_{\text{start}}, t_{\text{end}}]$ must satisfy:
 $$A_{k,\text{end}} + B \le t_{\text{start}} < t_{\text{end}} \le A_{k+1,\text{start}} - B$$
 where $A_k$ and $A_{k+1}$ are the adjacent anchors bounding the task's requested start time, and $B$ is the inter-task rest buffer.
+
+### 5. Net Free-Time Gap Telemetry (Buffer-Excluded)
+For consecutive scheduled tasks $T_i$ and $T_{i+1}$ in `EARLIEST_START` order:
+$$B_i = \begin{cases} \operatorname{clamp}(T_i.\text{interTaskBufferMinutes}, 0, 30) & \text{if } T_i.\text{type} = \text{DYNAMIC} \\ 0 & \text{otherwise} \end{cases}$$
+$$E_{\text{eff}}(T_i) = T_i.\text{startTimeMinute} + T_i.\text{durationMinutes} + B_i$$
+$$\text{NetGap}(T_i, T_{i+1}) = \max\left(0, \; T_{i+1}.\text{startTimeMinute} - E_{\text{eff}}(T_i)\right)$$
+Gap pills render exclusively when $\text{NetGap} > 0$.
+
+### 6. Horizontal Scrub Bounds & Drag Priority Invariant
+For dragged dynamic task $T$ inside enclosing anchor bounds $[A_{\text{start}}, A_{\text{end}}]$ and adjacent free gap $[G_{\text{start}}, G_{\text{end}}]$ excluding anchors and other dynamic tasks' duration + buffer blocks:
+$$\text{ScrubMin} = \max(G_{\text{start}}, A_{\text{start}}), \quad \text{ScrubMax} = \max\left(\text{ScrubMin}, \; \min(G_{\text{end}}, A_{\text{end}}) - (\text{dur}_T + B_T)\right)$$
+Manual drag placement updates both `startTimeMinute` and `originalStartTimeMinute` to the confirmed target time and assigns a monotonically increasing `manualPlacementOrder` so displaced non-dragged tasks yield cleanly while retaining their own birth-time auto-return targets.
 
 ---
 

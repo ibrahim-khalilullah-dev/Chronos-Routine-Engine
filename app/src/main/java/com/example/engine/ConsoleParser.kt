@@ -300,7 +300,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           durationMinutes = duration ?: 60,
           voiceMessage = message,
           enableDnd = enableDnd,
-          dndDelayMinutes = if (slot == 1 || slot == 5) 0 else dndDelayMinutes,
+          dndDelayMinutes = if (enableDnd) dndDelayMinutes.coerceIn(0, 25) else 0,
           isVoiceEnabled = isVoiceEnabled,
           voiceVolume = voiceVolume,
           isSoundAlertEnabled = isSoundAlertEnabled,

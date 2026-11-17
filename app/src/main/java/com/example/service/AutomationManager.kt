@@ -679,37 +679,47 @@ object AutomationManager {
     }
   }
 
-  private fun scheduleTaskAlarmsForOccurrence(
+  private data class PlannedAlarmItem(
+    val triggerMillis: Long,
+    val pendingIntent: PendingIntent,
+    val eligibleForAlarmClock: Boolean
+  )
+
+  private fun formatDurationMinutes(durationMinutes: Int): String {
+    val safeMins = durationMinutes.coerceAtLeast(0)
+    val h = safeMins / 60
+    val m = safeMins % 60
+    return when {
+      h > 0 && m > 0 -> "${h}h ${m}m"
+      h > 0 -> "${h}h"
+      else -> "${m}m"
+    }
+  }
+
+  private fun buildTaskAlarmsForOccurrence(
     context: Context,
     task: RoutineTask,
     startMillis: Long,
     targetRoutineDay: RoutineDay,
     now: Long = System.currentTimeMillis()
-  ) {
+  ): List<PlannedAlarmItem> {
     if (task.isDeleted || task.isCurrentlyPaused() || task.isOverflow) {
-      cancelTaskAlarms(context, task.id)
-      return
+      return emptyList()
     }
-    val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-
-    // Cancel any existing alarms for this task first to avoid stale duplicates
-    cancelTaskAlarms(context, task.id)
-
     if (task.slotNumber == 5 && task.selectedDays.isEmpty()) {
-      return
+      return emptyList()
     }
 
     var effectiveDurationMin = task.durationMinutes
     var effectiveTitle = task.title
     var effectiveVoiceMessage = task.voiceMessage
-    var effectiveDndDelay = task.dndDelayMinutes
+    val effectiveDndDelay = task.dndDelayMinutes.coerceIn(0, 25)
 
-    // Slot 3 Friday dual-mode check: if target day is Friday, use Friday overrides if not already applied
+    // Slot 3 Friday dual-mode check: if target day is Friday, use Friday title/duration/voice overrides while respecting user's custom DND delay
     if (task.slotNumber == 3 && targetRoutineDay == RoutineDay.FRIDAY) {
       effectiveTitle = task.fridayTitle?.ifBlank { null } ?: task.title
       effectiveDurationMin = task.fridayDurationMinutes ?: task.durationMinutes
       effectiveVoiceMessage = task.fridayVoiceMessage?.ifBlank { null } ?: task.voiceMessage
-      effectiveDndDelay = 5
     }
 
     val targetCal = Calendar.getInstance().apply { timeInMillis = startMillis }
@@ -717,7 +727,9 @@ object AutomationManager {
 
     val endHourMin = ((targetCal.get(Calendar.HOUR_OF_DAY) * 60 + targetCal.get(Calendar.MINUTE) + effectiveDurationMin) % 1440 + 1440) % 1440
     val formattedEndTime = RoutineTask.formatTime(endHourMin)
+    val formattedEffectiveDuration = formatDurationMinutes(effectiveDurationMin)
     val endMillis = startMillis + (effectiveDurationMin * 60L * 1000L)
+    val items = mutableListOf<PlannedAlarmItem>()
 
     // 1. Task Start Alarm (only if start time is in the future)
     if (startMillis > now + 1500L) {
@@ -736,7 +748,7 @@ object AutomationManager {
         putExtra(EXTRA_VOICE_VOLUME, task.voiceVolume)
         putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
         putExtra(EXTRA_CATEGORY_NAME, catName)
-        putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)
+        putExtra(EXTRA_FORMATTED_DURATION, formattedEffectiveDuration)
         putExtra(EXTRA_FORMATTED_END_TIME, formattedEndTime)
         putExtra(EXTRA_DND_DELAY_MINUTES, effectiveDndDelay)
       }
@@ -747,8 +759,7 @@ object AutomationManager {
         startIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
       )
-
-      scheduleExactOrAlarmClock(am, startMillis, pendingStart, useAlarmClock = true)
+      items.add(PlannedAlarmItem(startMillis, pendingStart, eligibleForAlarmClock = true))
     }
 
     // Deep Sleep Immune Delayed DND via AlarmManager (only if trigger precedes task end)
@@ -768,11 +779,11 @@ object AutomationManager {
           dndIntent,
           PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        scheduleExactOrAlarmClock(am, dndTriggerMillis, pendingDnd, useAlarmClock = true)
+        items.add(PlannedAlarmItem(dndTriggerMillis, pendingDnd, eligibleForAlarmClock = true))
       }
     }
 
-    // Synchronize end alarm: use setAlarmClock for DND-enabled tasks so DND teardown pierces Doze reliably
+    // Synchronize end alarm
     if (endMillis > now) {
       val endIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
         action = ACTION_END_TASK
@@ -786,7 +797,37 @@ object AutomationManager {
         endIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
       )
-      scheduleExactOrAlarmClock(am, endMillis, pendingEnd, useAlarmClock = task.enableDnd)
+      items.add(PlannedAlarmItem(endMillis, pendingEnd, eligibleForAlarmClock = task.enableDnd))
+    }
+
+    return items
+  }
+
+  private fun scheduleTaskAlarmsForOccurrence(
+    context: Context,
+    task: RoutineTask,
+    startMillis: Long,
+    targetRoutineDay: RoutineDay,
+    now: Long = System.currentTimeMillis(),
+    skipCancel: Boolean = false
+  ) {
+    if (task.isDeleted || task.isCurrentlyPaused() || task.isOverflow) {
+      if (!skipCancel) cancelTaskAlarms(context, task.id)
+      return
+    }
+    val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+
+    if (!skipCancel) {
+      cancelTaskAlarms(context, task.id)
+    }
+
+    val items = buildTaskAlarmsForOccurrence(context, task, startMillis, targetRoutineDay, now)
+    val earliestAlarmClockMillis = items.filter { it.eligibleForAlarmClock }.minOfOrNull { it.triggerMillis }
+    for (item in items) {
+      val useAlarmClock = item.eligibleForAlarmClock &&
+        earliestAlarmClockMillis != null &&
+        item.triggerMillis == earliestAlarmClockMillis
+      scheduleExactOrAlarmClock(am, item.triggerMillis, item.pendingIntent, useAlarmClock = useAlarmClock)
     }
   }
 
@@ -905,11 +946,7 @@ object AutomationManager {
           }
           val startMillis = startCal.timeInMillis
           val endMillis = startMillis + matchingTask.durationMinutes * 60L * 1000L
-          val effectiveDndDelay = if (matchingTask.slotNumber == 3 && routineDay == RoutineDay.FRIDAY) {
-            5
-          } else {
-            matchingTask.dndDelayMinutes.coerceIn(0, 25)
-          }
+          val effectiveDndDelay = matchingTask.dndDelayMinutes.coerceIn(0, 25)
           val effectiveDndStartMillis = startMillis + effectiveDndDelay * 60L * 1000L
           if (nowMillis in effectiveDndStartMillis until endMillis) {
             hasValidOngoingDndOccurrence = true
@@ -936,6 +973,7 @@ object AutomationManager {
   internal fun rescheduleAllAlarmsAt(context: Context, now: Long) {
     try {
       reconcileStaleDndState(context, now)
+      val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
       val repository = RoutineRepository(context)
       val anchors = repository.getAnchors().filter { !it.isDeleted }
       val dynamicTasks = repository.getDynamicTasks().filter { !it.isDeleted }
@@ -956,6 +994,7 @@ object AutomationManager {
 
       val baseCal = Calendar.getInstance().apply { timeInMillis = now }
       val scheduledTaskIds = mutableSetOf<String>()
+      val allPlannedAlarms = mutableListOf<PlannedAlarmItem>()
 
       for (dayOffset in -1..6) {
         val dayCal = (baseCal.clone() as Calendar).apply {
@@ -987,25 +1026,31 @@ object AutomationManager {
           }
 
           if (isUpcomingOrOngoing) {
-            scheduleTaskAlarmsForOccurrence(context, task, startMillis, routineDay, now)
+            allPlannedAlarms.addAll(
+              buildTaskAlarmsForOccurrence(context, task, startMillis, routineDay, now)
+            )
             scheduledTaskIds.add(task.id)
           }
         }
+      }
+
+      // Single earliest upcoming alarm timestamp across Start / Delayed-DND / DND-End uses setAlarmClock()
+      // to pierce Deep Doze without flooding SystemUI; all subsequent future alarms use setExactAndAllowWhileIdle().
+      val earliestAlarmClockMillis = allPlannedAlarms
+        .filter { it.eligibleForAlarmClock }
+        .minOfOrNull { it.triggerMillis }
+
+      for (item in allPlannedAlarms) {
+        val useAlarmClock = item.eligibleForAlarmClock &&
+          earliestAlarmClockMillis != null &&
+          item.triggerMillis == earliestAlarmClockMillis
+        scheduleExactOrAlarmClock(am, item.triggerMillis, item.pendingIntent, useAlarmClock = useAlarmClock)
       }
     } catch (_: Exception) {}
   }
 
   fun rescheduleCompletedTaskNextCycle(context: Context, taskId: String) {
     try {
-      val repository = RoutineRepository(context)
-      val allTasks = repository.getAnchors() + repository.getDynamicTasks()
-      val targetTask = allTasks.firstOrNull { it.id == taskId } ?: return
-      if (targetTask.isDeleted || targetTask.isCurrentlyPaused()) return
-
-      // Schedule the next cycle of this task
-      scheduleTaskAlarms(context, targetTask)
-
-      // Also ensure all upcoming alarms across the schedule are refreshed
       rescheduleAllAlarms(context)
     } catch (_: Exception) {}
   }

@@ -71,6 +71,7 @@ import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -150,6 +151,19 @@ fun AnchorEditBottomSheet(
     isSoundAlertEnabled: Boolean
   ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
   onSaveSlot5: ((title: String, voiceMessage: String) -> Unit)? = null,
+  onSaveSlot5Detailed: ((
+    title: String,
+    voiceMessage: String,
+    selectedDays: Set<RoutineDay>,
+    enableDnd: Boolean,
+    dndDelayMinutes: Int,
+    enableHaptic: Boolean,
+    isVoiceEnabled: Boolean,
+    voiceVolume: Float,
+    isSoundAlertEnabled: Boolean,
+    customRingtoneUri: String?,
+    customRingtoneTitle: String?
+  ) -> Unit)? = null,
   onSave: ((RoutineTask) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
@@ -283,27 +297,75 @@ fun AnchorEditBottomSheet(
     }
   }
 
-  // TTS Engine Setup
+  // Lazy TTS Engine Setup (uses applicationContext; only initialized when voice is enabled or preview tapped)
+  val appContext = context.applicationContext ?: context
   var ttsInstance by remember { mutableStateOf<TextToSpeech?>(null) }
   var isTtsReady by remember { mutableStateOf(false) }
+  var ttsRequested by remember { mutableStateOf(isVoiceEnabled) }
+  var pendingVoicePreview by remember { mutableStateOf<Triple<String, Float, String>?>(null) }
 
-  DisposableEffect(context) {
-    var instance: TextToSpeech? = null
-    instance = TextToSpeech(context) { status ->
-      if (status == TextToSpeech.SUCCESS) {
-        isTtsReady = true
+  LaunchedEffect(isVoiceEnabled) {
+    if (isVoiceEnabled) {
+      ttsRequested = true
+    }
+  }
+
+  DisposableEffect(appContext, ttsRequested) {
+    if (!ttsRequested) {
+      onDispose {
         try {
-          instance?.language = Locale.getDefault()
+          tonePreviewPlayer?.stop()
+        } catch (_: Exception) {}
+      }
+    } else {
+      var instance: TextToSpeech? = null
+      var disposed = false
+      instance = TextToSpeech(appContext) { status ->
+        if (disposed) {
+          try {
+            instance?.shutdown()
+          } catch (_: Exception) {}
+          return@TextToSpeech
+        }
+        if (status == TextToSpeech.SUCCESS) {
+          isTtsReady = true
+          try {
+            instance?.language = Locale.getDefault()
+          } catch (_: Exception) {}
+          pendingVoicePreview?.let { (msg, vol, uttId) ->
+            pendingVoicePreview = null
+            val params = Bundle().apply {
+              putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0f, 1f))
+            }
+            try {
+              instance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, uttId)
+            } catch (_: Exception) {}
+          }
+        }
+      }
+      ttsInstance = instance
+      onDispose {
+        disposed = true
+        isTtsReady = false
+        ttsInstance = null
+        pendingVoicePreview = null
+        try {
+          tonePreviewPlayer?.stop()
+          instance?.stop()
+          instance?.shutdown()
         } catch (_: Exception) {}
       }
     }
-    ttsInstance = instance
-    onDispose {
-      try {
-        tonePreviewPlayer?.stop()
-        instance?.stop()
-        instance?.shutdown()
-      } catch (_: Exception) {}
+  }
+
+  val speakAnchorVoicePreview: (String, Float, String) -> Unit = { textToSpeak, vol, uttId ->
+    val activeTts = ttsInstance
+    if (activeTts != null && isTtsReady) {
+      val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0f, 1f)) }
+      activeTts.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, params, uttId)
+    } else {
+      pendingVoicePreview = Triple(textToSpeak, vol, uttId)
+      ttsRequested = true
     }
   }
 
@@ -356,7 +418,21 @@ fun AnchorEditBottomSheet(
     val calculatedDuration = (durationHours * 60 + durationMins).coerceAtLeast(15)
 
     if (isSlot5) {
-      if (onSaveSlot5 != null) {
+      if (onSaveSlot5Detailed != null) {
+        onSaveSlot5Detailed(
+          finalTitle,
+          voiceMessage,
+          selectedDays,
+          isDndEnabled,
+          dndDelayMinutes.coerceIn(0, 25),
+          enableHaptic,
+          isVoiceEnabled,
+          voiceVolume,
+          isSoundAlertEnabled,
+          customRingtoneUri,
+          customRingtoneTitle
+        )
+      } else if (onSaveSlot5 != null) {
         onSaveSlot5(finalTitle, voiceMessage)
       } else {
         onSaveAnchor(
@@ -401,7 +477,7 @@ fun AnchorEditBottomSheet(
       durationMinutes = if (isSlot5) anchor.durationMinutes else calculatedDuration,
       voiceMessage = voiceMessage,
       enableDnd = isDndEnabled,
-      dndDelayMinutes = if (isSlot1 || isSlot5) 0 else dndDelayMinutes,
+      dndDelayMinutes = dndDelayMinutes.coerceIn(0, 25),
       enableHaptic = enableHaptic,
       isVoiceEnabled = isVoiceEnabled,
       voiceVolume = voiceVolume,
@@ -916,8 +992,7 @@ fun AnchorEditBottomSheet(
                         val textToSpeak = fridayVoiceMessage.ifBlank {
                           "${fridayTitle.ifBlank { "Friday anchor" }} starting now."
                         }
-                        val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
-                        ttsInstance?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, params, "friday_tts_preview")
+                        speakAnchorVoicePreview(textToSpeak, voiceVolume, "friday_tts_preview")
                       },
                       modifier = Modifier.testTag("test_friday_voice_button")
                     ) {
@@ -1511,8 +1586,7 @@ fun AnchorEditBottomSheet(
                         val textToSpeak = voiceMessage.ifBlank {
                           "${title.ifBlank { "Anchor slot $slotIdx" }} starting now."
                         }
-                        val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
-                        ttsInstance?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, params, "anchor_voice_preview")
+                        speakAnchorVoicePreview(textToSpeak, voiceVolume, "anchor_voice_preview")
                       },
                       modifier = Modifier.testTag("preview_voice_tts_button")
                     ) {
@@ -1760,14 +1834,7 @@ fun AnchorEditBottomSheet(
 
               Spacer(modifier = Modifier.height(4.dp))
 
-              if (isSlot1 || isSlot5) {
-                Text(
-                  text = "Locked: 0m (Immediate)",
-                  fontSize = 10.sp,
-                  fontFamily = FontFamily.Monospace,
-                  color = Color(0xFF94A3B8)
-                )
-              } else if (isDndEnabled) {
+              if (isDndEnabled) {
                 Row(
                   modifier = Modifier.fillMaxWidth(),
                   verticalAlignment = Alignment.CenterVertically,
@@ -1781,7 +1848,12 @@ fun AnchorEditBottomSheet(
                     color = Color(0xFFC4B5FD)
                   )
 
-                  var delayInputText by remember(dndDelayMinutes) { mutableStateOf(dndDelayMinutes.toString()) }
+                  var delayInputText by remember { mutableStateOf(dndDelayMinutes.toString()) }
+                  LaunchedEffect(dndDelayMinutes) {
+                    if ((delayInputText.toIntOrNull() ?: 0) != dndDelayMinutes) {
+                      delayInputText = dndDelayMinutes.toString()
+                    }
+                  }
                   OutlinedTextField(
                     value = delayInputText,
                     onValueChange = { raw ->

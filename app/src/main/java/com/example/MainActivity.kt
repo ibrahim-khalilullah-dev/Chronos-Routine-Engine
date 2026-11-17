@@ -133,6 +133,8 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
   val currentMinute by viewModel.currentMinute.collectAsState()
   val taskRatingHistory by viewModel.taskRatingHistory.collectAsState()
   val voicePresetId by viewModel.voicePresetId.collectAsState()
+  val hasPendingEdits by viewModel.hasPendingEdits.collectAsState()
+  val pendingImpactDiff by viewModel.pendingImpactDiff.collectAsState()
 
   // Modal Sheet State
   var isModalOpen by remember { mutableStateOf(false) }
@@ -147,7 +149,6 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
   )
 
   LaunchedEffect(Unit) {
-    viewModel.checkAndAutoRestoreVault()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
       if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
         != PackageManager.PERMISSION_GRANTED
@@ -315,6 +316,21 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             },
             onDeleteTwinAndAbsorbTime = { toDeleteId, partnerId ->
               viewModel.deleteTwinAndAbsorbTime(toDeleteId, partnerId)
+            },
+            anchors = anchors,
+            hasPendingEdits = hasPendingEdits,
+            pendingImpactDiff = pendingImpactDiff,
+            onPreviewDragTaskMove = { taskId, targetMin, onWallHit ->
+              viewModel.previewDragTaskMove(taskId, targetMin, onWallHit)
+            },
+            onPreviewVerticalDropMove = { taskId, dropTarget, onWallHit ->
+              viewModel.previewVerticalDropMove(taskId, dropTarget, onWallHit)
+            },
+            onCommitPendingEdits = {
+              viewModel.commitPendingEdits()
+            },
+            onDiscardPendingEdits = {
+              viewModel.discardPendingEdits()
             }
           )
         }
@@ -607,6 +623,21 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
           },
           onSaveSlot5 = { title, voice, days, dnd, dndDelay ->
             viewModel.updateSlot5Protected(title, voice, days, dnd, dndDelay)
+          },
+          onSaveSlot5Detailed = { title, voice, days, dnd, dndDelay, hapticOn, voiceOn, volume, soundOn, ringUri, ringTitle ->
+            viewModel.updateSlot5Protected(
+              title = title,
+              voiceMessage = voice,
+              selectedDays = days,
+              enableDnd = dnd,
+              dndDelayMinutes = dndDelay,
+              enableHaptic = hapticOn,
+              isVoiceEnabled = voiceOn,
+              voiceVolume = volume,
+              isSoundAlertEnabled = soundOn,
+              customRingtoneUri = ringUri,
+              customRingtoneTitle = ringTitle
+            )
           },
           onMoveToTrash = { taskId ->
             viewModel.moveToTrash(taskId)

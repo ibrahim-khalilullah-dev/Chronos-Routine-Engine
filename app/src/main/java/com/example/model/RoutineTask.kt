@@ -90,7 +90,8 @@ data class RoutineTask(
   val pausedUntilDateMillis: Long? = null,
   val isPausedTodayOnly: Boolean = false,
   val dndDelayMinutes: Int = 0, // Auto-engage DND delay in minutes (0 to 25m, default 0)
-  val originalStartTimeMinute: Int? = null // Birth start time in minutes (preserved across scheduling shifts)
+  val originalStartTimeMinute: Int? = null, // Birth start time in minutes (preserved across scheduling shifts)
+  val manualPlacementOrder: Long = 0L // Monotonic priority tie-breaker from manual drag-and-drop placement
 ) {
   fun isCurrentlyPaused(currentDateMillis: Long = System.currentTimeMillis()): Boolean {
     if (isPausedIndefinitely) return true

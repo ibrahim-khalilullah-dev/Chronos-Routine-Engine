@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -155,7 +157,7 @@ fun ChronosArchitectureGuideSheet(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-              text = "VOL. VIII • OFFICIAL ARCHITECTURAL SPECIFICATION",
+              text = "VOL. IX • OFFICIAL ARCHITECTURAL SPECIFICATION (v1.1)",
               fontSize = 9.sp,
               fontWeight = FontWeight.Bold,
               fontFamily = FontFamily.Monospace,
@@ -205,7 +207,7 @@ fun ChronosArchitectureGuideSheet(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-          text = "An authoritative engineering specification on zero-encroachment anchors, reverse sleep math, dynamic elastic buffers, hydraulic communicating vessels, delayed DND automation, and Samsung deep-sleep immunity.",
+          text = "An authoritative engineering specification on zero-encroachment anchors, reverse sleep math, dynamic elastic buffers, hydraulic communicating vessels, launcher-grade drag scheduling, buffer-excluded gap telemetry, and zero-lag 4GB RAM optimization.",
           fontSize = 12.sp,
           fontStyle = FontStyle.Italic,
           color = Color(0xFF94A3B8),
@@ -262,7 +264,7 @@ fun ChronosArchitectureGuideSheet(
               slot = 3,
               task = anchor3,
               defaultTitle = "Dhuhr",
-              role = "01:15 PM (35m) • Midday focus boundary (8m DND delay). Features Friday Jumu'ah Dual Mode (12:30 PM, 120m, 5m DND delay).",
+              role = "01:15 PM (35m) • Midday focus boundary (8m DND delay). Features Friday Jumu'ah Dual Mode (12:30 PM, 120m, honoring your 0–25m DND delay).",
               accent = AnchorGradientStart
             )
             NewspaperAnchorRow(
@@ -276,7 +278,7 @@ fun ChronosArchitectureGuideSheet(
               slot = 5,
               task = anchor5,
               defaultTitle = "Break",
-              role = "04:55 PM → 06:00 PM (65m) • Accordion rubber buffer spanning Slot 4 End to Slot 6 Start with a strict 15m safety floor and 7-day recurrence selector.",
+              role = "04:55 PM → 06:00 PM (65m) • Accordion rubber buffer spanning Slot 4 End to Slot 6 Start with a strict 15m safety floor, 7-day recurrence selector, and customizable 0–25m DND delay.",
               accent = ElasticGradientStart
             )
             NewspaperAnchorRow(
@@ -294,6 +296,15 @@ fun ChronosArchitectureGuideSheet(
               accent = AnchorGradientStart
             )
           }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          Text(
+            text = "All 7 Anchors—including Slot 1 (Sleep) and Slot 5 (Elastic Buffer)—support configurable 0–25m Auto DND Delay timers.",
+            color = TextTertiary,
+            fontSize = 11.sp,
+            lineHeight = 15.sp
+          )
 
           Spacer(modifier = Modifier.height(12.dp))
 
@@ -315,8 +326,8 @@ fun ChronosArchitectureGuideSheet(
               Spacer(modifier = Modifier.height(4.dp))
               Text(
                 text = "On Fridays, Slot 3 seamlessly switches into dedicated Jumu'ah mode without altering Saturday–Thursday schedules:\n" +
-                  "• Dedicated Time Window: Starts at 12:30 PM with an expanded duration of 2 hours (120m).\n" +
-                  "• Autonomous Voice Annunciation: Custom speech ('জুমার সময় হয়েছে।') with audio ducking and a 5m DND delay timer.\n" +
+                  "• Dedicated Time Window: Starts at 12:30 PM with an expanded duration of 2 hours (120m) and renders the accurate Friday duration on lock-screen notifications.\n" +
+                  "• Autonomous Voice Annunciation: Custom speech ('জুমার সময় হয়েছে।') with audio ducking, while strictly honoring the user's configured DND delay (0–25m).\n" +
                   "• Dynamic Non-Encroachment: Friday dynamic tasks automatically conform around the extended Jumu'ah window with zero manual rescheduling.",
                 color = Color(0xFFCBD5E1),
                 fontSize = 11.sp,
@@ -334,7 +345,7 @@ fun ChronosArchitectureGuideSheet(
         EditorialArticleCard(
           dispatchNumber = "DISPATCH II",
           title = "Slot 5: Accordion Elastic Buffer",
-          lead = "Self-Balancing Mathematical Shock Absorber & Day Recurrence",
+          lead = "Self-Balancing Mathematical Shock Absorber, Ringtone & Day Recurrence",
           icon = Icons.Default.Shield,
           accentColor = ElasticGradientStart
         ) {
@@ -342,7 +353,7 @@ fun ChronosArchitectureGuideSheet(
             text = "Slot 5 functions as an accordion buffer mathematically calibrated to bridge the exact duration between Slot 4 (Asr End) and Slot 6 (Maghrib Start):\n\n" +
               "• Dynamic Recalculation: When Slot 4 or Slot 6 moves, Slot 5 automatically stretches or contracts to absorb routine drift without shifting surrounding dynamic tasks.\n" +
               "• Protected 15-Minute Floor: Slot 5 can never be compressed below 15 minutes under routine expansion, guaranteeing physiological decompression time.\n" +
-              "• Weekly Recurrence Selector: Slot 5 includes a granular 7-day selector (Saturday through Friday). When deactivated on any designated day, 100% of the Slot 4 → Slot 6 interval is fully liberated for high-leverage dynamic tasks with zero artificial buffers.",
+              "• Full Hardware Alert Persistence & Weekly Recurrence: Slot 5 persists custom phone ringtones, sound alert & voice toggles, voice volume, haptic pulse, and 0–25m Auto DND Delay alongside its granular 7-day recurrence selector (Saturday–Friday). When deactivated on any designated day, 100% of the Slot 4 → Slot 6 interval is liberated for dynamic tasks.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp
@@ -434,11 +445,10 @@ fun ChronosArchitectureGuideSheet(
           accentColor = Color(0xFF10B981)
         ) {
           Text(
-            text = "Engineered specifically for complete immunity against aggressive OEM task killers (such as Samsung One UI Device Care deep sleep):\n\n" +
-              "• AlarmManager.setAlarmClock & Overnight Rollover Guard: Start alarms, bounded delayed DND triggers (scheduled only when delay < duration), and DND-enabled end alarms use system clock alarm architecture across dayOffset -1..6 so overnight tasks retain their morning end alarm across midnight.\n" +
-              "• Task-Owned Priority DND & Stale Reconciliation: Tracks the active DND owner task ID synchronously, rejects stale or expired ACTION_APPLY_DND triggers via EXTRA_TASK_END_MILLIS, reconciles stale DND state on reschedule, and skips teardown when a zero-delay follow-up DND task starts immediately at boundary.\n" +
-              "• 12-Persona Bilingual TTS & Audio Ducking: Sound chimes, haptic vibration, and TTS voice briefings run independently with a cancellable 1500ms delay, dynamic bn-BD/en-US language switching, Google TTS fallback, and transient audio ducking. Choose between 12 free offline bilingual BN/EN voice personas across Female (5), Youth 10–15y (3), and Male & Studio (4) categories in Settings via a collapsible dropdown with custom BN/EN test text and confirmation dialog, while keeping app access protected behind your device lock.\n" +
-              "• 4-Tier Offline Vault: Routines and your active Voice Persona automatically persist to chronos_vault.json across external, public documents, and internal storage, enabling zero-click restoration on fresh reinstallation.",
+            text = "Engineered specifically for zero-lag 4GB RAM reliability and complete immunity against aggressive OEM task killers (such as Samsung One UI Device Care deep sleep):\n\n" +
+              "• Single-Earliest setAlarmClock() Promotion + 7-Day Horizon: Only the single earliest upcoming alarm across Start, bounded Delayed DND (delay < duration), and DND-End uses AlarmManager.setAlarmClock() to pierce Deep Doze without flooding SystemUI; remaining alarms across dayOffset -1..6 register cleanly via setExactAndAllowWhileIdle(), with goAsync() coroutines offloading receiver and BootReceiver alarm promotion off the main thread.\n" +
+              "• Silent Notification Channel & USAGE_ALARM Ringtone Playback: Foreground banners run on chronos_automation_silent_channel (setSound(null, null), enableVibration(false)) to eliminate double chimes, while custom user ringtones play cleanly via AudioAttributes.USAGE_ALARM Ringtone with automatic MediaPlayer fallback.\n" +
+              "• Lazy Self-Releasing TTS & 25s WakeLock Cap: TextToSpeech(applicationContext) initializes strictly when isVoiceEnabled == true, immediately executes stop() + shutdown() upon UtteranceProgressListener.onDone/onError or a 20-second safety timeout so com.google.android.tts RAM unbinds immediately, caps WakeLocks at 25 seconds, uses START_NOT_STICKY lifecycle semantics, and keeps 12 offline bilingual BN/EN Voice Personas + 4-Tier chronos_vault.json backup intact without waking background activity.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp
@@ -594,15 +604,63 @@ fun ChronosArchitectureGuideSheet(
           }
         }
 
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // ==============================================================
+        // 11. EDITORIAL DISPATCH IX: LAUNCHER-GRADE DRAG SCHEDULING
+        // ==============================================================
+        EditorialArticleCard(
+          dispatchNumber = "DISPATCH IX",
+          title = "Launcher-Grade Drag Scheduling & Impact Diff",
+          lead = "Outer-Container Gesture Tracking, Dual Shadows & Non-Destructive Preview",
+          icon = Icons.Default.SwapVert,
+          accentColor = Color(0xFF38BDF8)
+        ) {
+          Text(
+            text = "Dynamic tasks can be long-pressed and scrubbed directly on the timeline with 60/120 FPS fluid feedback:\n\n" +
+              "• Horizontal Speed-Sensitive Scrubbing: Drag left/right to glide start times minute-by-minute within open surrounding bounds (strictly locked when adjacent tasks/anchors leave 0m free room).\n" +
+              "• Vertical Reordering & Auto-Scroll: Outer-container PointerEventPass.Initial tracking drives an elevated overlay card and frame-rate-independent withFrameNanos edge auto-scroll, gliding neighbors cleanly via Modifier.animateItem with zero LazyColumn flicker.\n" +
+              "• Dual Shadow Choreography: Leaves a dimmed dashed Source Shadow (alpha = 0.28) at origin while opening a full-card-height Destination Drop Shadow with ±8dp anti-ping-pong hysteresis and live start/end preview times.\n" +
+              "• Anchor Fencing & Cross-Anchor Drops: High Priority and Fluid Twin tasks clamp safely at enclosing Anchor Walls; Normal Dynamic tasks cross anchors, leap into open gaps, or swap and cascade adjacent neighbors cleanly via manualPlacementOrder.\n" +
+              "• Non-Destructive Top Header Confirmation: Pending edits swap the top-right countdown pill for a 3-button confirmation bar ([History] diff preview dialog, [Check] Apply, [Close] Discard).",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+          )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // ==============================================================
+        // 12. EDITORIAL DISPATCH X: COUNTDOWN & GAP TELEMETRY
+        // ==============================================================
+        EditorialArticleCard(
+          dispatchNumber = "DISPATCH X",
+          title = "Minimalist Header Countdown & Net Gap Telemetry",
+          lead = "Zero-Clutter Timeline Awareness & Buffer-Excluded Gap Pills",
+          icon = Icons.Outlined.Timer,
+          accentColor = Color(0xFF818CF8)
+        ) {
+          Text(
+            text = "Real-time free space and upcoming boundary telemetry stay scannable without extra cards:\n\n" +
+              "• Minimalist Header Countdown Pill: Opposite the Chronos masthead, a compact badge ticks down to the next scheduled task or anchor—wrapping smoothly past midnight to tomorrow's earliest slot late at night—with zero duplicate lower banners.\n" +
+              "• Corner Stopwatch Gap Pills: Under Earliest Start sorting, sleek right-aligned dark obsidian capsules display exact net open intervals between tasks (excluding reserved interTaskBufferMinutes via computeNetFreeGapMinutes), hiding automatically whenever net gap ≤ 0m.\n" +
+              "• Live Scrub Telemetry: While scrubbing a task horizontally, neighboring corner gap pills recalculate live frame-by-frame (e.g., 3m → 2m → 1m → hidden at 0m) so tight fits are visible before you lift your finger.",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+          )
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
         // ==============================================================
-        // 11. EDITORIAL COLOPHON (Footer)
+        // 13. EDITORIAL COLOPHON (Footer)
         // ==============================================================
         HorizontalDivider(thickness = 1.dp, color = Color(0xFF1E293B))
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-          text = "PRINTED & COMPILED OFFLINE FOR SAMSUNG GALAXY A24 (SM-A245N) • HELIO G99 ENGINE\nCHRONOS DETERMINISTIC TIME SYSTEM • 100% PRIVATE • ZERO ANALYTICS",
+          text = "PRINTED & COMPILED OFFLINE FOR SAMSUNG GALAXY A24 (SM-A245N) • HELIO G99 ENGINE\nCHRONOS DETERMINISTIC TIME SYSTEM v1.1 • 100% PRIVATE • ZERO ANALYTICS",
           fontSize = 9.sp,
           fontFamily = FontFamily.Monospace,
           color = Color(0xFF64748B),

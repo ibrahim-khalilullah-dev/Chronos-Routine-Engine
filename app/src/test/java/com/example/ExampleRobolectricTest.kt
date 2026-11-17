@@ -415,7 +415,7 @@ class ExampleRobolectricTest {
       durationMinutes = 45
     )
     repo.saveDynamicTasks(listOf(testTask))
-    Thread.sleep(300)
+    Thread.sleep(600)
 
     // Clear preferences to simulate fresh reinstall after uninstall
     val prefs = context.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
@@ -720,7 +720,7 @@ class ExampleRobolectricTest {
 
     repo.setVoicePresetId("deep_male")
     assertEquals("deep_male", repo.getVoicePresetId())
-    Thread.sleep(250)
+    Thread.sleep(600)
 
     // Simulate fresh install where SharedPreferences are empty and Tier-1 vault holds "crisp_male"
     val tier1Dir = java.io.File(context.getExternalFilesDir(null), "ChronosBackup").apply { mkdirs() }
@@ -909,5 +909,282 @@ class ExampleRobolectricTest {
       scheduledAlarms.any { it.operation == slot1EndPi && it.triggerAtTime == expectedSleepEndCal.timeInMillis }
     )
   }
+
+  @Test
+  fun `repository persists and restores manualPlacementOrder accurately`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val task = RoutineTask(
+      id = "manual_order_persist_1",
+      title = "Ordered Block",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 540,
+      durationMinutes = 40,
+      manualPlacementOrder = 1731744000123L
+    )
+    repo.saveDynamicTasks(listOf(task))
+    val loaded = repo.getDynamicTasks().first { it.id == "manual_order_persist_1" }
+    assertEquals(1731744000123L, loaded.manualPlacementOrder)
+  }
+
+  @Test
+  fun `rescheduleAllAlarmsAt uses setAlarmClock only at single earliest trigger timestamp across 7-day horizon`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val anchors = SchedulerEngine.createDefaultAnchors(360)
+    val dyn1 = RoutineTask(
+      id = "horizon_dyn_1",
+      title = "Focus Morning",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 480,
+      durationMinutes = 45,
+      enableDnd = true,
+      dndDelayMinutes = 5,
+      selectedDays = RoutineDay.allDays()
+    )
+    val dyn2 = RoutineTask(
+      id = "horizon_dyn_2",
+      title = "Focus Afternoon",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 900,
+      durationMinutes = 45,
+      enableDnd = true,
+      dndDelayMinutes = 0,
+      selectedDays = RoutineDay.allDays()
+    )
+    repo.saveAnchors(anchors)
+    repo.saveDynamicTasks(listOf(dyn1, dyn2))
+
+    val nowCal = java.util.Calendar.getInstance().apply {
+      set(java.util.Calendar.YEAR, 2026)
+      set(java.util.Calendar.MONTH, java.util.Calendar.MAY)
+      set(java.util.Calendar.DAY_OF_MONTH, 12) // Tuesday 07:00 AM
+      set(java.util.Calendar.HOUR_OF_DAY, 7)
+      set(java.util.Calendar.MINUTE, 0)
+      set(java.util.Calendar.SECOND, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+
+    val am = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+    val shadowAm = org.robolectric.Shadows.shadowOf(am)
+    org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(true)
+    try {
+      shadowAm.scheduledAlarms.clear()
+
+      AutomationManager.rescheduleAllAlarmsAt(context, nowCal.timeInMillis)
+
+      val scheduled = shadowAm.scheduledAlarms
+      assertTrue("Horizon must schedule multiple exact alarms across tasks", scheduled.size > 5)
+
+      val alarmClockTimestamps = scheduled.filter { it.showIntent != null }.map { it.triggerAtTime }.distinct()
+      assertEquals(
+        "Only the single earliest trigger timestamp should be registered via setAlarmClock to avoid SystemUI broadcast floods",
+        1,
+        alarmClockTimestamps.size
+      )
+
+      val expectedFirstCal = (nowCal.clone() as java.util.Calendar).apply {
+        set(java.util.Calendar.HOUR_OF_DAY, 8)
+        set(java.util.Calendar.MINUTE, 0)
+      }
+      assertEquals(expectedFirstCal.timeInMillis, alarmClockTimestamps.first())
+    } finally {
+      org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(false)
+    }
+  }
+
+  @Test
+  fun `slot 3 friday jumuah honors custom dnd delay and uses silent notification channel`() {
+    assertEquals("chronos_automation_silent_channel", com.example.service.RoutineAutomationService.CHANNEL_ID)
+
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val repo = RoutineRepository(context)
+    val baseAnchors = SchedulerEngine.createDefaultAnchors(360).map {
+      if (it.slotNumber == 3) {
+        it.copy(
+          enableDnd = true,
+          dndDelayMinutes = 14, // Custom delay should NOT be overwritten by hardcoded 5m on Friday
+          fridayStartTimeMinute = 750, // 12:30 PM
+          fridayDurationMinutes = 120
+        )
+      } else {
+        it
+      }
+    }
+    repo.saveAnchors(baseAnchors)
+    repo.saveDynamicTasks(emptyList())
+
+    // Friday May 15, 2026 at 12:00 PM
+    val fridayNoonCal = java.util.Calendar.getInstance().apply {
+      set(java.util.Calendar.YEAR, 2026)
+      set(java.util.Calendar.MONTH, java.util.Calendar.MAY)
+      set(java.util.Calendar.DAY_OF_MONTH, 15)
+      set(java.util.Calendar.HOUR_OF_DAY, 12)
+      set(java.util.Calendar.MINUTE, 0)
+      set(java.util.Calendar.SECOND, 0)
+      set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val expectedDelayCal = (fridayNoonCal.clone() as java.util.Calendar).apply {
+      set(java.util.Calendar.HOUR_OF_DAY, 12)
+      set(java.util.Calendar.MINUTE, 44) // 12:30 + 14m
+    }
+
+    val am = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+    val shadowAm = org.robolectric.Shadows.shadowOf(am)
+    shadowAm.scheduledAlarms.clear()
+
+    AutomationManager.rescheduleAllAlarmsAt(context, fridayNoonCal.timeInMillis)
+
+    val slot3DndPi = android.app.PendingIntent.getBroadcast(
+      context,
+      ("anchor_slot_3_dnd").hashCode(),
+      android.content.Intent(context, com.example.receiver.RoutineAlarmReceiver::class.java).apply {
+        action = AutomationManager.ACTION_APPLY_DND
+      },
+      android.app.PendingIntent.FLAG_NO_CREATE or android.app.PendingIntent.FLAG_IMMUTABLE
+    )
+    assertNotNull("Friday Slot 3 DND delay alarm must be scheduled", slot3DndPi)
+    assertTrue(
+      "Friday Slot 3 DND alarm must fire at 12:30 + custom 14m = 12:44",
+      shadowAm.scheduledAlarms.any { it.operation == slot3DndPi && it.triggerAtTime == expectedDelayCal.timeInMillis }
+    )
+  }
+
+  @Test
+  fun `viewModel persists slot 5 detailed settings and manages draft pending edits cleanly`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val repo = RoutineRepository(app)
+    repo.saveAnchors(SchedulerEngine.createDefaultAnchors(360))
+    val task1 = RoutineTask(
+      id = "vm_drag_t1",
+      title = "Morning Research",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420,
+      originalStartTimeMinute = 420,
+      durationMinutes = 45,
+      selectedDays = RoutineDay.allDays()
+    )
+    repo.saveDynamicTasks(listOf(task1))
+
+    fun pumpUntil(maxWaitMs: Long = 2000L, predicate: () -> Boolean) {
+      val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+      val deadline = System.currentTimeMillis() + maxWaitMs
+      while (!predicate() && System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (!predicate()) Thread.sleep(20)
+      }
+      mainLooper.idle()
+    }
+
+    val vm = com.example.ui.RoutineViewModel(app)
+    vm.updateSlot5Protected(
+      title = "Protected Rest",
+      voiceMessage = "Rest well",
+      selectedDays = RoutineDay.allDays(),
+      enableDnd = true,
+      dndDelayMinutes = 12,
+      enableHaptic = false,
+      isVoiceEnabled = true,
+      voiceVolume = 0.75f,
+      isSoundAlertEnabled = true,
+      customRingtoneUri = "content://media/external/audio/media/42",
+      customRingtoneTitle = "Soft Bell"
+    )
+    pumpUntil { vm.anchors.value.firstOrNull { it.slotNumber == 5 }?.dndDelayMinutes == 12 }
+
+    val updatedSlot5 = vm.anchors.value.first { it.slotNumber == 5 }
+    assertTrue(updatedSlot5.enableDnd)
+    assertEquals(12, updatedSlot5.dndDelayMinutes)
+    assertFalse(updatedSlot5.enableHaptic)
+    assertEquals(0.75f, updatedSlot5.voiceVolume, 0.01f)
+    assertEquals("Soft Bell", updatedSlot5.customRingtoneTitle)
+
+    // Preview drag move creates pending draft + impact diff without mutating committed _dynamicTasks
+    vm.previewDragTaskMove(taskId = "vm_drag_t1", targetStartMinute = 480)
+    pumpUntil { vm.hasPendingEdits.value && vm.pendingImpactDiff.value.any { it.taskId == "vm_drag_t1" && it.newStartMinute == 480 } }
+    assertTrue("Pending edits flag must turn true after drag preview", vm.hasPendingEdits.value)
+    assertEquals(420, vm.dynamicTasks.value.first { it.id == "vm_drag_t1" }.startTimeMinute)
+    assertTrue(vm.pendingImpactDiff.value.any { it.taskId == "vm_drag_t1" && it.newStartMinute == 480 })
+
+    // Discard reverts draft state
+    vm.discardPendingEdits()
+    pumpUntil { !vm.hasPendingEdits.value && vm.pendingImpactDiff.value.isEmpty() }
+    assertFalse(vm.hasPendingEdits.value)
+    assertTrue(vm.pendingImpactDiff.value.isEmpty())
+
+    // Re-preview and commit persists new position
+    vm.previewDragTaskMove(taskId = "vm_drag_t1", targetStartMinute = 490)
+    pumpUntil { vm.hasPendingEdits.value }
+    vm.commitPendingEdits()
+    pumpUntil { !vm.hasPendingEdits.value && vm.dynamicTasks.value.firstOrNull { it.id == "vm_drag_t1" }?.startTimeMinute == 490 }
+    assertFalse(vm.hasPendingEdits.value)
+    assertEquals(490, vm.dynamicTasks.value.first { it.id == "vm_drag_t1" }.startTimeMinute)
+  }
+
+  @Test
+  fun `viewModel previewVerticalDropMove swaps tasks in draft and keeps committed tasks unchanged until commit`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val repo = RoutineRepository(app)
+    repo.saveAnchors(SchedulerEngine.createDefaultAnchors(360))
+    val eat = RoutineTask(
+      id = "vm_swap_eat",
+      title = "Eat",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420,
+      originalStartTimeMinute = 420,
+      durationMinutes = 60,
+      interTaskBufferMinutes = 0,
+      selectedDays = RoutineDay.allDays()
+    )
+    val bath = RoutineTask(
+      id = "vm_swap_bath",
+      title = "Bath",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 480,
+      originalStartTimeMinute = 480,
+      durationMinutes = 30,
+      interTaskBufferMinutes = 10,
+      selectedDays = RoutineDay.allDays()
+    )
+    repo.saveDynamicTasks(listOf(eat, bath))
+
+    fun pumpUntil(maxWaitMs: Long = 2500L, predicate: () -> Boolean) {
+      val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+      val deadline = System.currentTimeMillis() + maxWaitMs
+      while (!predicate() && System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (!predicate()) Thread.sleep(20)
+      }
+      mainLooper.idle()
+    }
+
+    val vm = com.example.ui.RoutineViewModel(app)
+    pumpUntil { vm.dynamicTasks.value.size == 2 }
+
+    var wallHit = false
+    vm.previewVerticalDropMove(
+      taskId = "vm_swap_eat",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertAfterTask("vm_swap_bath"),
+      onAnchorWallHit = { wallHit = true }
+    )
+    pumpUntil {
+      vm.hasPendingEdits.value &&
+        vm.pendingImpactDiff.value.any { it.taskId == "vm_swap_bath" && it.newStartMinute == 420 }
+    }
+
+    assertFalse(wallHit)
+    assertTrue(vm.hasPendingEdits.value)
+    assertEquals(420, vm.dynamicTasks.value.first { it.id == "vm_swap_eat" }.startTimeMinute)
+    assertEquals(480, vm.dynamicTasks.value.first { it.id == "vm_swap_bath" }.startTimeMinute)
+    assertTrue(vm.pendingImpactDiff.value.any { it.taskId == "vm_swap_bath" && it.newStartMinute == 420 })
+    assertTrue(vm.pendingImpactDiff.value.any { it.taskId == "vm_swap_eat" && it.newStartMinute == 460 })
+
+    vm.commitPendingEdits()
+    pumpUntil { !vm.hasPendingEdits.value && vm.dynamicTasks.value.first { it.id == "vm_swap_bath" }.startTimeMinute == 420 }
+    assertFalse(vm.hasPendingEdits.value)
+    assertEquals(420, vm.dynamicTasks.value.first { it.id == "vm_swap_bath" }.startTimeMinute)
+    assertEquals(460, vm.dynamicTasks.value.first { it.id == "vm_swap_eat" }.startTimeMinute)
+  }
 }
+
 
