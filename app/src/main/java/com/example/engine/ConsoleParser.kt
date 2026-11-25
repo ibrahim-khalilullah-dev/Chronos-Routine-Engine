@@ -481,6 +481,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           startTimeMinute = p1Start,
           originalStartTimeMinute = p1Start,
           durationMinutes = p1Dur,
+          originalDurationMinutes = p1Dur,
           voiceMessage = p1Voice,
           enableDnd = enableDnd,
           dndDelayMinutes = dndDelayMinutes,
@@ -510,6 +511,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           startTimeMinute = p2Start,
           originalStartTimeMinute = p2Start,
           durationMinutes = p2Dur,
+          originalDurationMinutes = p2Dur,
           voiceMessage = p2Voice,
           enableDnd = enableDnd,
           dndDelayMinutes = dndDelayMinutes,
@@ -708,6 +710,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         startTimeMinute = startMinutes,
         originalStartTimeMinute = startMinutes,
         durationMinutes = duration,
+        originalDurationMinutes = duration,
         voiceMessage = customMessage,
         enableDnd = enableDnd,
         dndDelayMinutes = parsedDndDelayMinutes,
@@ -917,7 +920,9 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
           val p2 = pair.firstOrNull { it.fluidTwinPart == 2 && it.id != p1?.id } ?: pair.firstOrNull { it.id != p1?.id }
           if (p1 != null && p2 != null) {
             exportedTwinIds.add(twinId)
-            val pool = p1.fluidTotalPoolMinutes ?: (p1.durationMinutes + p2.durationMinutes)
+            val p1BirthDur = p1.originalDurationMinutes ?: p1.durationMinutes
+            val p2BirthDur = p2.originalDurationMinutes ?: p2.durationMinutes
+            val pool = p1.fluidTotalPoolMinutes ?: (p1BirthDur + p2BirthDur)
             val p1Start = RoutineTask.formatTime24(p1.originalStartTimeMinute ?: p1.startTimeMinute)
             val p2Start = RoutineTask.formatTime24(p2.originalStartTimeMinute ?: p2.startTimeMinute)
             val p1VoiceMsg = p1.voiceMessage.ifBlank { "${p1.title} starting now." }
@@ -927,8 +932,8 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
             val flex = maxOf(p1.toleranceMinutes, p1.customFlexibilityMinutes).coerceIn(0, 30)
             val rest = p1.interTaskBufferMinutes.coerceIn(0, 30)
             val cat = p1.category?.trim()?.lowercase()?.ifBlank { null } ?: "general"
-            val p1Safety = p1.fluidSafetyFloorMinutes.coerceIn(0, p1.durationMinutes)
-            val p2Safety = p2.fluidSafetyFloorMinutes.coerceIn(0, p2.durationMinutes)
+            val p1Safety = p1.fluidSafetyFloorMinutes.coerceIn(0, p1BirthDur)
+            val p2Safety = p2.fluidSafetyFloorMinutes.coerceIn(0, p2BirthDur)
             val p1VoiceStr = if (p1.isVoiceEnabled) "Y" else "N"
             val p2VoiceStr = if (p2.isVoiceEnabled) "Y" else "N"
             val p1VolPct = (p1.voiceVolume.coerceIn(0f, 1f) * 100).toInt()
@@ -937,8 +942,8 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
             val dndDelay = if (p1.enableDnd) p1.dndDelayMinutes.coerceIn(0, 25) else 0
 
             sb.appendLine(
-              "TWIN | $pool | ${p1.title} | $p1Start | ${p1.durationMinutes} | $p1VoiceMsg | " +
-                "${p2.title} | $p2Start | ${p2.durationMinutes} | $p2VoiceMsg | " +
+              "TWIN | $pool | ${p1.title} | $p1Start | $p1BirthDur | $p1VoiceMsg | " +
+                "${p2.title} | $p2Start | $p2BirthDur | $p2VoiceMsg | " +
                 "$dndStr | $daysStr | $flex | $rest | $cat | $p1Safety | $p2Safety | $p1VoiceStr | $p2VoiceStr | $p1VolPct | $p2VolPct | $soundStr | $dndDelay"
             )
             continue
@@ -946,7 +951,7 @@ ANCHOR | 7 | এশার সালাত | 19:45 | 25 | Y | 5 | Y | এশা�
         }
 
         val title = task.title
-        val duration = task.durationMinutes
+        val duration = task.originalDurationMinutes ?: task.durationMinutes
         val timeStr = RoutineTask.formatTime24(task.originalStartTimeMinute ?: task.startTimeMinute)
         val dndStr = if (task.enableDnd) "Y" else "N"
         val daysStr = formatDaysToken(task.selectedDays)

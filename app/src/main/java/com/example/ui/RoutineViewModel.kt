@@ -17,6 +17,7 @@ import com.example.service.AutomationManager
 import com.example.service.RoutineAutomationService
 import com.example.ui.components.FluidTwinSaveRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -106,12 +107,15 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   val pendingDraftTasks: StateFlow<List<RoutineTask>?> = _pendingDraftTasks.asStateFlow()
 
   private val _baselineSnapshotSchedule = MutableStateFlow<ScheduleResult?>(null)
+  private val _baselineDynamicTasksSnapshot = MutableStateFlow<List<RoutineTask>?>(null)
 
   val hasPendingEdits: StateFlow<Boolean> = _pendingDraftTasks
     .map { it != null }
     .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
   private var nextManualPlacementOrder: Long = System.currentTimeMillis()
+  private var uiTickerJob: Job? = null
+  private var lastKnownDay: RoutineDay = RoutineDay.today()
 
   init {
     // Populate permanent task ratings into cache
@@ -119,45 +123,64 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
     for (r in history) {
       com.example.ui.components.taskRatingCache[r.taskId] = r.ratingPct
     }
-    // Clock synchronization ticker for real-time progress bar, day rollover & auto-scroll
-    viewModelScope.launch {
-      var lastKnownDay = RoutineDay.today()
+  }
+
+  fun onUiForegrounded() {
+    refreshPermissions()
+    _currentMinute.value = getCurrentMinuteOfDay()
+    uiTickerJob?.cancel()
+    uiTickerJob = viewModelScope.launch {
       while (isActive) {
-        _currentMinute.value = getCurrentMinuteOfDay()
-        val currentDay = RoutineDay.today()
-        if (currentDay != lastKnownDay) {
-          lastKnownDay = currentDay
-          _activeDay.value = currentDay
-          withContext(Dispatchers.IO) {
-            repository.setActiveDay(currentDay)
-          }
+        checkDayRolloverAndSync()
+        delay(15000L) // Refresh every 15 seconds while UI is foregrounded
+      }
+    }
+  }
 
-          scheduleMutex.withLock {
-            // Reset any expired isPausedTodayOnly tasks
-            val updatedDynamics = _dynamicTasks.value.map {
-              if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
-            }
-            val dynamicsChanged = updatedDynamics != _dynamicTasks.value
-            if (dynamicsChanged) {
-              _dynamicTasks.value = updatedDynamics
-            }
+  fun onUiBackgrounded() {
+    uiTickerJob?.cancel()
+    uiTickerJob = null
+  }
 
-            val updatedAnchors = _anchors.value.map {
-              if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
-            }
-            val anchorsChanged = updatedAnchors != _anchors.value
-            if (anchorsChanged) {
-              _anchors.value = updatedAnchors
-            }
+  override fun onCleared() {
+    uiTickerJob?.cancel()
+    uiTickerJob = null
+    super.onCleared()
+  }
 
-            withContext(Dispatchers.IO) {
-              if (dynamicsChanged) repository.saveDynamicTasks(updatedDynamics)
-              if (anchorsChanged) repository.saveAnchors(updatedAnchors)
-              AutomationManager.rescheduleAllAlarms(getApplication())
-            }
-          }
+  private suspend fun checkDayRolloverAndSync() {
+    _currentMinute.value = getCurrentMinuteOfDay()
+    val currentDay = RoutineDay.today()
+    if (currentDay != lastKnownDay) {
+      lastKnownDay = currentDay
+      _activeDay.value = currentDay
+      withContext(Dispatchers.IO) {
+        repository.setActiveDay(currentDay)
+      }
+
+      scheduleMutex.withLock {
+        // Reset any expired isPausedTodayOnly tasks
+        val updatedDynamics = _dynamicTasks.value.map {
+          if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
         }
-        delay(15000L) // Refresh every 15 seconds
+        val dynamicsChanged = updatedDynamics != _dynamicTasks.value
+        if (dynamicsChanged) {
+          _dynamicTasks.value = updatedDynamics
+        }
+
+        val updatedAnchors = _anchors.value.map {
+          if (it.isPausedTodayOnly) it.copy(isPausedTodayOnly = false) else it
+        }
+        val anchorsChanged = updatedAnchors != _anchors.value
+        if (anchorsChanged) {
+          _anchors.value = updatedAnchors
+        }
+
+        withContext(Dispatchers.IO) {
+          if (dynamicsChanged) repository.saveDynamicTasks(updatedDynamics)
+          if (anchorsChanged) repository.saveAnchors(updatedAnchors)
+          AutomationManager.rescheduleAllAlarms(getApplication())
+        }
       }
     }
   }
@@ -282,17 +305,23 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        if (_baselineSnapshotSchedule.value == null) {
-          _baselineSnapshotSchedule.value = rawScheduleResult.value
-        }
-        val workingTasks = _pendingDraftTasks.value ?: _dynamicTasks.value
         val currentAnchors = _anchors.value
         val day = _activeDay.value
+        val buf = _bufferMinutes.value
+        val baselineDyn = _baselineDynamicTasksSnapshot.value ?: _dynamicTasks.value
+        val existingBaselineSchedule = _baselineSnapshotSchedule.value
+        val workingTasks = _pendingDraftTasks.value ?: _dynamicTasks.value
         nextManualPlacementOrder = maxOf(nextManualPlacementOrder + 1L, System.currentTimeMillis())
         val order = nextManualPlacementOrder
 
-        val (updatedTasks, hitWall) = withContext(Dispatchers.Default) {
-          SchedulerEngine.applyDragReposition(
+        val (baselineSchedule, previewResult) = withContext(Dispatchers.Default) {
+          val resolvedBaseline = existingBaselineSchedule ?: SchedulerEngine.scheduleDay(
+            anchors = currentAnchors,
+            dynamicTasks = baselineDyn.filter { !it.isDeleted },
+            activeDay = day,
+            interTaskBufferMinutes = buf
+          )
+          val (updated, wall) = SchedulerEngine.applyDragReposition(
             allDynamicTasks = workingTasks,
             taskId = taskId,
             targetStartMinute = targetStartMinute,
@@ -300,8 +329,29 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
             anchors = currentAnchors,
             day = day
           )
+          val draftSchedule = SchedulerEngine.scheduleDay(
+            anchors = currentAnchors,
+            dynamicTasks = updated.filter { !it.isDeleted },
+            activeDay = day,
+            interTaskBufferMinutes = buf
+          )
+          val impactDiff = SchedulerEngine.computeScheduleImpactDiff(resolvedBaseline, draftSchedule)
+          resolvedBaseline to Triple(updated, wall, impactDiff)
         }
-        _pendingDraftTasks.value = updatedTasks
+        val (updatedTasks, hitWall, diff) = previewResult
+        if (diff.isEmpty()) {
+          _pendingDraftTasks.value = null
+          _baselineSnapshotSchedule.value = null
+          _baselineDynamicTasksSnapshot.value = null
+        } else {
+          if (_baselineDynamicTasksSnapshot.value == null) {
+            _baselineDynamicTasksSnapshot.value = baselineDyn
+          }
+          if (_baselineSnapshotSchedule.value == null) {
+            _baselineSnapshotSchedule.value = baselineSchedule
+          }
+          _pendingDraftTasks.value = updatedTasks
+        }
         if (hitWall) {
           onAnchorWallHit?.invoke()
         }
@@ -316,30 +366,119 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   ) {
     viewModelScope.launch {
       scheduleMutex.withLock {
-        val currentSchedule = rawScheduleResult.value
-        if (_baselineSnapshotSchedule.value == null) {
-          _baselineSnapshotSchedule.value = currentSchedule
-        }
-        val workingTasks = _pendingDraftTasks.value ?: _dynamicTasks.value
         val currentAnchors = _anchors.value
         val day = _activeDay.value
+        val buf = _bufferMinutes.value
+        val baselineDyn = _baselineDynamicTasksSnapshot.value ?: _dynamicTasks.value
+        val existingBaselineSchedule = _baselineSnapshotSchedule.value
+        val workingTasks = _pendingDraftTasks.value ?: _dynamicTasks.value
         nextManualPlacementOrder = maxOf(nextManualPlacementOrder + 200L, System.currentTimeMillis())
         val baseOrder = nextManualPlacementOrder
 
-        val (updatedTasks, hitWall) = withContext(Dispatchers.Default) {
-          SchedulerEngine.applyVerticalDropReposition(
+        val (baselineSchedule, previewResult) = withContext(Dispatchers.Default) {
+          val resolvedBaseline = existingBaselineSchedule ?: SchedulerEngine.scheduleDay(
+            anchors = currentAnchors,
+            dynamicTasks = baselineDyn.filter { !it.isDeleted },
+            activeDay = day,
+            interTaskBufferMinutes = buf
+          )
+          val workingSchedule = if (_pendingDraftTasks.value == null) {
+            resolvedBaseline
+          } else {
+            SchedulerEngine.scheduleDay(
+              anchors = currentAnchors,
+              dynamicTasks = workingTasks.filter { !it.isDeleted },
+              activeDay = day,
+              interTaskBufferMinutes = buf
+            )
+          }
+          val (updated, wall) = SchedulerEngine.applyVerticalDropReposition(
             allDynamicTasks = workingTasks,
-            scheduledTasks = currentSchedule.scheduledTasks,
+            scheduledTasks = workingSchedule.scheduledTasks,
             taskId = taskId,
             dropTarget = dropTarget,
             baseManualOrder = baseOrder,
             anchors = currentAnchors,
             day = day
           )
+          val draftSchedule = SchedulerEngine.scheduleDay(
+            anchors = currentAnchors,
+            dynamicTasks = updated.filter { !it.isDeleted },
+            activeDay = day,
+            interTaskBufferMinutes = buf
+          )
+          val impactDiff = SchedulerEngine.computeScheduleImpactDiff(resolvedBaseline, draftSchedule)
+          resolvedBaseline to Triple(updated, wall, impactDiff)
         }
-        _pendingDraftTasks.value = updatedTasks
+        val (updatedTasks, hitWall, diff) = previewResult
+        if (diff.isEmpty()) {
+          _pendingDraftTasks.value = null
+          _baselineSnapshotSchedule.value = null
+          _baselineDynamicTasksSnapshot.value = null
+        } else {
+          if (_baselineDynamicTasksSnapshot.value == null) {
+            _baselineDynamicTasksSnapshot.value = baselineDyn
+          }
+          if (_baselineSnapshotSchedule.value == null) {
+            _baselineSnapshotSchedule.value = baselineSchedule
+          }
+          _pendingDraftTasks.value = updatedTasks
+        }
         if (hitWall) {
           onAnchorWallHit?.invoke()
+        }
+      }
+    }
+  }
+
+  fun previewCompactAndRescueSchedule(onNoChanges: (() -> Unit)? = null) {
+    viewModelScope.launch {
+      scheduleMutex.withLock {
+        val currentAnchors = _anchors.value
+        val day = _activeDay.value
+        val buf = _bufferMinutes.value
+        val baselineDyn = _baselineDynamicTasksSnapshot.value ?: _dynamicTasks.value
+        val existingBaselineSchedule = _baselineSnapshotSchedule.value
+        val workingTasks = _pendingDraftTasks.value ?: _dynamicTasks.value
+        nextManualPlacementOrder = maxOf(nextManualPlacementOrder + 100L, System.currentTimeMillis())
+        val baseOrder = nextManualPlacementOrder
+
+        val (baselineSchedule, outcome, diff) = withContext(Dispatchers.Default) {
+          val resolvedBaseline = existingBaselineSchedule ?: SchedulerEngine.scheduleDay(
+            anchors = currentAnchors,
+            dynamicTasks = baselineDyn.filter { !it.isDeleted },
+            activeDay = day,
+            interTaskBufferMinutes = buf
+          )
+          val comp = SchedulerEngine.compactAndRescueSchedule(
+            anchors = currentAnchors,
+            allDynamicTasks = workingTasks,
+            activeDay = day,
+            interTaskBufferMinutes = buf,
+            baseManualOrder = baseOrder
+          )
+          val impactDiff = SchedulerEngine.computeScheduleImpactDiff(resolvedBaseline, comp.scheduleResult)
+          Triple(resolvedBaseline, comp, impactDiff)
+        }
+
+        if (outcome.movedCount == 0 && outcome.rescuedCount == 0 && outcome.flexedCount == 0) {
+          onNoChanges?.invoke()
+          return@withLock
+        }
+
+        if (diff.isEmpty()) {
+          _pendingDraftTasks.value = null
+          _baselineSnapshotSchedule.value = null
+          _baselineDynamicTasksSnapshot.value = null
+          onNoChanges?.invoke()
+        } else {
+          if (_baselineDynamicTasksSnapshot.value == null) {
+            _baselineDynamicTasksSnapshot.value = baselineDyn
+          }
+          if (_baselineSnapshotSchedule.value == null) {
+            _baselineSnapshotSchedule.value = baselineSchedule
+          }
+          _pendingDraftTasks.value = outcome.updatedDynamicTasks
         }
       }
     }
@@ -353,6 +492,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         _dynamicTasks.value = draft
         _pendingDraftTasks.value = null
         _baselineSnapshotSchedule.value = null
+        _baselineDynamicTasksSnapshot.value = null
         withContext(Dispatchers.IO) {
           repository.saveDynamicTasks(draft)
           AutomationManager.rescheduleAllAlarms(getApplication())
@@ -364,6 +504,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun discardPendingEdits() {
     _pendingDraftTasks.value = null
     _baselineSnapshotSchedule.value = null
+    _baselineDynamicTasksSnapshot.value = null
   }
 
   fun selectTab(tab: NavigationTab) {
@@ -376,6 +517,15 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   fun setActiveDay(day: RoutineDay) {
     _activeDay.value = day
     repository.setActiveDay(day)
+    val baseDyn = _baselineDynamicTasksSnapshot.value
+    if (_pendingDraftTasks.value != null && baseDyn != null) {
+      _baselineSnapshotSchedule.value = SchedulerEngine.scheduleDay(
+        anchors = _anchors.value,
+        dynamicTasks = baseDyn.filter { !it.isDeleted },
+        activeDay = day,
+        interTaskBufferMinutes = _bufferMinutes.value
+      )
+    }
   }
 
   fun setSortMode(mode: TimelineSortMode) {
@@ -384,6 +534,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
   }
 
   fun recordTaskRating(task: RoutineTask, ratingPct: Int) {
+    com.example.ui.components.taskRatingCache[task.id] = ratingPct
     val normalizedCategory = when {
       task.type == TaskType.ANCHOR_SLEEP || task.slotNumber == 1 -> "sleep"
       task.type == TaskType.ANCHOR_ELASTIC || task.slotNumber == 5 -> "anchor_elastic"
@@ -398,9 +549,10 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       ratingPct = ratingPct,
       timestamp = System.currentTimeMillis()
     )
-    repository.recordTaskRating(record)
-    _taskRatingHistory.value = repository.getTaskRatingHistory()
-    com.example.ui.components.taskRatingCache[task.id] = ratingPct
+    viewModelScope.launch(Dispatchers.IO) {
+      repository.recordTaskRating(record)
+      _taskRatingHistory.value = repository.getTaskRatingHistory()
+    }
   }
 
   fun getTaskRatingHistory(): List<TaskRatingRecord> = repository.getTaskRatingHistory()
@@ -734,9 +886,18 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       scheduleMutex.withLock {
         _pendingDraftTasks.value = null
         _baselineSnapshotSchedule.value = null
+        _baselineDynamicTasksSnapshot.value = null
         val birthStart = task.originalStartTimeMinute ?: task.startTimeMinute
+        val birthDur = task.originalDurationMinutes ?: task.durationMinutes
         val list = _dynamicTasks.value.filter { it.id != task.id && it.parentTaskId != task.id }.toMutableList()
-        list.add(task.copy(originalStartTimeMinute = birthStart, isDeleted = false, deletedTimestamp = null))
+        list.add(
+          task.copy(
+            originalStartTimeMinute = birthStart,
+            originalDurationMinutes = birthDur,
+            isDeleted = false,
+            deletedTimestamp = null
+          )
+        )
         _dynamicTasks.value = list
         withContext(Dispatchers.IO) {
           repository.saveDynamicTasks(list)
@@ -754,6 +915,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       scheduleMutex.withLock {
         _pendingDraftTasks.value = null
         _baselineSnapshotSchedule.value = null
+        _baselineDynamicTasksSnapshot.value = null
         val twinId = request.existingTwinId?.ifBlank { null } ?: "fluid_${UUID.randomUUID().toString().take(8)}"
         val actualP1Title = request.part1Title.ifBlank { "${request.title} (Part 1)" }
         val actualP2Title = request.part2Title.ifBlank { "${request.title} (Part 2)" }
@@ -771,6 +933,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           startTimeMinute = request.part1StartMinute,
           originalStartTimeMinute = request.part1OriginalStartMinute ?: request.part1StartMinute,
           durationMinutes = p1Dur,
+          originalDurationMinutes = p1Dur,
           voiceMessage = request.part1VoiceMessage.ifBlank { "$actualP1Title starting now." },
           enableDnd = request.enableDnd,
           dndDelayMinutes = clampedDndDelay,
@@ -803,6 +966,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
           startTimeMinute = request.part2StartMinute,
           originalStartTimeMinute = request.part2OriginalStartMinute ?: request.part2StartMinute,
           durationMinutes = p2Dur,
+          originalDurationMinutes = p2Dur,
           voiceMessage = request.part2VoiceMessage.ifBlank { "$actualP2Title starting now." },
           enableDnd = request.enableDnd,
           dndDelayMinutes = clampedDndDelay,
@@ -856,6 +1020,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       scheduleMutex.withLock {
         _pendingDraftTasks.value = null
         _baselineSnapshotSchedule.value = null
+        _baselineDynamicTasksSnapshot.value = null
         val (updated, deleted) = withContext(Dispatchers.IO) {
           val u = repository.softDeleteTask(taskId)
           val d = repository.getDeletedTasks()
@@ -881,6 +1046,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       scheduleMutex.withLock {
         _pendingDraftTasks.value = null
         _baselineSnapshotSchedule.value = null
+        _baselineDynamicTasksSnapshot.value = null
         val twins = _dynamicTasks.value.filter { it.fluidTwinId == twinId }
         twins.forEach { task ->
           if (_activeAutomationStateIsTask(task.id)) {
@@ -909,13 +1075,17 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       scheduleMutex.withLock {
         _pendingDraftTasks.value = null
         _baselineSnapshotSchedule.value = null
+        _baselineDynamicTasksSnapshot.value = null
         val taskToDelete = _dynamicTasks.value.firstOrNull { it.id == taskToDeleteId && !it.isDeleted }
         val partnerTask = _dynamicTasks.value.firstOrNull { it.id == partnerTaskId && !it.isDeleted }
         if (taskToDelete != null && partnerTask != null) {
-          val absorbedDuration = (partnerTask.durationMinutes + taskToDelete.durationMinutes)
-            .coerceAtLeast(partnerTask.fluidTotalPoolMinutes ?: (partnerTask.durationMinutes + taskToDelete.durationMinutes))
+          val partnerBirthDur = partnerTask.originalDurationMinutes ?: partnerTask.durationMinutes
+          val deleteBirthDur = taskToDelete.originalDurationMinutes ?: taskToDelete.durationMinutes
+          val absorbedDuration = (partnerBirthDur + deleteBirthDur)
+            .coerceAtLeast(partnerTask.fluidTotalPoolMinutes ?: (partnerBirthDur + deleteBirthDur))
           val updatedPartner = partnerTask.copy(
             durationMinutes = absorbedDuration,
+            originalDurationMinutes = absorbedDuration,
             isFluidTwin = false,
             fluidTwinId = null,
             fluidTwinPart = null,
@@ -966,6 +1136,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       scheduleMutex.withLock {
         _pendingDraftTasks.value = null
         _baselineSnapshotSchedule.value = null
+        _baselineDynamicTasksSnapshot.value = null
         val (updated, deleted) = withContext(Dispatchers.IO) {
           var u = repository.restoreTask(taskId)
           val restoredTask = u.firstOrNull { it.id == taskId }
@@ -1045,6 +1216,7 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
       scheduleMutex.withLock {
         _pendingDraftTasks.value = null
         _baselineSnapshotSchedule.value = null
+        _baselineDynamicTasksSnapshot.value = null
         val syncedSleep = when {
           backupSleepMinutes != null -> backupSleepMinutes.coerceIn(240, 720)
           parsedAnchors.any { it.slotNumber == 1 } ->
@@ -1076,7 +1248,10 @@ class RoutineViewModel(application: Application) : AndroidViewModel(application)
         }
 
         val normalizedNewTasks = newTasks.map {
-          it.copy(originalStartTimeMinute = it.originalStartTimeMinute ?: it.startTimeMinute)
+          it.copy(
+            originalStartTimeMinute = it.originalStartTimeMinute ?: it.startTimeMinute,
+            originalDurationMinutes = it.originalDurationMinutes ?: it.durationMinutes
+          )
         }
         val oldTasks = if (replaceExisting) _dynamicTasks.value else emptyList()
         val list = if (replaceExisting) {

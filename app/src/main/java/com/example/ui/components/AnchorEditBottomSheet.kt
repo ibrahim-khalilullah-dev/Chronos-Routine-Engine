@@ -1,12 +1,19 @@
 package com.example.ui.components
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.view.KeyEvent
+import android.view.Window
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -72,6 +79,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -89,6 +97,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -97,8 +106,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.ViewCompat
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
+import com.example.service.AutomationManager
+import com.example.service.RoutineAutomationService
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -165,6 +178,7 @@ fun AnchorEditBottomSheet(
     customRingtoneTitle: String?
   ) -> Unit)? = null,
   onSave: ((RoutineTask) -> Unit)? = null,
+  activeVoicePresetId: String = "natural_female",
   modifier: Modifier = Modifier
 ) {
   val slotIdx = anchor.slotIndex
@@ -297,22 +311,44 @@ fun AnchorEditBottomSheet(
     }
   }
 
-  // Lazy TTS Engine Setup (uses applicationContext; only initialized when voice is enabled or preview tapped)
+  // Lazy TTS Engine Setup (uses applicationContext; only initialized when preview explicitly tapped)
   val appContext = context.applicationContext ?: context
+  val anchorAudioManager = remember(appContext) {
+    appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+  }
+  var anchorAudioFocusRequest by remember { mutableStateOf<AudioFocusRequest?>(null) }
   var ttsInstance by remember { mutableStateOf<TextToSpeech?>(null) }
   var isTtsReady by remember { mutableStateOf(false) }
-  var ttsRequested by remember { mutableStateOf(isVoiceEnabled) }
+  var isSpeakingVoicePreview by remember { mutableStateOf(false) }
+  var activeVoiceUtteranceId by remember { mutableStateOf<String?>(null) }
+  var ttsRequested by remember { mutableStateOf(false) }
   var pendingVoicePreview by remember { mutableStateOf<Triple<String, Float, String>?>(null) }
 
-  LaunchedEffect(isVoiceEnabled) {
-    if (isVoiceEnabled) {
-      ttsRequested = true
+  val stopAnchorPreviewPlayback: () -> Unit = {
+    try {
+      ttsInstance?.stop()
+    } catch (_: Exception) {}
+    AutomationManager.abandonTransientAlarmAudioFocus(anchorAudioManager, anchorAudioFocusRequest)
+    anchorAudioFocusRequest = null
+    isSpeakingVoicePreview = false
+    activeVoiceUtteranceId = null
+  }
+
+  DisposableEffect(isSpeakingVoicePreview) {
+    if (isSpeakingVoicePreview) {
+      AutomationManager.registerActivePreviewStop(stopAnchorPreviewPlayback)
+    }
+    onDispose {
+      AutomationManager.clearActivePreviewStop(stopAnchorPreviewPlayback)
     }
   }
 
   DisposableEffect(appContext, ttsRequested) {
     if (!ttsRequested) {
       onDispose {
+        AutomationManager.clearActivePreviewStop(stopAnchorPreviewPlayback)
+        AutomationManager.abandonTransientAlarmAudioFocus(anchorAudioManager, anchorAudioFocusRequest)
+        anchorAudioFocusRequest = null
         try {
           tonePreviewPlayer?.stop()
         } catch (_: Exception) {}
@@ -320,6 +356,36 @@ fun AnchorEditBottomSheet(
     } else {
       var instance: TextToSpeech? = null
       var disposed = false
+      val listener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) {
+          isSpeakingVoicePreview = true
+          activeVoiceUtteranceId = utteranceId
+        }
+
+        override fun onDone(utteranceId: String?) {
+          if (activeVoiceUtteranceId == null || activeVoiceUtteranceId == utteranceId) {
+            isSpeakingVoicePreview = false
+            activeVoiceUtteranceId = null
+            AutomationManager.abandonTransientAlarmAudioFocus(anchorAudioManager, anchorAudioFocusRequest)
+            anchorAudioFocusRequest = null
+          }
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String?) {
+          isSpeakingVoicePreview = false
+          activeVoiceUtteranceId = null
+          AutomationManager.abandonTransientAlarmAudioFocus(anchorAudioManager, anchorAudioFocusRequest)
+          anchorAudioFocusRequest = null
+        }
+
+        override fun onError(utteranceId: String?, errorCode: Int) {
+          isSpeakingVoicePreview = false
+          activeVoiceUtteranceId = null
+          AutomationManager.abandonTransientAlarmAudioFocus(anchorAudioManager, anchorAudioFocusRequest)
+          anchorAudioFocusRequest = null
+        }
+      }
       instance = TextToSpeech(appContext) { status ->
         if (disposed) {
           try {
@@ -329,26 +395,34 @@ fun AnchorEditBottomSheet(
         }
         if (status == TextToSpeech.SUCCESS) {
           isTtsReady = true
-          try {
-            instance?.language = Locale.getDefault()
-          } catch (_: Exception) {}
+          AutomationManager.configureAlarmTtsAttributes(instance)
+          AutomationManager.applyTtsLanguage(instance, "", activeVoicePresetId)
+          instance?.setOnUtteranceProgressListener(listener)
           pendingVoicePreview?.let { (msg, vol, uttId) ->
             pendingVoicePreview = null
-            val params = Bundle().apply {
-              putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0f, 1f))
-            }
+            AutomationManager.configureAlarmTtsAttributes(instance)
+            AutomationManager.applyTtsLanguage(instance, msg, activeVoicePresetId)
+            AutomationManager.abandonTransientAlarmAudioFocus(anchorAudioManager, anchorAudioFocusRequest)
+            anchorAudioFocusRequest = AutomationManager.requestTransientAlarmAudioFocus(anchorAudioManager)
+            val effectiveVol = vol.coerceIn(0f, 1f)
             try {
-              instance?.speak(msg, TextToSpeech.QUEUE_FLUSH, params, uttId)
+              instance?.speak(msg, TextToSpeech.QUEUE_FLUSH, AutomationManager.createTtsVolumeParams(effectiveVol), uttId)
             } catch (_: Exception) {}
           }
         }
       }
+      instance?.setOnUtteranceProgressListener(listener)
       ttsInstance = instance
       onDispose {
         disposed = true
         isTtsReady = false
+        isSpeakingVoicePreview = false
+        activeVoiceUtteranceId = null
         ttsInstance = null
         pendingVoicePreview = null
+        AutomationManager.clearActivePreviewStop(stopAnchorPreviewPlayback)
+        AutomationManager.abandonTransientAlarmAudioFocus(anchorAudioManager, anchorAudioFocusRequest)
+        anchorAudioFocusRequest = null
         try {
           tonePreviewPlayer?.stop()
           instance?.stop()
@@ -361,8 +435,12 @@ fun AnchorEditBottomSheet(
   val speakAnchorVoicePreview: (String, Float, String) -> Unit = { textToSpeak, vol, uttId ->
     val activeTts = ttsInstance
     if (activeTts != null && isTtsReady) {
-      val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0f, 1f)) }
-      activeTts.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, params, uttId)
+      AutomationManager.configureAlarmTtsAttributes(activeTts)
+      AutomationManager.applyTtsLanguage(activeTts, textToSpeak, activeVoicePresetId)
+      AutomationManager.abandonTransientAlarmAudioFocus(anchorAudioManager, anchorAudioFocusRequest)
+      anchorAudioFocusRequest = AutomationManager.requestTransientAlarmAudioFocus(anchorAudioManager)
+      val effectiveVol = vol.coerceIn(0f, 1f)
+      activeTts.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, AutomationManager.createTtsVolumeParams(effectiveVol), uttId)
     } else {
       pendingVoicePreview = Triple(textToSpeak, vol, uttId)
       ttsRequested = true
@@ -517,6 +595,78 @@ fun AnchorEditBottomSheet(
     shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     modifier = modifier.testTag("anchor_edit_bottom_sheet")
   ) {
+    val sheetView = LocalView.current
+    val activeAutomation by RoutineAutomationService.serviceState.collectAsState()
+    val shouldInterceptHardwareVolumeKeys = isSpeakingVoicePreview || activeAutomation.isSpeaking
+
+    DisposableEffect(sheetView, shouldInterceptHardwareVolumeKeys) {
+      if (!shouldInterceptHardwareVolumeKeys) {
+        onDispose {}
+      } else {
+        val keyListener = ViewCompat.OnUnhandledKeyEventListenerCompat { _, event ->
+          if (event.action == KeyEvent.ACTION_DOWN &&
+            (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+          ) {
+            val stoppedService = RoutineAutomationService.stopVoiceIfSpeaking(appContext)
+            val stoppedCoordinator = AutomationManager.stopActivePreviewVoiceIfPlaying()
+            if (isSpeakingVoicePreview) {
+              stopAnchorPreviewPlayback()
+            }
+            stoppedService || stoppedCoordinator || isSpeakingVoicePreview
+          } else {
+            false
+          }
+        }
+        ViewCompat.addOnUnhandledKeyEventListener(sheetView, keyListener)
+
+        val dialogWindow = (sheetView.parent as? DialogWindowProvider)?.window
+        val originalCallback: Window.Callback? = dialogWindow?.callback
+        if (dialogWindow != null && originalCallback != null) {
+          dialogWindow.callback = object : Window.Callback by originalCallback {
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+              if (event.action == KeyEvent.ACTION_DOWN &&
+                (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+              ) {
+                val stoppedService = RoutineAutomationService.stopVoiceIfSpeaking(appContext)
+                val stoppedCoordinator = AutomationManager.stopActivePreviewVoiceIfPlaying()
+                if (isSpeakingVoicePreview) {
+                  stopAnchorPreviewPlayback()
+                  return true
+                }
+                if (stoppedService || stoppedCoordinator) {
+                  return true
+                }
+              }
+              return originalCallback.dispatchKeyEvent(event)
+            }
+
+            override fun onProvideKeyboardShortcuts(
+              data: MutableList<android.view.KeyboardShortcutGroup>?,
+              menu: android.view.Menu?,
+              deviceId: Int
+            ) {
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                originalCallback.onProvideKeyboardShortcuts(data, menu, deviceId)
+              }
+            }
+
+            override fun onPointerCaptureChanged(hasCapture: Boolean) {
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                originalCallback.onPointerCaptureChanged(hasCapture)
+              }
+            }
+          }
+        }
+
+        onDispose {
+          ViewCompat.removeOnUnhandledKeyEventListener(sheetView, keyListener)
+          if (dialogWindow != null && originalCallback != null) {
+            dialogWindow.callback = originalCallback
+          }
+        }
+      }
+    }
+
     @OptIn(ExperimentalFoundationApi::class)
     CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
       Column(
@@ -989,17 +1139,21 @@ fun AnchorEditBottomSheet(
                   trailingIcon = {
                     IconButton(
                       onClick = {
-                        val textToSpeak = fridayVoiceMessage.ifBlank {
-                          "${fridayTitle.ifBlank { "Friday anchor" }} starting now."
+                        if (isSpeakingVoicePreview && activeVoiceUtteranceId == "friday_tts_preview") {
+                          stopAnchorPreviewPlayback()
+                        } else {
+                          val textToSpeak = fridayVoiceMessage.ifBlank {
+                            "${fridayTitle.ifBlank { "Friday anchor" }} starting now."
+                          }
+                          speakAnchorVoicePreview(textToSpeak, voiceVolume, "friday_tts_preview")
                         }
-                        speakAnchorVoicePreview(textToSpeak, voiceVolume, "friday_tts_preview")
                       },
                       modifier = Modifier.testTag("test_friday_voice_button")
                     ) {
                       Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Test Friday Voice",
-                        tint = Color(0xFF6EE7B7)
+                        imageVector = if (isSpeakingVoicePreview && activeVoiceUtteranceId == "friday_tts_preview") Icons.Default.Stop else Icons.Default.PlayArrow,
+                        contentDescription = if (isSpeakingVoicePreview && activeVoiceUtteranceId == "friday_tts_preview") "Stop Friday Voice" else "Test Friday Voice",
+                        tint = if (isSpeakingVoicePreview && activeVoiceUtteranceId == "friday_tts_preview") Color(0xFFEF4444) else Color(0xFF6EE7B7)
                       )
                     }
                   },
@@ -1019,7 +1173,9 @@ fun AnchorEditBottomSheet(
 
                 // Volume Slider
                 Row(
-                  modifier = Modifier.fillMaxWidth(),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("anchor_friday_voice_slider"),
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   Icon(
@@ -1583,17 +1739,21 @@ fun AnchorEditBottomSheet(
                   trailingIcon = {
                     IconButton(
                       onClick = {
-                        val textToSpeak = voiceMessage.ifBlank {
-                          "${title.ifBlank { "Anchor slot $slotIdx" }} starting now."
+                        if (isSpeakingVoicePreview && activeVoiceUtteranceId == "anchor_voice_preview") {
+                          stopAnchorPreviewPlayback()
+                        } else {
+                          val textToSpeak = voiceMessage.ifBlank {
+                            "${title.ifBlank { "Anchor slot $slotIdx" }} starting now."
+                          }
+                          speakAnchorVoicePreview(textToSpeak, voiceVolume, "anchor_voice_preview")
                         }
-                        speakAnchorVoicePreview(textToSpeak, voiceVolume, "anchor_voice_preview")
                       },
                       modifier = Modifier.testTag("preview_voice_tts_button")
                     ) {
                       Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Preview voice message",
-                        tint = accentLight
+                        imageVector = if (isSpeakingVoicePreview && activeVoiceUtteranceId == "anchor_voice_preview") Icons.Default.Stop else Icons.Default.PlayArrow,
+                        contentDescription = if (isSpeakingVoicePreview && activeVoiceUtteranceId == "anchor_voice_preview") "Stop voice preview" else "Preview voice message",
+                        tint = if (isSpeakingVoicePreview && activeVoiceUtteranceId == "anchor_voice_preview") Color(0xFFEF4444) else accentLight
                       )
                     }
                   },
@@ -1613,7 +1773,9 @@ fun AnchorEditBottomSheet(
 
                 // Volume Slider
                 Row(
-                  modifier = Modifier.fillMaxWidth(),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("anchor_regular_voice_slider"),
                   verticalAlignment = Alignment.CenterVertically
                 ) {
                   Icon(

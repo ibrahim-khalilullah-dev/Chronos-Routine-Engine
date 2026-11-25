@@ -1185,6 +1185,322 @@ class ExampleRobolectricTest {
     assertEquals(420, vm.dynamicTasks.value.first { it.id == "vm_swap_bath" }.startTimeMinute)
     assertEquals(460, vm.dynamicTasks.value.first { it.id == "vm_swap_eat" }.startTimeMinute)
   }
+
+  @Test
+  fun `viewModel auto-dismisses pending edits on baseline return, syncs setActiveDay baseline, and runs compaction rescue`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val repo = RoutineRepository(app)
+    repo.saveAnchors(SchedulerEngine.createDefaultAnchors(360))
+    // Gap 3-4: 830..990 (Monday); fill other gaps on Monday to test compaction rescue while keeping t_base simple
+    val tBase = RoutineTask(
+      id = "vm_base_return",
+      title = "Morning Deep",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420,
+      originalStartTimeMinute = 420,
+      durationMinutes = 30,
+      selectedDays = RoutineDay.allDays()
+    )
+    val n1 = RoutineTask(
+      id = "vm_frag_1",
+      title = "Frag 1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 860,
+      originalStartTimeMinute = 860,
+      durationMinutes = 30,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val n2 = RoutineTask(
+      id = "vm_frag_2",
+      title = "Frag 2",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 920,
+      originalStartTimeMinute = 920,
+      durationMinutes = 30,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    repo.saveDynamicTasks(listOf(tBase, n1, n2))
+
+    fun pumpUntil(maxWaitMs: Long = 2500L, predicate: () -> Boolean) {
+      val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+      val deadline = System.currentTimeMillis() + maxWaitMs
+      while (!predicate() && System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (!predicate()) Thread.sleep(20)
+      }
+      mainLooper.idle()
+    }
+
+    val vm = com.example.ui.RoutineViewModel(app)
+    vm.setActiveDay(RoutineDay.MONDAY)
+    pumpUntil { vm.dynamicTasks.value.size == 3 && vm.activeDay.value == RoutineDay.MONDAY }
+
+    // 1. Move tBase away from 420 -> pending edits appear
+    vm.previewDragTaskMove(taskId = "vm_base_return", targetStartMinute = 480)
+    pumpUntil { vm.hasPendingEdits.value }
+    assertTrue(vm.hasPendingEdits.value)
+
+    // Move tBase back to 420 -> diff is empty -> auto-dismisses pending edits cleanly!
+    vm.previewDragTaskMove(taskId = "vm_base_return", targetStartMinute = 420)
+    pumpUntil { !vm.hasPendingEdits.value && vm.pendingImpactDiff.value.isEmpty() }
+    assertFalse("Returning to baseline must auto-dismiss pending edits", vm.hasPendingEdits.value)
+    assertTrue(vm.pendingImpactDiff.value.isEmpty())
+
+    // 2. Stage pending edit on Monday, switch to Tuesday -> baseline updates cleanly and remains consistent
+    vm.previewDragTaskMove(taskId = "vm_base_return", targetStartMinute = 480)
+    pumpUntil { vm.hasPendingEdits.value }
+    vm.setActiveDay(RoutineDay.TUESDAY)
+    pumpUntil { vm.activeDay.value == RoutineDay.TUESDAY && vm.scheduleResult.value.scheduledTasks.any { it.id == "vm_base_return" && it.startTimeMinute == 480 } }
+    assertTrue(vm.hasPendingEdits.value)
+    vm.discardPendingEdits()
+    pumpUntil { !vm.hasPendingEdits.value }
+
+    // 3. Switch back to Monday and run compaction preview -> detects fragmented n1/n2 moves as pending edits
+    vm.setActiveDay(RoutineDay.MONDAY)
+    pumpUntil { vm.activeDay.value == RoutineDay.MONDAY }
+    var noChangesCalled = false
+    vm.previewCompactAndRescueSchedule(onNoChanges = { noChangesCalled = true })
+    pumpUntil { vm.hasPendingEdits.value && vm.pendingImpactDiff.value.isNotEmpty() }
+    assertFalse(noChangesCalled)
+    assertTrue(vm.pendingImpactDiff.value.any { it.taskId == "vm_frag_1" && it.newStartMinute == 830 })
+
+    // Running compaction again when already compacted calls onNoChanges
+    vm.commitPendingEdits()
+    pumpUntil { !vm.hasPendingEdits.value }
+    // Move tBase to start of Gap 2-3 (335) so everything is optimal, or verify optimal no-op after compacting Gap 2-3 too
+    vm.previewCompactAndRescueSchedule(onNoChanges = { noChangesCalled = true })
+    pumpUntil { vm.hasPendingEdits.value || noChangesCalled }
+    if (vm.hasPendingEdits.value) {
+      vm.commitPendingEdits()
+      pumpUntil { !vm.hasPendingEdits.value }
+      vm.previewCompactAndRescueSchedule(onNoChanges = { noChangesCalled = true })
+      pumpUntil { noChangesCalled }
+    }
+    assertTrue("Already optimal schedule must invoke onNoChanges", noChangesCalled)
+  }
+
+  @Test
+  fun `repository persists and restores originalDurationMinutes across storage and vault json`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val repo = RoutineRepository(app)
+
+    val flexedTask = RoutineTask(
+      id = "repo_birth_1",
+      title = "Elastic Coding",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 830,
+      originalStartTimeMinute = 420,
+      durationMinutes = 45,
+      originalDurationMinutes = 60,
+      customFlexibilityMinutes = 15,
+      toleranceMinutes = 15,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val unflexedTask = RoutineTask(
+      id = "repo_birth_2",
+      title = "Fixed Brief",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 900,
+      originalStartTimeMinute = 900,
+      durationMinutes = 30,
+      originalDurationMinutes = null,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    repo.saveDynamicTasks(listOf(flexedTask, unflexedTask))
+    val restored = repo.getDynamicTasks()
+    assertEquals(2, restored.size)
+    val r1 = restored.first { it.id == "repo_birth_1" }
+    val r2 = restored.first { it.id == "repo_birth_2" }
+    assertEquals(45, r1.durationMinutes)
+    assertEquals(60, r1.originalDurationMinutes)
+    assertEquals(420, r1.originalStartTimeMinute)
+    assertEquals(30, r2.durationMinutes)
+    assertEquals(null, r2.originalDurationMinutes)
+  }
+
+  @Test
+  fun `repository scrubs legacy unified voice volume pref and vault key on init while preserving per-task voiceVolume`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val seedRepo = RoutineRepository(app)
+
+    val task = RoutineTask(
+      id = "voice_mode_task_1",
+      title = "Evening Brief",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1140,
+      durationMinutes = 30,
+      voiceVolume = 0.42f,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    seedRepo.saveDynamicTasks(listOf(task))
+
+    // Wait for initial vault write, then inject legacy v1.4 pref & vault JSON field
+    val vaultFile = java.io.File(app.getExternalFilesDir(null), "ChronosBackup/chronos_vault.json")
+    val initialDeadline = System.currentTimeMillis() + 3000L
+    while (System.currentTimeMillis() < initialDeadline && !vaultFile.exists()) {
+      Thread.sleep(50)
+    }
+    assertTrue("Initial vault file should exist", vaultFile.exists())
+    val legacyVaultJson = org.json.JSONObject(vaultFile.readText()).apply {
+      put("useSameVoiceVolumeForAll", true)
+    }.toString(2)
+    vaultFile.writeText(legacyVaultJson)
+
+    val prefs = app.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
+    prefs.edit().putBoolean("key_use_same_voice_volume_for_all", true).commit()
+    assertTrue(prefs.contains("key_use_same_voice_volume_for_all"))
+
+    // Re-initializing RoutineRepository must scrub the legacy key from prefs and rewrite vault without it
+    val upgradedRepo = RoutineRepository(app)
+    assertFalse("Legacy pref key must be scrubbed on init", prefs.contains("key_use_same_voice_volume_for_all"))
+
+    val rewriteDeadline = System.currentTimeMillis() + 3000L
+    while (System.currentTimeMillis() < rewriteDeadline && vaultFile.readText().contains("useSameVoiceVolumeForAll")) {
+      Thread.sleep(50)
+    }
+    assertFalse("Rewritten vault must not contain useSameVoiceVolumeForAll", vaultFile.readText().contains("useSameVoiceVolumeForAll"))
+
+    // Verify per-task voiceVolume remained completely intact
+    val preservedTask = upgradedRepo.getDynamicTasks().first { it.id == "voice_mode_task_1" }
+    assertEquals(0.42f, preservedTask.voiceVolume, 0.001f)
+  }
+
+  @Test
+  fun `automationManager routes TTS params to STREAM_ALARM with per-task voiceVolume and stops active preview`() {
+    val params = AutomationManager.createTtsVolumeParams(0.65f)
+    assertEquals(
+      android.media.AudioManager.STREAM_ALARM,
+      params.getInt(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_STREAM, -1)
+    )
+    assertEquals(0.65f, params.getFloat(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_VOLUME), 0.001f)
+
+    val clampedHigh = AutomationManager.createTtsVolumeParams(2.5f)
+    assertEquals(1.0f, clampedHigh.getFloat(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_VOLUME), 0.001f)
+    val clampedLow = AutomationManager.createTtsVolumeParams(-0.3f)
+    assertEquals(0.0f, clampedLow.getFloat(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_VOLUME), 0.001f)
+
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val task = RoutineTask(
+      id = "alarm_vol_task",
+      title = "Alarm Stream Test",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 600,
+      durationMinutes = 30,
+      voiceVolume = 0.35f,
+      selectedDays = RoutineDay.allDays()
+    )
+
+    AutomationManager.startAutomationService(app, task)
+    val serviceIntent = org.robolectric.Shadows.shadowOf(app).nextStartedService
+    assertNotNull(serviceIntent)
+    assertEquals(0.35f, serviceIntent.getFloatExtra(AutomationManager.EXTRA_VOICE_VOLUME, -1f), 0.001f)
+
+    var previewStopped = false
+    val stopHandler = { previewStopped = true }
+    AutomationManager.registerActivePreviewStop(stopHandler)
+    assertTrue(AutomationManager.stopActivePreviewVoiceIfPlaying())
+    assertTrue(previewStopped)
+    // Cleared after stopping
+    assertFalse(AutomationManager.stopActivePreviewVoiceIfPlaying())
+  }
+
+  @Test
+  fun `routineAutomationService stops only voice on volume change or screen off, keeps DND and running intact, and registers zero idle receivers`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val controller = org.robolectric.Robolectric.buildService(com.example.service.RoutineAutomationService::class.java).create()
+    val service = controller.get()
+
+    // 1. Voice disabled -> ZERO hardware receivers registered
+    val silentIntent = android.content.Intent(app, com.example.service.RoutineAutomationService::class.java).apply {
+      putExtra(AutomationManager.EXTRA_TASK_ID, "silent_task_1")
+      putExtra(AutomationManager.EXTRA_TASK_TITLE, "Silent Work")
+      putExtra(AutomationManager.EXTRA_IS_VOICE_ENABLED, false)
+      putExtra(AutomationManager.EXTRA_IS_SOUND_ALERT_ENABLED, false)
+      putExtra(AutomationManager.EXTRA_ENABLE_HAPTIC, false)
+    }
+    service.onStartCommand(silentIntent, 0, 1)
+    assertFalse("Zero hardware stop listeners may register when voice is disabled", service.isHardwareStopRegisteredForTesting())
+    assertFalse(com.example.service.RoutineAutomationService.serviceState.value.isSpeaking)
+    assertTrue(com.example.service.RoutineAutomationService.serviceState.value.isRunning)
+
+    // 2. Voice enabled + active DND -> listeners registered; equal-volume broadcast ignored; changed-volume stops ONLY voice
+    val voiceIntent = android.content.Intent(app, com.example.service.RoutineAutomationService::class.java).apply {
+      putExtra(AutomationManager.EXTRA_TASK_ID, "voice_task_1")
+      putExtra(AutomationManager.EXTRA_TASK_TITLE, "Morning Brief")
+      putExtra(AutomationManager.EXTRA_VOICE_MESSAGE, "Good morning")
+      putExtra(AutomationManager.EXTRA_IS_VOICE_ENABLED, true)
+      putExtra(AutomationManager.EXTRA_IS_SOUND_ALERT_ENABLED, false)
+      putExtra(AutomationManager.EXTRA_ENABLE_HAPTIC, false)
+    }
+    service.onStartCommand(voiceIntent, 0, 2)
+    com.example.service.RoutineAutomationService.onDndApplied("voice_task_1")
+    assertTrue(service.isHardwareStopRegisteredForTesting())
+    assertTrue(com.example.service.RoutineAutomationService.serviceState.value.isSpeaking)
+    assertTrue(com.example.service.RoutineAutomationService.serviceState.value.isDndActive)
+
+    // Equal volume broadcast must NOT stop voice
+    app.sendBroadcast(android.content.Intent("android.media.VOLUME_CHANGED_ACTION").apply {
+      putExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", 5)
+      putExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", 5)
+    })
+    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+    assertTrue(com.example.service.RoutineAutomationService.serviceState.value.isSpeaking)
+    assertTrue(service.isHardwareStopRegisteredForTesting())
+
+    // Changed volume broadcast stops ONLY voice, unregisters listeners, preserves isRunning & isDndActive
+    app.sendBroadcast(android.content.Intent("android.media.VOLUME_CHANGED_ACTION").apply {
+      putExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", 4)
+      putExtra("android.media.EXTRA_PREV_VOLUME_STREAM_VALUE", 5)
+    })
+    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+    assertFalse(com.example.service.RoutineAutomationService.serviceState.value.isSpeaking)
+    assertFalse(service.isHardwareStopRegisteredForTesting())
+    assertTrue("Service must stay running after voice stop", com.example.service.RoutineAutomationService.serviceState.value.isRunning)
+    assertTrue("DND state must stay intact after voice stop", com.example.service.RoutineAutomationService.serviceState.value.isDndActive)
+
+    // 3. Re-start voice session and test ACTION_SCREEN_OFF guard (<200ms ignored, >200ms stops voice)
+    service.onStartCommand(voiceIntent, 0, 3)
+    assertTrue(service.isHardwareStopRegisteredForTesting())
+    assertTrue(com.example.service.RoutineAutomationService.serviceState.value.isSpeaking)
+    org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(50))
+    app.sendBroadcast(android.content.Intent(android.content.Intent.ACTION_SCREEN_OFF))
+    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+    assertTrue("Immediate screen-off within 200ms guard must not stop voice", com.example.service.RoutineAutomationService.serviceState.value.isSpeaking)
+
+    org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(200))
+    app.sendBroadcast(android.content.Intent(android.content.Intent.ACTION_SCREEN_OFF))
+    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+    assertFalse(com.example.service.RoutineAutomationService.serviceState.value.isSpeaking)
+    assertFalse(service.isHardwareStopRegisteredForTesting())
+
+    // Cleanup service
+    service.onStartCommand(android.content.Intent(app, com.example.service.RoutineAutomationService::class.java).apply {
+      action = com.example.service.RoutineAutomationService.ACTION_STOP_AUTOMATION
+    }, 0, 4)
+    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+    controller.destroy()
+  }
+
+  @Test
+  fun `mainActivity dispatchKeyEvent stops active preview or service voice on volume down and volume up`() {
+    val activity = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).setup().get()
+
+    val volDownEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_DOWN)
+    val volUpEvent = android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_UP)
+
+    // When idle, dispatchKeyEvent does not consume volume keys
+    AutomationManager.stopActivePreviewVoiceIfPlaying()
+    assertFalse(activity.dispatchKeyEvent(volDownEvent))
+
+    // When preview voice is active, Volume Up stops it and returns true
+    var stoppedCount = 0
+    val handler = { stoppedCount++ ; Unit }
+    AutomationManager.registerActivePreviewStop(handler)
+    assertTrue(activity.dispatchKeyEvent(volUpEvent))
+    assertEquals(1, stoppedCount)
+
+    // Next press when silent passes through normally
+    assertFalse(activity.dispatchKeyEvent(volDownEvent))
+  }
 }
-
-

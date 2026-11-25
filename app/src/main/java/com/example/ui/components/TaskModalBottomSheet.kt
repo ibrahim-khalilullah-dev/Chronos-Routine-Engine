@@ -3,6 +3,8 @@ package com.example.ui.components
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
@@ -10,6 +12,8 @@ import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.view.KeyEvent
+import android.view.Window
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -89,6 +93,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -115,6 +120,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.text.TextStyle
@@ -126,10 +132,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.ViewCompat
 import com.example.model.RoutineDay
 import com.example.model.RoutineTask
 import com.example.model.TaskType
 import com.example.service.AutomationManager
+import com.example.service.RoutineAutomationService
 import com.example.ui.theme.AnchorGradientStart
 import com.example.ui.theme.DangerRed
 import com.example.ui.theme.ElasticGradientStart
@@ -273,7 +282,8 @@ fun TaskModalBottomSheet(
   allDynamicTasks: List<RoutineTask> = emptyList(),
   onAbsorbTwin: ((taskToDeleteId: String, partnerTaskId: String) -> Unit)? = null,
   onDeleteTwinBoth: ((twinId: String) -> Unit)? = null,
-  activeVoicePresetId: String = "natural_female"
+  activeVoicePresetId: String = "natural_female",
+  activeFlexedMinutes: Int? = null
 ) {
   val context = LocalContext.current
   val appContext = context.applicationContext ?: context
@@ -337,7 +347,8 @@ fun TaskModalBottomSheet(
   // Total Routine Duration Controller (for Dual Fluid Twin Mode)
   val initialTotalPool = if (isEditingFluidTwin) {
     initialTask?.fluidTotalPoolMinutes
-      ?: ((resolvedP1Task?.durationMinutes ?: 0) + (resolvedP2Task?.durationMinutes ?: 0)).coerceAtLeast(2)
+      ?: ((resolvedP1Task?.let { it.originalDurationMinutes ?: it.durationMinutes } ?: 0) +
+        (resolvedP2Task?.let { it.originalDurationMinutes ?: it.durationMinutes } ?: 0)).coerceAtLeast(2)
   } else {
     0
   }
@@ -351,13 +362,13 @@ fun TaskModalBottomSheet(
   }
   var splitValidationError by remember(initialTask) { mutableStateOf<String?>(null) }
 
-  // Single Task / Regular Anchor State (strictly reads initialTask?.startTimeMinute & durationMinutes)
+  // Single Task / Regular Anchor State (reads canonical birth duration)
   val initialRegularStart = initialTask?.startTimeMinute ?: 540
   val birthStartMinute = remember(initialTask) {
     initialTask?.originalStartTimeMinute ?: initialTask?.startTimeMinute ?: 540
   }
   var hasUserEditedStartTime by remember(initialTask) { mutableStateOf(false) }
-  val initialRegularDuration = initialTask?.durationMinutes ?: 0
+  val initialRegularDuration = initialTask?.originalDurationMinutes ?: initialTask?.durationMinutes ?: 0
   var title by remember(initialTask) { mutableStateOf(initialTask?.title ?: "") }
   var startHour by remember(initialTask) { mutableIntStateOf(initialRegularStart / 60) }
   var startMinute by remember(initialTask) { mutableIntStateOf(initialRegularStart % 60) }
@@ -444,10 +455,10 @@ fun TaskModalBottomSheet(
     mutableIntStateOf(if (isEditingFluidTwin) (resolvedP1Task?.let { it.startTimeMinute % 60 } ?: startMinute) else startMinute)
   }
   var part1DurationHours by remember(initialTask) {
-    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP1Task?.durationMinutes ?: 0) / 60) else 0)
+    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP1Task?.let { it.originalDurationMinutes ?: it.durationMinutes } ?: 0) / 60) else 0)
   }
   var part1DurationMins by remember(initialTask) {
-    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP1Task?.durationMinutes ?: 0) % 60) else 0)
+    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP1Task?.let { it.originalDurationMinutes ?: it.durationMinutes } ?: 0) % 60) else 0)
   }
   var part1SafetyFloor by remember(initialTask) {
     mutableIntStateOf(if (isEditingFluidTwin) (resolvedP1Task?.fluidSafetyFloorMinutes ?: 0) else 0)
@@ -473,10 +484,10 @@ fun TaskModalBottomSheet(
     mutableIntStateOf(if (isEditingFluidTwin) (resolvedP2Task?.let { it.startTimeMinute % 60 } ?: 0) else 0)
   }
   var part2DurationHours by remember(initialTask) {
-    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP2Task?.durationMinutes ?: 0) / 60) else 0)
+    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP2Task?.let { it.originalDurationMinutes ?: it.durationMinutes } ?: 0) / 60) else 0)
   }
   var part2DurationMins by remember(initialTask) {
-    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP2Task?.durationMinutes ?: 0) % 60) else 0)
+    mutableIntStateOf(if (isEditingFluidTwin) ((resolvedP2Task?.let { it.originalDurationMinutes ?: it.durationMinutes } ?: 0) % 60) else 0)
   }
   var part2SafetyFloor by remember(initialTask) {
     mutableIntStateOf(if (isEditingFluidTwin) (resolvedP2Task?.fluidSafetyFloorMinutes ?: 0) else 0)
@@ -521,8 +532,8 @@ fun TaskModalBottomSheet(
       }
       if (uri != null) {
         customRingtoneUri = uri.toString()
-        val r = RingtoneManager.getRingtone(context, uri)
-        customRingtoneTitle = r?.getTitle(context) ?: "Selected Ringtone"
+        val r = RingtoneManager.getRingtone(appContext, uri)
+        customRingtoneTitle = r?.getTitle(appContext) ?: "Selected Ringtone"
       } else {
         customRingtoneUri = null
         customRingtoneTitle = "Silent / None"
@@ -530,24 +541,45 @@ fun TaskModalBottomSheet(
     }
   }
 
-  // Lazy TTS Engine Setup (uses applicationContext; only initialized when voice is enabled or preview requested)
+  // Lazy TTS Engine Setup (uses applicationContext; only initialized when preview explicitly requested)
+  val modalAudioManager = remember(appContext) {
+    appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+  }
+  var modalAudioFocusRequest by remember { mutableStateOf<AudioFocusRequest?>(null) }
   var ttsInstance by remember { mutableStateOf<TextToSpeech?>(null) }
   var isTtsReady by remember { mutableStateOf(false) }
   var isBengaliVoiceReady by remember { mutableStateOf(true) }
   var isSpeakingVoicePreview by remember { mutableStateOf(false) }
   var activeVoiceUtteranceId by remember { mutableStateOf<String?>(null) }
-  var ttsRequested by remember { mutableStateOf(isVoiceEnabled || isVoiceEnabledS1 || isVoiceEnabledS2) }
+  var ttsRequested by remember { mutableStateOf(false) }
   var pendingVoicePreview by remember { mutableStateOf<Triple<String, Float, String>?>(null) }
 
-  LaunchedEffect(isVoiceEnabled, isVoiceEnabledS1, isVoiceEnabledS2) {
-    if (isVoiceEnabled || isVoiceEnabledS1 || isVoiceEnabledS2) {
-      ttsRequested = true
+  val stopPreviewPlayback: () -> Unit = {
+    try {
+      ttsInstance?.stop()
+    } catch (_: Exception) {}
+    AutomationManager.abandonTransientAlarmAudioFocus(modalAudioManager, modalAudioFocusRequest)
+    modalAudioFocusRequest = null
+    isSpeakingVoicePreview = false
+    activeVoiceUtteranceId = null
+  }
+
+  DisposableEffect(isSpeakingVoicePreview) {
+    if (isSpeakingVoicePreview) {
+      AutomationManager.registerActivePreviewStop(stopPreviewPlayback)
+    }
+    onDispose {
+      AutomationManager.clearActivePreviewStop(stopPreviewPlayback)
     }
   }
 
   DisposableEffect(appContext, ttsRequested) {
     if (!ttsRequested) {
-      onDispose {}
+      onDispose {
+        AutomationManager.clearActivePreviewStop(stopPreviewPlayback)
+        AutomationManager.abandonTransientAlarmAudioFocus(modalAudioManager, modalAudioFocusRequest)
+        modalAudioFocusRequest = null
+      }
     } else {
       var currentTts: TextToSpeech? = null
       var triedGoogleTtsFallback = false
@@ -563,6 +595,8 @@ fun TaskModalBottomSheet(
           if (activeVoiceUtteranceId == null || activeVoiceUtteranceId == utteranceId) {
             isSpeakingVoicePreview = false
             activeVoiceUtteranceId = null
+            AutomationManager.abandonTransientAlarmAudioFocus(modalAudioManager, modalAudioFocusRequest)
+            modalAudioFocusRequest = null
           }
         }
 
@@ -570,11 +604,15 @@ fun TaskModalBottomSheet(
         override fun onError(utteranceId: String?) {
           isSpeakingVoicePreview = false
           activeVoiceUtteranceId = null
+          AutomationManager.abandonTransientAlarmAudioFocus(modalAudioManager, modalAudioFocusRequest)
+          modalAudioFocusRequest = null
         }
 
         override fun onError(utteranceId: String?, errorCode: Int) {
           isSpeakingVoicePreview = false
           activeVoiceUtteranceId = null
+          AutomationManager.abandonTransientAlarmAudioFocus(modalAudioManager, modalAudioFocusRequest)
+          modalAudioFocusRequest = null
         }
       }
 
@@ -598,6 +636,7 @@ fun TaskModalBottomSheet(
               createTts("com.google.android.tts")
               return@OnInitListener
             }
+            AutomationManager.configureAlarmTtsAttributes(active)
             AutomationManager.applyTtsLanguage(active, "", activeVoicePresetId)
             active.setOnUtteranceProgressListener(progressListener)
             currentTts = active
@@ -606,11 +645,12 @@ fun TaskModalBottomSheet(
             isTtsReady = true
             pendingVoicePreview?.let { (msg, vol, uttId) ->
               pendingVoicePreview = null
+              AutomationManager.configureAlarmTtsAttributes(active)
               AutomationManager.applyTtsLanguage(active, msg, activeVoicePresetId)
-              val params = Bundle().apply {
-                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0f, 1f))
-              }
-              active.speak(msg, TextToSpeech.QUEUE_FLUSH, params, uttId)
+              AutomationManager.abandonTransientAlarmAudioFocus(modalAudioManager, modalAudioFocusRequest)
+              modalAudioFocusRequest = AutomationManager.requestTransientAlarmAudioFocus(modalAudioManager)
+              val effectiveVol = vol.coerceIn(0f, 1f)
+              active.speak(msg, TextToSpeech.QUEUE_FLUSH, AutomationManager.createTtsVolumeParams(effectiveVol), uttId)
             }
           } else if (!triedGoogleTtsFallback && AutomationManager.hasGoogleTtsEngine(appContext)) {
             triedGoogleTtsFallback = true
@@ -648,6 +688,9 @@ fun TaskModalBottomSheet(
         pendingVoicePreview = null
         isTtsReady = false
         ttsInstance = null
+        AutomationManager.clearActivePreviewStop(stopPreviewPlayback)
+        AutomationManager.abandonTransientAlarmAudioFocus(modalAudioManager, modalAudioFocusRequest)
+        modalAudioFocusRequest = null
         try {
           currentTts?.stop()
           currentTts?.shutdown()
@@ -662,11 +705,12 @@ fun TaskModalBottomSheet(
   val speakVoicePreview: (String, Float, String) -> Unit = { msg, vol, utteranceId ->
     val activeTts = ttsInstance
     if (activeTts != null && isTtsReady) {
+      AutomationManager.configureAlarmTtsAttributes(activeTts)
       AutomationManager.applyTtsLanguage(activeTts, msg, activeVoicePresetId)
-      val params = Bundle().apply {
-        putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol.coerceIn(0f, 1f))
-      }
-      activeTts.speak(msg, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+      AutomationManager.abandonTransientAlarmAudioFocus(modalAudioManager, modalAudioFocusRequest)
+      modalAudioFocusRequest = AutomationManager.requestTransientAlarmAudioFocus(modalAudioManager)
+      val effectiveVol = vol.coerceIn(0f, 1f)
+      activeTts.speak(msg, TextToSpeech.QUEUE_FLUSH, AutomationManager.createTtsVolumeParams(effectiveVol), utteranceId)
     } else {
       pendingVoicePreview = Triple(msg, vol, utteranceId)
       ttsRequested = true
@@ -683,7 +727,7 @@ fun TaskModalBottomSheet(
     } else {
       try {
         val uri = customRingtoneUri?.let { Uri.parse(it) } ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-        val r = RingtoneManager.getRingtone(context, uri)
+        val r = RingtoneManager.getRingtone(appContext, uri)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
           r?.isLooping = false
           r?.volume = voiceVolume.coerceIn(0f, 1f)
@@ -959,6 +1003,7 @@ fun TaskModalBottomSheet(
         startTimeMinute = finalStart,
         originalStartTimeMinute = finalStart,
         durationMinutes = calculatedDuration,
+        originalDurationMinutes = calculatedDuration,
         voiceMessage = voiceMessage,
         enableDnd = enableDnd,
         dndDelayMinutes = if (enableDnd) dndDelayMinutes.coerceIn(0, 25) else 0,
@@ -1004,6 +1049,78 @@ fun TaskModalBottomSheet(
     contentColor = TextPrimary,
     shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
   ) {
+    val sheetView = LocalView.current
+    val activeAutomation by RoutineAutomationService.serviceState.collectAsState()
+    val shouldInterceptHardwareVolumeKeys = isSpeakingVoicePreview || activeAutomation.isSpeaking
+
+    DisposableEffect(sheetView, shouldInterceptHardwareVolumeKeys) {
+      if (!shouldInterceptHardwareVolumeKeys) {
+        onDispose {}
+      } else {
+        val keyListener = ViewCompat.OnUnhandledKeyEventListenerCompat { _, event ->
+          if (event.action == KeyEvent.ACTION_DOWN &&
+            (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+          ) {
+            val stoppedService = RoutineAutomationService.stopVoiceIfSpeaking(appContext)
+            val stoppedCoordinator = AutomationManager.stopActivePreviewVoiceIfPlaying()
+            if (isSpeakingVoicePreview) {
+              stopPreviewPlayback()
+            }
+            stoppedService || stoppedCoordinator || isSpeakingVoicePreview
+          } else {
+            false
+          }
+        }
+        ViewCompat.addOnUnhandledKeyEventListener(sheetView, keyListener)
+
+        val dialogWindow = (sheetView.parent as? DialogWindowProvider)?.window
+        val originalCallback: Window.Callback? = dialogWindow?.callback
+        if (dialogWindow != null && originalCallback != null) {
+          dialogWindow.callback = object : Window.Callback by originalCallback {
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+              if (event.action == KeyEvent.ACTION_DOWN &&
+                (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+              ) {
+                val stoppedService = RoutineAutomationService.stopVoiceIfSpeaking(appContext)
+                val stoppedCoordinator = AutomationManager.stopActivePreviewVoiceIfPlaying()
+                if (isSpeakingVoicePreview) {
+                  stopPreviewPlayback()
+                  return true
+                }
+                if (stoppedService || stoppedCoordinator) {
+                  return true
+                }
+              }
+              return originalCallback.dispatchKeyEvent(event)
+            }
+
+            override fun onProvideKeyboardShortcuts(
+              data: MutableList<android.view.KeyboardShortcutGroup>?,
+              menu: android.view.Menu?,
+              deviceId: Int
+            ) {
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                originalCallback.onProvideKeyboardShortcuts(data, menu, deviceId)
+              }
+            }
+
+            override fun onPointerCaptureChanged(hasCapture: Boolean) {
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                originalCallback.onPointerCaptureChanged(hasCapture)
+              }
+            }
+          }
+        }
+
+        onDispose {
+          ViewCompat.removeOnUnhandledKeyEventListener(sheetView, keyListener)
+          if (dialogWindow != null && originalCallback != null) {
+            dialogWindow.callback = originalCallback
+          }
+        }
+      }
+    }
+
     Box(modifier = Modifier.fillMaxWidth()) {
       @OptIn(ExperimentalFoundationApi::class)
       CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
@@ -1222,14 +1339,10 @@ fun TaskModalBottomSheet(
             voiceMessage = voiceMessage,
             onVoiceMessageChange = { voiceMessage = it },
             onTestVoice = {
-              if (isSpeakingVoicePreview) {
-                ttsInstance?.stop()
-                isSpeakingVoicePreview = false
-                activeVoiceUtteranceId = null
-              } else if (isTtsReady && voiceMessage.isNotBlank()) {
-                AutomationManager.applyTtsLanguage(ttsInstance, voiceMessage, activeVoicePresetId)
-                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
-                ttsInstance?.speak(voiceMessage, TextToSpeech.QUEUE_FLUSH, params, "anchor_tts")
+              if (isSpeakingVoicePreview && activeVoiceUtteranceId == "anchor_tts") {
+                stopPreviewPlayback()
+              } else if (voiceMessage.isNotBlank()) {
+                speakVoicePreview(voiceMessage, voiceVolume, "anchor_tts")
               }
             },
             isSlot3 = isSlot3,
@@ -1250,14 +1363,10 @@ fun TaskModalBottomSheet(
             fridayVoiceMessage = fridayVoiceMessage,
             onFridayVoiceMessageChange = { fridayVoiceMessage = it },
             onTestFridayVoice = {
-              if (isSpeakingVoicePreview) {
-                ttsInstance?.stop()
-                isSpeakingVoicePreview = false
-                activeVoiceUtteranceId = null
-              } else if (isTtsReady && fridayVoiceMessage.isNotBlank()) {
-                AutomationManager.applyTtsLanguage(ttsInstance, fridayVoiceMessage, activeVoicePresetId)
-                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume.coerceIn(0f, 1f)) }
-                ttsInstance?.speak(fridayVoiceMessage, TextToSpeech.QUEUE_FLUSH, params, "friday_tts")
+              if (isSpeakingVoicePreview && activeVoiceUtteranceId == "friday_tts") {
+                stopPreviewPlayback()
+              } else if (fridayVoiceMessage.isNotBlank()) {
+                speakVoicePreview(fridayVoiceMessage, voiceVolume, "friday_tts")
               }
             },
             isSpeakingVoicePreview = isSpeakingVoicePreview,
@@ -1402,6 +1511,26 @@ fun TaskModalBottomSheet(
               badgeTextColor = Color(0xFF22D3EE)
             )
 
+            if (isEditing && activeFlexedMinutes != null && activeFlexedMinutes < initialRegularDuration) {
+              Spacer(modifier = Modifier.height(8.dp))
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFFF59E0B).copy(alpha = 0.14f))
+                  .border(BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)), RoundedCornerShape(10.dp))
+                  .padding(horizontal = 10.dp, vertical = 6.dp)
+                  .testTag("modal_active_flex_hint")
+              ) {
+                Text(
+                  text = "⚡ Auto-flexed to ${activeFlexedMinutes}m today (Birth duration: ${initialRegularDuration}m preserved)",
+                  color = Color(0xFFFCD34D),
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.SemiBold
+                )
+              }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // ==============================================================
@@ -1421,9 +1550,7 @@ fun TaskModalBottomSheet(
               messageTestTag = "voice_message_input",
               onTestVoice = {
                 if (isSpeakingVoicePreview) {
-                  ttsInstance?.stop()
-                  isSpeakingVoicePreview = false
-                  activeVoiceUtteranceId = null
+                  stopPreviewPlayback()
                 } else {
                   val msg = voiceMessage.ifBlank { "${title.ifBlank { "Task" }} starting now" }
                   speakVoicePreview(msg, voiceVolume, "voice_test_preview")
@@ -1615,9 +1742,7 @@ fun TaskModalBottomSheet(
               onVoiceVolumeChange = { voiceVolumeS1 = it },
               onTestVoice = {
                 if (isSpeakingVoicePreview && activeVoiceUtteranceId == "s1_tts") {
-                  ttsInstance?.stop()
-                  isSpeakingVoicePreview = false
-                  activeVoiceUtteranceId = null
+                  stopPreviewPlayback()
                 } else {
                   val msg = part1VoiceMessage.ifBlank { "${part1Title.ifBlank { "Session 1" }} starting now" }
                   speakVoicePreview(msg, voiceVolumeS1, "s1_tts")
@@ -1679,9 +1804,7 @@ fun TaskModalBottomSheet(
               onVoiceVolumeChange = { voiceVolumeS2 = it },
               onTestVoice = {
                 if (isSpeakingVoicePreview && activeVoiceUtteranceId == "s2_tts") {
-                  ttsInstance?.stop()
-                  isSpeakingVoicePreview = false
-                  activeVoiceUtteranceId = null
+                  stopPreviewPlayback()
                 } else {
                   val msg = part2VoiceMessage.ifBlank { "${part2Title.ifBlank { "Session 2" }} starting now" }
                   speakVoicePreview(msg, voiceVolumeS2, "s2_tts")
@@ -3701,7 +3824,9 @@ private fun LuxuryVoiceStudioCard(
         Spacer(modifier = Modifier.height(10.dp))
 
         Row(
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("${testButtonTestTag}_volume_slider"),
           verticalAlignment = Alignment.CenterVertically
         ) {
           Icon(

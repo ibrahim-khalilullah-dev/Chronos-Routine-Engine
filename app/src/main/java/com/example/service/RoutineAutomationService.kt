@@ -5,9 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.database.ContentObserver
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -20,10 +23,13 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
+import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.compose.runtime.Immutable
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.RoutineRepository
@@ -55,6 +61,18 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     const val ACTION_STOP_AUTOMATION = "com.example.ACTION_STOP_AUTOMATION"
     private const val WAKELOCK_MAX_TIMEOUT_MS = 25_000L
     private const val TTS_SAFETY_TIMEOUT_MS = 20_000L
+    private const val RINGTONE_MAX_TIMEOUT_MS = 10_000L
+
+    private const val SCREEN_BUTTON_GUARD_MS = 200L
+    private const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
+    private const val EXTRA_VOLUME_STREAM_VALUE = "android.media.EXTRA_VOLUME_STREAM_VALUE"
+    private const val EXTRA_PREV_VOLUME_STREAM_VALUE = "android.media.EXTRA_PREV_VOLUME_STREAM_VALUE"
+    private val WATCHED_VOLUME_STREAMS = intArrayOf(
+      AudioManager.STREAM_ALARM,
+      AudioManager.STREAM_MUSIC,
+      AudioManager.STREAM_RING,
+      AudioManager.STREAM_NOTIFICATION
+    )
 
     private val _serviceState = MutableStateFlow(ActiveAutomationState())
     val serviceState: StateFlow<ActiveAutomationState> = _serviceState.asStateFlow()
@@ -72,6 +90,26 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
           instance.currentDndApplied = true
         }
       }
+    }
+
+    fun stopVoiceIfSpeaking(context: Context): Boolean {
+      val instance = activeInstance
+      val state = _serviceState.value
+      if (instance != null && (state.isSpeaking || instance.hasActiveVoiceSession())) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+          instance.stopVoiceOnly()
+        } else {
+          Handler(Looper.getMainLooper()).post {
+            instance.stopVoiceOnly()
+          }
+        }
+        return true
+      }
+      if (state.isSpeaking) {
+        _serviceState.value = state.copy(isSpeaking = false)
+        return true
+      }
+      return false
     }
 
     fun requestStop(context: Context, taskId: String?) {
@@ -112,9 +150,18 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   private var voiceVolume = 1.0f
   private var activeRingtone: Ringtone? = null
   private var activeMediaPlayer: MediaPlayer? = null
+  private var ringtoneTimeoutRunnable: Runnable? = null
+  private var voiceSessionStartElapsedMs: Long = 0L
+  private var hardwareStopReceiver: BroadcastReceiver? = null
+  private var volumeSettingsObserver: ContentObserver? = null
+  private var isHardwareStopRegistered = false
+  private val initialStreamVolumes = mutableMapOf<Int, Int>()
+  @Volatile
+  private var isStopping = false
 
   override fun onCreate() {
     super.onCreate()
+    isStopping = false
     activeInstance = this
     createNotificationChannel()
     audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -161,8 +208,124 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     mainHandler.postDelayed(timeoutRunnable, TTS_SAFETY_TIMEOUT_MS)
   }
 
+  private fun hasActiveVoiceSession(): Boolean {
+    return ttsDelayRunnable != null || tts != null || _serviceState.value.isSpeaking
+  }
+
+  internal fun isHardwareStopRegisteredForTesting(): Boolean = isHardwareStopRegistered
+
+  private fun registerVoiceStopHardwareListeners() {
+    unregisterVoiceStopHardwareListeners()
+    val am = audioManager
+    if (am != null) {
+      for (stream in WATCHED_VOLUME_STREAMS) {
+        try {
+          initialStreamVolumes[stream] = am.getStreamVolume(stream)
+        } catch (_: Exception) {}
+      }
+    }
+
+    val receiver = object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) {
+        if (intent == null) return
+        when (intent.action) {
+          Intent.ACTION_SCREEN_OFF, Intent.ACTION_SCREEN_ON -> {
+            val elapsed = SystemClock.elapsedRealtime() - voiceSessionStartElapsedMs
+            if (elapsed > SCREEN_BUTTON_GUARD_MS) {
+              stopVoiceOnly()
+            }
+          }
+          VOLUME_CHANGED_ACTION -> {
+            val newVol = intent.getIntExtra(EXTRA_VOLUME_STREAM_VALUE, -1)
+            val prevVol = intent.getIntExtra(EXTRA_PREV_VOLUME_STREAM_VALUE, -1)
+            if (newVol >= 0 && prevVol >= 0 && newVol == prevVol) {
+              return
+            }
+            stopVoiceOnly()
+          }
+        }
+      }
+    }
+    try {
+      val filter = IntentFilter().apply {
+        addAction(Intent.ACTION_SCREEN_OFF)
+        addAction(Intent.ACTION_SCREEN_ON)
+        addAction(VOLUME_CHANGED_ACTION)
+      }
+      ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
+      hardwareStopReceiver = receiver
+      isHardwareStopRegistered = true
+    } catch (_: Exception) {
+      hardwareStopReceiver = null
+      isHardwareStopRegistered = false
+    }
+
+    val observer = object : ContentObserver(mainHandler) {
+      override fun onChange(selfChange: Boolean, uri: Uri?) {
+        val lastSeg = uri?.lastPathSegment
+        val currAm = audioManager
+        if (currAm != null) {
+          var streamChanged = false
+          for (stream in WATCHED_VOLUME_STREAMS) {
+            val currentVol = try {
+              currAm.getStreamVolume(stream)
+            } catch (_: Exception) {
+              continue
+            }
+            val prevVol = initialStreamVolumes[stream]
+            if (prevVol != null && currentVol != prevVol) {
+              initialStreamVolumes[stream] = currentVol
+              streamChanged = true
+            }
+          }
+          if (streamChanged || (lastSeg != null && lastSeg.startsWith("volume_"))) {
+            stopVoiceOnly()
+          }
+        } else if (lastSeg != null && lastSeg.startsWith("volume_")) {
+          stopVoiceOnly()
+        }
+      }
+    }
+    try {
+      contentResolver.registerContentObserver(Settings.System.CONTENT_URI, true, observer)
+      volumeSettingsObserver = observer
+    } catch (_: Exception) {
+      volumeSettingsObserver = null
+    }
+  }
+
+  private fun unregisterVoiceStopHardwareListeners() {
+    hardwareStopReceiver?.let { receiver ->
+      try {
+        unregisterReceiver(receiver)
+      } catch (_: Exception) {}
+    }
+    hardwareStopReceiver = null
+    isHardwareStopRegistered = false
+
+    volumeSettingsObserver?.let { observer ->
+      try {
+        contentResolver.unregisterContentObserver(observer)
+      } catch (_: Exception) {}
+    }
+    volumeSettingsObserver = null
+    initialStreamVolumes.clear()
+  }
+
+  internal fun stopVoiceOnly() {
+    ttsDelayRunnable?.let { mainHandler.removeCallbacks(it) }
+    ttsDelayRunnable = null
+    stopActiveSoundAlert()
+    releaseTtsEngine()
+    val current = _serviceState.value
+    if (current.isSpeaking) {
+      _serviceState.value = current.copy(isSpeaking = false)
+    }
+  }
+
   private fun releaseTtsEngine() {
     cancelTtsSafetyTimeout()
+    unregisterVoiceStopHardwareListeners()
     pendingSpeechText = null
     isTtsReady = false
     triedGoogleTtsFallback = false
@@ -177,7 +340,23 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     releaseWakeLock()
   }
 
+  private fun cancelRingtoneTimeout() {
+    ringtoneTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+    ringtoneTimeoutRunnable = null
+  }
+
+  private fun scheduleRingtoneTimeout() {
+    cancelRingtoneTimeout()
+    val timeoutRunnable = Runnable {
+      ringtoneTimeoutRunnable = null
+      stopActiveSoundAlert()
+    }
+    ringtoneTimeoutRunnable = timeoutRunnable
+    mainHandler.postDelayed(timeoutRunnable, RINGTONE_MAX_TIMEOUT_MS)
+  }
+
   private fun stopActiveSoundAlert() {
+    cancelRingtoneTimeout()
     try {
       activeRingtone?.stop()
     } catch (_: Exception) {}
@@ -199,7 +378,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     return try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val playbackAttributes = AudioAttributes.Builder()
-          .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+          .setUsage(AudioAttributes.USAGE_ALARM)
           .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
           .build()
 
@@ -214,7 +393,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
         @Suppress("DEPRECATION")
         am.requestAudioFocus(
           null,
-          AudioManager.STREAM_NOTIFICATION,
+          AudioManager.STREAM_ALARM,
           AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
         ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
       }
@@ -258,6 +437,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       return START_NOT_STICKY
     }
 
+    isStopping = false
     val taskId = intent.getStringExtra(AutomationManager.EXTRA_TASK_ID) ?: "task_${System.currentTimeMillis()}"
     val title = intent.getStringExtra(AutomationManager.EXTRA_TASK_TITLE) ?: "Scheduled Task"
     val voiceMessage = intent.getStringExtra(AutomationManager.EXTRA_VOICE_MESSAGE) ?: "$title is starting now."
@@ -266,7 +446,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
     val dndDelayMinutes = intent.getIntExtra(AutomationManager.EXTRA_DND_DELAY_MINUTES, 0).coerceIn(0, 25)
     val enableHaptic = intent.getBooleanExtra(AutomationManager.EXTRA_ENABLE_HAPTIC, true)
     isVoiceEnabled = intent.getBooleanExtra(AutomationManager.EXTRA_IS_VOICE_ENABLED, true)
-    voiceVolume = intent.getFloatExtra(AutomationManager.EXTRA_VOICE_VOLUME, 1.0f)
+    voiceVolume = intent.getFloatExtra(AutomationManager.EXTRA_VOICE_VOLUME, 1.0f).coerceIn(0.0f, 1.0f)
 
     val isSoundAlertEnabled = intent.getBooleanExtra(AutomationManager.EXTRA_IS_SOUND_ALERT_ENABLED, true)
     val ringtoneUriString = intent.getStringExtra(AutomationManager.EXTRA_CUSTOM_RINGTONE_URI)
@@ -338,6 +518,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
 
     // Decoupled Lazy Voice Reminder via TTS (only instantiated when isVoiceEnabled == true)
     if (isVoiceEnabled) {
+      voiceSessionStartElapsedMs = SystemClock.elapsedRealtime()
+      registerVoiceStopHardwareListeners()
       scheduleTtsSafetyTimeout()
       if (isSoundAlertEnabled) {
         val scheduledSpeech = voiceMessage
@@ -398,6 +580,7 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
         }
         activeRingtone = ringtone
         ringtone.play()
+        scheduleRingtoneTimeout()
         playedViaRingtone = true
       }
     } catch (_: Exception) {
@@ -473,7 +656,9 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
           return
         }
 
-        val presetId = RoutineRepository(applicationContext).getVoicePresetId()
+        val repo = RoutineRepository(applicationContext)
+        val presetId = repo.getVoicePresetId()
+        AutomationManager.configureAlarmTtsAttributes(tts)
         AutomationManager.applyTtsLanguage(tts, pending ?: "", presetId)
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
           override fun onStart(utteranceId: String?) {
@@ -547,10 +732,13 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
         return
       }
       scheduleTtsSafetyTimeout()
-      val presetId = RoutineRepository(applicationContext).getVoicePresetId()
+      val repo = RoutineRepository(applicationContext)
+      val presetId = repo.getVoicePresetId()
+      val effectiveVol = voiceVolume.coerceIn(0.0f, 1.0f)
+      AutomationManager.configureAlarmTtsAttributes(tts)
       AutomationManager.applyTtsLanguage(tts, text, presetId)
       requestTransientAudioFocus()
-      val params = AutomationManager.createTtsVolumeParams(voiceVolume)
+      val params = AutomationManager.createTtsVolumeParams(effectiveVol)
       val speakResult = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "chronos_voice_${System.currentTimeMillis()}")
       if (speakResult == TextToSpeech.ERROR) {
         _serviceState.value = _serviceState.value.copy(isSpeaking = false)
@@ -563,6 +751,8 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
   }
 
   private fun stopAutomation() {
+    if (isStopping) return
+    isStopping = true
     try {
       dndRunnable?.let { dndHandler?.removeCallbacks(it) }
       dndRunnable = null
@@ -673,10 +863,13 @@ class RoutineAutomationService : Service(), TextToSpeech.OnInitListener {
       activeInstance = null
     }
     try {
-      stopAutomation()
+      if (!isStopping) {
+        stopAutomation()
+      } else {
+        stopActiveSoundAlert()
+        releaseTtsEngine()
+      }
     } finally {
-      stopActiveSoundAlert()
-      releaseTtsEngine()
       super.onDestroy()
     }
   }

@@ -412,5 +412,283 @@ class TaskModalBottomSheetUiTest {
     composeTestRule.onNodeWithTag("free_gap_indicator_buf_t2").assertIsDisplayed()
     composeTestRule.onNodeWithTag("free_gap_indicator_buf_t1").assertDoesNotExist()
   }
-}
 
+  @Test
+  fun `timeline screen pins countdown and pending controls while scrolling and exposes compact and auto-fit buttons`() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Fill Gap 2-3 (335..795 = 460m) with a fenced 460m task so overflowTask goes into Overflow Pool
+    val fullGap = RoutineTask(
+      id = "ui_full_23",
+      title = "Full Morning",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 335,
+      durationMinutes = 460,
+      isHighPriority = true,
+      selectedDays = RoutineDay.allDays()
+    )
+    val overflowTask = RoutineTask(
+      id = "ui_ov_task",
+      title = "Overflow Candidate",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360,
+      durationMinutes = 30,
+      isHighPriority = true,
+      selectedDays = RoutineDay.allDays()
+    )
+    val result = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(fullGap, overflowTask),
+      activeDay = RoutineDay.today()
+    )
+
+    var compactInvokedCount = 0
+    composeTestRule.setContent {
+      MaterialTheme {
+        com.example.ui.screens.TimelineScreen(
+          activeDay = RoutineDay.today(),
+          onSelectDay = {},
+          scheduleResult = result,
+          sleepDurationMinutes = 360,
+          currentMinute = 310, // Before 05:35 -> countdown visible
+          isDndGranted = true,
+          activeAutomation = com.example.service.ActiveAutomationState(),
+          sortMode = com.example.ui.TimelineSortMode.EARLIEST_START,
+          deletedCount = 0,
+          onSelectSortMode = {},
+          onQuickAdjustAnchor = { _, _ -> },
+          onEditTask = {},
+          onMoveToTrash = {},
+          onOpenTrashBin = {},
+          onStopAutomation = {},
+          onRefreshDndPermission = {},
+          anchors = anchors,
+          onCompactAndRescueSchedule = { onNoChanges ->
+            compactInvokedCount++
+            onNoChanges()
+          }
+        )
+      }
+    }
+
+    // Compact button visible in 24-Hour Cycle Map header -> clicking invokes callback and shows optimal toast
+    composeTestRule.onNodeWithTag("compact_schedule_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(1, compactInvokedCount)
+    composeTestRule.onNodeWithTag("optimal_schedule_toast").assertIsDisplayed()
+
+    // Scroll down to bottom Overflow Pool -> countdown pill remains pinned and visible, Auto-Fit button visible!
+    composeTestRule.onAllNodes(hasScrollToNodeAction()).onFirst().performScrollToNode(hasTestTag("auto_fit_overflow_button"))
+    composeTestRule.onNodeWithTag("auto_fit_overflow_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(2, compactInvokedCount)
+    composeTestRule.onNodeWithTag("next_task_countdown_pill").assertIsDisplayed()
+  }
+
+  @Test
+  fun `dynamic task card displays flexed duration and relocated badges when compressed or migrated`() {
+    val flexedAndMovedTask = RoutineTask(
+      id = "badge_t1",
+      title = "Smart Migrated Sprint",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1110, // 06:30 PM
+      originalStartTimeMinute = 540, // 09:00 AM
+      durationMinutes = 45,
+      originalDurationMinutes = 60,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        com.example.ui.components.DynamicTaskCard(
+          task = flexedAndMovedTask,
+          currentMinute = 300,
+          isToday = false,
+          onEditClick = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("flexed_duration_badge_badge_t1").assertIsDisplayed()
+    composeTestRule.onNodeWithText("⚡ 60m→45m").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("relocated_task_badge_badge_t1").assertIsDisplayed()
+    composeTestRule.onNodeWithText("↪ ${RoutineTask.formatTime(540)}").assertIsDisplayed()
+  }
+
+  @Test
+  fun `editing flexed task shows active flex hint, initializes birth duration, and preserves originalDurationMinutes on save`() {
+    val birthTask = RoutineTask(
+      id = "modal_flex_1",
+      title = "Elastic Deep Work",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 540,
+      originalStartTimeMinute = 540,
+      durationMinutes = 60,
+      originalDurationMinutes = 60,
+      customFlexibilityMinutes = 15,
+      toleranceMinutes = 15,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    var savedTask: RoutineTask? = null
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        TaskModalBottomSheet(
+          initialTask = birthTask,
+          onDismiss = {},
+          onSaveTask = { savedTask = it },
+          onSaveAnchorDetails = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+          onSaveSlot5 = { _, _, _, _, _ -> },
+          activeFlexedMinutes = 45
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("modal_active_flex_hint").assertIsDisplayed()
+    composeTestRule.onNodeWithText("⚡ Auto-flexed to 45m today (Birth duration: 60m preserved)").assertIsDisplayed()
+    composeTestRule.onNode(hasText("1") and hasTestTag("duration_hours_input")).assertIsDisplayed()
+    composeTestRule.onNode(hasText("0") and hasTestTag("duration_mins_input")).assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("save_task_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(60, savedTask?.durationMinutes)
+    assertEquals(60, savedTask?.originalDurationMinutes)
+  }
+
+  @Test
+  fun `settings screen omits removed voice volume mode card and preserves persona and trash navigation`() {
+    composeTestRule.setContent {
+      MaterialTheme {
+        SettingsScreen(
+          bufferMinutes = 0,
+          onUpdateBufferMinutes = {}
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("voice_persona_card").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("settings_trash_bin_card").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("voice_volume_mode_card").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("voice_mode_per_task_option").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("voice_mode_same_all_option").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("open_sound_settings_button").assertDoesNotExist()
+  }
+
+  @Test
+  fun `task modal always displays per-task voice volume slider in single mode and preserves voiceVolume`() {
+    val singleTask = RoutineTask(
+      id = "mode_single_1",
+      title = "Focus Read",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 540,
+      durationMinutes = 30,
+      isVoiceEnabled = true,
+      voiceVolume = 0.45f,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    var savedSingle: RoutineTask? = null
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        TaskModalBottomSheet(
+          initialTask = singleTask,
+          onDismiss = {},
+          onSaveTask = { savedSingle = it },
+          onSaveAnchorDetails = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+          onSaveSlot5 = { _, _, _, _, _ -> }
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("test_voice_button_volume_slider").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("save_task_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(0.45f, savedSingle?.voiceVolume ?: -1f, 0.001f)
+  }
+
+  @Test
+  fun `task modal always displays per-session and anchor voice volume sliders`() {
+    val twin1 = RoutineTask(
+      id = "mode_twin_p1",
+      title = "Twin Part 1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 540,
+      durationMinutes = 30,
+      isFluidTwin = true,
+      fluidTwinId = "twin_mode_test",
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 60,
+      isVoiceEnabled = true,
+      voiceVolume = 0.5f,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val twin2 = RoutineTask(
+      id = "mode_twin_p2",
+      title = "Twin Part 2",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 840,
+      durationMinutes = 30,
+      isFluidTwin = true,
+      fluidTwinId = "twin_mode_test",
+      fluidTwinPart = 2,
+      fluidTotalPoolMinutes = 60,
+      isVoiceEnabled = true,
+      voiceVolume = 0.7f,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        TaskModalBottomSheet(
+          initialTask = twin1,
+          allDynamicTasks = listOf(twin1, twin2),
+          onDismiss = {},
+          onSaveTask = {},
+          onSaveAnchorDetails = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+          onSaveSlot5 = { _, _, _, _, _ -> }
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("session_1_test_voice_button_volume_slider").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("session_2_test_voice_button_volume_slider").performScrollTo().assertIsDisplayed()
+  }
+
+  @Test
+  fun `anchor modal always displays regular and friday voice volume sliders when enabled`() {
+    val slot3Anchor = RoutineTask(
+      id = "anchor_slot_3",
+      title = "Dhuhr",
+      type = TaskType.ANCHOR_STANDARD,
+      slotNumber = 3,
+      startTimeMinute = 795,
+      durationMinutes = 35,
+      isVoiceEnabled = true,
+      voiceVolume = 0.65f,
+      fridayTitle = "Jumu'ah",
+      fridayStartTimeMinute = 750,
+      fridayDurationMinutes = 120,
+      fridayVoiceMessage = "জুমার সময় হয়েছে।",
+      selectedDays = RoutineDay.allDays()
+    )
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        TaskModalBottomSheet(
+          initialTask = slot3Anchor,
+          onDismiss = {},
+          onSaveTask = {},
+          onSaveAnchorDetails = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+          onSaveSlot5 = { _, _, _, _, _ -> }
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("test_voice_button_volume_slider").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("Friday Mode \uD83D\uDD4C").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("test_friday_voice_button_volume_slider").performScrollTo().assertIsDisplayed()
+  }
+}

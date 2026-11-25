@@ -39,10 +39,102 @@ data class VerticalDropPreview(
   val hitAnchorWall: Boolean
 )
 
+@Immutable
+data class CompactionOutcome(
+  val updatedDynamicTasks: List<RoutineTask>,
+  val scheduleResult: ScheduleResult,
+  val movedCount: Int,
+  val rescuedCount: Int,
+  val flexedCount: Int = 0
+)
+
 object SchedulerEngine {
 
   const val MIN_FLUID_TWIN_MINUTES = 45
   const val MIN_ELASTIC_BUFFER_MINUTES = 15
+
+  fun birthDurationOf(task: RoutineTask): Int =
+    (task.originalDurationMinutes ?: task.durationMinutes).coerceAtLeast(0)
+
+  fun effectiveFlexOf(task: RoutineTask): Int =
+    maxOf(task.toleranceMinutes, task.customFlexibilityMinutes).coerceIn(0, 30)
+
+  fun minAllowedDurationOf(task: RoutineTask): Int {
+    val birthDur = birthDurationOf(task)
+    if (birthDur <= 0) return 0
+    if (task.isFluidTwin) {
+      return task.fluidSafetyFloorMinutes.coerceIn(1, birthDur)
+    }
+    val flex = effectiveFlexOf(task)
+    if (flex <= 0) return birthDur
+    val minFloor = if (birthDur >= 15) 15 else 1
+    return (birthDur - flex).coerceIn(minFloor, birthDur)
+  }
+
+  private fun minDonorDurationOf(task: RoutineTask): Int {
+    val birthDur = birthDurationOf(task)
+    if (birthDur <= 0) return 0
+    val flex = effectiveFlexOf(task)
+    if (flex <= 0) return birthDur
+    val minFloor = if (task.isFluidTwin) {
+      task.fluidSafetyFloorMinutes.coerceIn(1, birthDur)
+    } else if (birthDur >= 15) {
+      15
+    } else {
+      1
+    }
+    return (birthDur - flex).coerceIn(minFloor, birthDur)
+  }
+
+  private fun availableFlexSlackOf(task: RoutineTask): Int =
+    (task.durationMinutes - minDonorDurationOf(task)).coerceAtLeast(0)
+
+  private fun distributeDeficitWaterFilling(slacks: IntArray, deficit: Int): IntArray {
+    val k = slacks.size
+    val cuts = IntArray(k)
+    if (deficit <= 0 || k == 0) return cuts
+    val totalSlack = slacks.sum()
+    if (totalSlack < deficit) return cuts
+
+    var remaining = deficit
+    while (remaining > 0) {
+      val activeIndices = (0 until k).filter { slacks[it] - cuts[it] > 0 }
+      if (activeIndices.isEmpty()) break
+      val remTotal = activeIndices.sumOf { slacks[it] - cuts[it] }
+      if (remTotal <= 0) break
+
+      var assignedThisRound = 0
+      val remainders = ArrayList<Pair<Int, Long>>(activeIndices.size)
+      for (idx in activeIndices) {
+        val remSlack = slacks[idx] - cuts[idx]
+        val num = remaining.toLong() * remSlack.toLong()
+        val baseCut = (num / remTotal.toLong()).toInt().coerceAtMost(remSlack)
+        val frac = num % remTotal.toLong()
+        cuts[idx] += baseCut
+        assignedThisRound += baseCut
+        if (cuts[idx] < slacks[idx]) {
+          remainders.add(idx to frac)
+        }
+      }
+      remaining -= assignedThisRound
+
+      if (remaining > 0 && remainders.isNotEmpty()) {
+        remainders.sortWith(
+          compareByDescending<Pair<Int, Long>> { it.second }
+            .thenByDescending { slacks[it.first] - cuts[it.first] }
+            .thenBy { it.first }
+        )
+        for ((idx, _) in remainders) {
+          if (remaining <= 0) break
+          if (cuts[idx] < slacks[idx]) {
+            cuts[idx] += 1
+            remaining -= 1
+          }
+        }
+      }
+    }
+    return cuts
+  }
 
   /**
    * Generates the precision default anchors for a fresh installation.
@@ -340,14 +432,17 @@ object SchedulerEngine {
 
   /**
    * Finds available timeline gaps on a 24-hour cycle (0..1440) that are NOT occupied
-   * by the 7 immutable anchors or already committed tasks.
+   * by the 7 immutable anchors or already committed tasks via O(N log N) sorted interval merging.
    */
   fun findAvailableGaps(
     committedTasks: List<RoutineTask>,
     interTaskBufferMinutes: Int = 0
   ): List<ScheduleGap> {
-    val occupied = BooleanArray(1440) { false }
+    if (committedTasks.isEmpty()) {
+      return listOf(ScheduleGap(0, 1440, 1440))
+    }
 
+    val intervals = ArrayList<Pair<Int, Int>>(committedTasks.size + 2)
     for (task in committedTasks) {
       val start = ((task.startTimeMinute % 1440) + 1440) % 1440
       val taskBuffer = if (task.type == TaskType.DYNAMIC) {
@@ -355,48 +450,1035 @@ object SchedulerEngine {
       } else {
         0 // Anchors possess hard mathematical boundaries; do NOT bleed rest buffers across adjacent anchors
       }
-      val totalBlock = task.durationMinutes + taskBuffer
+      val totalBlock = (task.durationMinutes.coerceAtLeast(0) + taskBuffer).coerceAtMost(1440)
+      if (totalBlock <= 0) continue
 
-      for (i in 0 until totalBlock) {
-        val min = (start + i) % 1440
-        occupied[min] = true
+      val end = start + totalBlock
+      if (end <= 1440) {
+        intervals.add(start to end)
+      } else {
+        intervals.add(start to 1440)
+        intervals.add(0 to (end - 1440))
       }
     }
+
+    if (intervals.isEmpty()) {
+      return listOf(ScheduleGap(0, 1440, 1440))
+    }
+
+    intervals.sortWith(compareBy<Pair<Int, Int>> { it.first }.thenBy { it.second })
 
     val gaps = mutableListOf<ScheduleGap>()
-    var inGap = false
-    var gapStart = 0
+    var mergedStart = intervals[0].first
+    var mergedEnd = intervals[0].second
+    var cursor = 0
 
-    for (m in 0 until 1440) {
-      if (!occupied[m]) {
-        if (!inGap) {
-          inGap = true
-          gapStart = m
-        }
+    for (i in 1 until intervals.size) {
+      val (nextStart, nextEnd) = intervals[i]
+      if (nextStart <= mergedEnd) {
+        if (nextEnd > mergedEnd) mergedEnd = nextEnd
       } else {
-        if (inGap) {
-          inGap = false
-          val gapDuration = m - gapStart
-          if (gapDuration > 0) {
-            gaps.add(ScheduleGap(gapStart, m, gapDuration))
-          }
+        if (mergedStart > cursor) {
+          gaps.add(ScheduleGap(cursor, mergedStart, mergedStart - cursor))
         }
+        cursor = maxOf(cursor, mergedEnd)
+        mergedStart = nextStart
+        mergedEnd = nextEnd
       }
     }
-    if (inGap) {
-      val gapDuration = 1440 - gapStart
-      if (gapDuration > 0) {
-        gaps.add(ScheduleGap(gapStart, 1440, gapDuration))
-      }
+
+    if (mergedStart > cursor) {
+      gaps.add(ScheduleGap(cursor, mergedStart, mergedStart - cursor))
+    }
+    cursor = maxOf(cursor, mergedEnd)
+    if (cursor < 1440) {
+      gaps.add(ScheduleGap(cursor, 1440, 1440 - cursor))
     }
 
     return gaps
   }
 
   /**
-   * Main Dynamic Scheduling Function:
-   * Places dynamic tasks using preferred time / auto-fit / auto-splitting (>= 15m),
-   * applies inter-task buffer, and moves unplaceable tasks to the overflow pool.
+   * Compacts dynamic tasks within a single inter-anchor window [win] so that fragmented free
+   * gaps merge into one contiguous block at the tail of [win], enabling [neededBlock] placement.
+   * Returns the edge-aligned startMinute if rescue succeeded (mutating [scheduledTasks] in place),
+   * or null if [win] cannot host [neededBlock] even after full compaction.
+   */
+  private fun tryCompactWindowForTask(
+    win: ScheduleGap,
+    neededBlock: Int,
+    prefStart: Int,
+    scheduledTasks: MutableList<RoutineTask>,
+    interTaskBufferMinutes: Int
+  ): Int? {
+    val windowNonZeroDynamics = scheduledTasks
+      .filter {
+        it.type == TaskType.DYNAMIC &&
+          it.durationMinutes > 0 &&
+          it.startTimeMinute in win.startMinute until win.endMinute
+      }
+      .sortedBy { it.startTimeMinute }
+
+    if (windowNonZeroDynamics.isEmpty()) return null
+
+    val usedMinutes = windowNonZeroDynamics.sumOf {
+      it.durationMinutes.coerceAtLeast(0) + it.interTaskBufferMinutes.coerceIn(0, 30)
+    }
+    if (win.durationMinutes - usedMinutes < neededBlock) return null
+
+    // Pack existing non-zero dynamic tasks from win.startMinute and check remaining contiguous tail
+    val packedUpdates = HashMap<String, Int>(windowNonZeroDynamics.size)
+    var cursor = win.startMinute
+    for (existing in windowNonZeroDynamics) {
+      val dur = existing.durationMinutes.coerceAtLeast(0)
+      val buf = existing.interTaskBufferMinutes.coerceIn(0, 30)
+      packedUpdates[existing.id] = cursor
+      cursor += dur + buf
+    }
+
+    if (win.endMinute - cursor < neededBlock) return null
+
+    for (i in scheduledTasks.indices) {
+      val current = scheduledTasks[i]
+      val newStart = packedUpdates[current.id]
+      if (newStart != null && newStart != current.startTimeMinute) {
+        scheduledTasks[i] = current.copy(startTimeMinute = newStart)
+      }
+    }
+
+    // Check gaps inside win after compaction to handle any 0-duration markers cleanly
+    val compactedGaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
+      .filter { it.startMinute >= win.startMinute && it.endMinute <= win.endMinute && it.durationMinutes >= neededBlock }
+    val targetGap = compactedGaps.minByOrNull { gap ->
+      val possibleStart = when {
+        prefStart in gap.startMinute..(gap.endMinute - neededBlock) -> prefStart
+        prefStart < gap.startMinute -> gap.startMinute
+        else -> gap.endMinute - neededBlock
+      }
+      Math.abs(possibleStart - prefStart)
+    } ?: return cursor.coerceIn(win.startMinute, (win.endMinute - neededBlock).coerceAtLeast(win.startMinute))
+
+    return when {
+      prefStart in targetGap.startMinute..(targetGap.endMinute - neededBlock) -> prefStart
+      prefStart < targetGap.startMinute -> targetGap.startMinute
+      else -> targetGap.endMinute - neededBlock
+    }
+  }
+
+  private sealed interface PendingItem {
+    val sortIsHighPriority: Boolean
+    val sortIsFluidTwin: Boolean
+    val sortBirthDuration: Int
+    val sortBirthStart: Int
+
+    data class Standard(val task: RoutineTask) : PendingItem {
+      override val sortIsHighPriority: Boolean = task.isHighPriority
+      override val sortIsFluidTwin: Boolean = false
+      override val sortBirthDuration: Int = birthDurationOf(task)
+      override val sortBirthStart: Int = task.originalStartTimeMinute ?: task.startTimeMinute
+    }
+
+    data class TwinPair(val part1: RoutineTask, val part2: RoutineTask) : PendingItem {
+      override val sortIsHighPriority: Boolean = false
+      override val sortIsFluidTwin: Boolean = true
+      override val sortBirthDuration: Int = birthDurationOf(part1) + birthDurationOf(part2)
+      override val sortBirthStart: Int = part1.originalStartTimeMinute ?: part1.startTimeMinute
+    }
+
+    data class TwinPartOnly(val part: RoutineTask, val partnerWinKey: Int) : PendingItem {
+      override val sortIsHighPriority: Boolean = false
+      override val sortIsFluidTwin: Boolean = true
+      override val sortBirthDuration: Int = birthDurationOf(part)
+      override val sortBirthStart: Int = part.originalStartTimeMinute ?: part.startTimeMinute
+    }
+  }
+
+  private fun enclosingAnchorGapFor(
+    anchorGaps: List<ScheduleGap>,
+    minute: Int
+  ): ScheduleGap? {
+    if (anchorGaps.isEmpty()) return null
+    val safeMin = ((minute % 1440) + 1440) % 1440
+    return anchorGaps.firstOrNull { safeMin in it.startMinute until it.endMinute }
+      ?: anchorGaps.firstOrNull { safeMin in it.startMinute..it.endMinute }
+      ?: anchorGaps.minByOrNull { Math.abs(safeMin - (it.startMinute + it.endMinute) / 2) }
+  }
+
+  private fun tryPlaceEdgeAlignedInGaps(
+    task: RoutineTask,
+    requiredDuration: Int,
+    candidateGaps: List<ScheduleGap>,
+    scheduledTasks: MutableList<RoutineTask>
+  ): Boolean {
+    val birthStart = task.originalStartTimeMinute ?: task.startTimeMinute
+    val birthDur = birthDurationOf(task)
+    val taskBuffer = task.interTaskBufferMinutes.coerceIn(0, 30)
+    val requiredBlock = requiredDuration + taskBuffer
+
+    var bestGap: ScheduleGap? = null
+    var bestStart = -1
+    var minDistance = Int.MAX_VALUE
+
+    for (gap in candidateGaps) {
+      if (gap.durationMinutes >= requiredBlock) {
+        val possibleStart = when {
+          birthStart in gap.startMinute..(gap.endMinute - requiredBlock) -> birthStart
+          birthStart < gap.startMinute -> gap.startMinute
+          else -> gap.endMinute - requiredBlock
+        }
+        val dist = Math.abs(possibleStart - birthStart)
+        if (dist < minDistance) {
+          minDistance = dist
+          bestGap = gap
+          bestStart = possibleStart
+        }
+      }
+    }
+
+    if (bestGap != null && bestStart != -1) {
+      scheduledTasks.add(
+        task.copy(
+          startTimeMinute = bestStart,
+          originalStartTimeMinute = birthStart,
+          durationMinutes = requiredDuration,
+          originalDurationMinutes = task.originalDurationMinutes ?: birthDur,
+          isSplitPart = false,
+          isOverflow = false
+        )
+      )
+      return true
+    }
+    return false
+  }
+
+  private fun tryPass1StandardTask(
+    task: RoutineTask,
+    scheduledTasks: MutableList<RoutineTask>,
+    overflowTasks: MutableList<RoutineTask>,
+    anchorGaps: List<ScheduleGap>,
+    interTaskBufferMinutes: Int
+  ): Boolean {
+    val birthDur = birthDurationOf(task)
+    val birthStart = task.originalStartTimeMinute ?: task.startTimeMinute
+
+    if (birthDur == 0) {
+      scheduledTasks.add(
+        task.copy(
+          startTimeMinute = ((birthStart % 1440) + 1440) % 1440,
+          originalStartTimeMinute = birthStart,
+          durationMinutes = 0,
+          originalDurationMinutes = task.originalDurationMinutes ?: 0,
+          isSplitPart = false,
+          isOverflow = false
+        )
+      )
+      return true
+    }
+
+    val gaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
+    val taskBuffer = task.interTaskBufferMinutes.coerceIn(0, 30)
+    val requiredBlock = birthDur + taskBuffer
+
+    val enclosingAnchorGap = if (task.isHighPriority) {
+      enclosingAnchorGapFor(anchorGaps, birthStart)
+    } else {
+      null
+    }
+
+    if (task.isHighPriority && enclosingAnchorGap == null) {
+      overflowTasks.add(
+        task.copy(
+          originalStartTimeMinute = birthStart,
+          durationMinutes = birthDur,
+          originalDurationMinutes = task.originalDurationMinutes ?: birthDur,
+          isOverflow = true,
+          overflowReason = "High Priority task preferred time conflicts directly with an anchor wall."
+        )
+      )
+      return true // Handled (unrecoverable anchor wall conflict)
+    }
+
+    val candidateGaps = if (task.isHighPriority && enclosingAnchorGap != null) {
+      gaps.filter { it.startMinute >= enclosingAnchorGap.startMinute && it.endMinute <= enclosingAnchorGap.endMinute }
+    } else {
+      gaps
+    }
+
+    if (tryPlaceEdgeAlignedInGaps(task, birthDur, candidateGaps, scheduledTasks)) {
+      return true
+    }
+
+    // For High Priority tasks, also allow targeted local compaction inside fenced gap before Pass 2
+    if (task.isHighPriority && enclosingAnchorGap != null) {
+      val compactedStart = tryCompactWindowForTask(
+        win = enclosingAnchorGap,
+        neededBlock = requiredBlock,
+        prefStart = birthStart,
+        scheduledTasks = scheduledTasks,
+        interTaskBufferMinutes = interTaskBufferMinutes
+      )
+      if (compactedStart != null) {
+        scheduledTasks.add(
+          task.copy(
+            startTimeMinute = compactedStart,
+            originalStartTimeMinute = birthStart,
+            durationMinutes = birthDur,
+            originalDurationMinutes = task.originalDurationMinutes ?: birthDur,
+            isSplitPart = false,
+            isOverflow = false
+          )
+        )
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private fun windowUsedMinutes(snapshot: List<RoutineTask>, win: ScheduleGap): Int {
+    return snapshot
+      .filter {
+        it.type == TaskType.DYNAMIC &&
+          it.durationMinutes > 0 &&
+          it.startTimeMinute in win.startMinute until win.endMinute
+      }
+      .sumOf { it.durationMinutes.coerceAtLeast(0) + it.interTaskBufferMinutes.coerceIn(0, 30) }
+  }
+
+  private fun windowNonZeroDynamics(snapshot: List<RoutineTask>, win: ScheduleGap): List<RoutineTask> {
+    return snapshot
+      .filter {
+        it.type == TaskType.DYNAMIC &&
+          it.durationMinutes > 0 &&
+          it.startTimeMinute in win.startMinute until win.endMinute
+      }
+      .sortedBy { it.startTimeMinute }
+  }
+
+  /**
+   * Re-packs [win] inside [snapshot] after applying [cutsById] (duration reductions), removing [evictIds],
+   * and optionally placing [incomingTask] with [incomingDuration]. Returns false if capacity is exceeded.
+   */
+  private fun repackWindowWithChanges(
+    snapshot: MutableList<RoutineTask>,
+    win: ScheduleGap,
+    cutsById: Map<String, Int> = emptyMap(),
+    evictIds: Set<String> = emptySet(),
+    incomingTask: RoutineTask? = null,
+    incomingDuration: Int = 0
+  ): Boolean {
+    val existingInWin = windowNonZeroDynamics(snapshot, win)
+      .filter { it.id !in evictIds }
+
+    val adjustedExisting = existingInWin.map { t ->
+      val cut = cutsById[t.id] ?: 0
+      val newDur = (t.durationMinutes - cut).coerceAtLeast(minDonorDurationOf(t))
+      val birthDur = birthDurationOf(t)
+      t.copy(
+        durationMinutes = newDur,
+        originalDurationMinutes = t.originalDurationMinutes ?: birthDur
+      )
+    }
+
+    val incomingEntry = if (incomingTask != null) {
+      val bBirthStart = incomingTask.originalStartTimeMinute ?: incomingTask.startTimeMinute
+      val bBirthDur = birthDurationOf(incomingTask)
+      incomingTask.copy(
+        originalStartTimeMinute = bBirthStart,
+        durationMinutes = incomingDuration,
+        originalDurationMinutes = incomingTask.originalDurationMinutes ?: bBirthDur,
+        isSplitPart = false,
+        isOverflow = false
+      )
+    } else {
+      null
+    }
+
+    val combined = if (incomingEntry != null) {
+      val bBirthStart = incomingEntry.originalStartTimeMinute ?: incomingEntry.startTimeMinute
+      if (bBirthStart in win.startMinute until win.endMinute) {
+        (adjustedExisting + incomingEntry).sortedBy { it.originalStartTimeMinute ?: it.startTimeMinute }
+      } else {
+        adjustedExisting + incomingEntry
+      }
+    } else {
+      adjustedExisting
+    }
+
+    val totalBlockNeeded = combined.sumOf {
+      it.durationMinutes.coerceAtLeast(0) + it.interTaskBufferMinutes.coerceIn(0, 30)
+    }
+    if (totalBlockNeeded > win.durationMinutes) return false
+
+    val replaceIds = (existingInWin.map { it.id } + evictIds).toSet()
+    snapshot.removeAll { it.id in replaceIds }
+
+    var cursor = win.startMinute
+    for (item in combined) {
+      val buf = item.interTaskBufferMinutes.coerceIn(0, 30)
+      snapshot.add(item.copy(startTimeMinute = cursor))
+      cursor += item.durationMinutes.coerceAtLeast(0) + buf
+    }
+    return true
+  }
+
+  /**
+   * Relocates [movable] (at [targetDuration]) into [destWin], compacting [destWin] if fragmented.
+   */
+  private fun placeTaskInOtherWindow(
+    snapshot: MutableList<RoutineTask>,
+    destWin: ScheduleGap,
+    movable: RoutineTask,
+    targetDuration: Int,
+    interTaskBufferMinutes: Int
+  ): Boolean {
+    val mBirthStart = movable.originalStartTimeMinute ?: movable.startTimeMinute
+    val mBirthDur = birthDurationOf(movable)
+    val mBuf = movable.interTaskBufferMinutes.coerceIn(0, 30)
+    val neededBlock = targetDuration + mBuf
+    val freeGapsInDest = findAvailableGaps(snapshot, interTaskBufferMinutes)
+      .filter { it.startMinute >= destWin.startMinute && it.endMinute <= destWin.endMinute && it.durationMinutes >= neededBlock }
+
+    val directGap = freeGapsInDest.minByOrNull { gap ->
+      val possibleStart = when {
+        mBirthStart in gap.startMinute..(gap.endMinute - neededBlock) -> mBirthStart
+        mBirthStart < gap.startMinute -> gap.startMinute
+        else -> gap.endMinute - neededBlock
+      }
+      Math.abs(possibleStart - mBirthStart)
+    }
+
+    val placedStart = if (directGap != null) {
+      when {
+        mBirthStart in directGap.startMinute..(directGap.endMinute - neededBlock) -> mBirthStart
+        mBirthStart < directGap.startMinute -> directGap.startMinute
+        else -> directGap.endMinute - neededBlock
+      }
+    } else {
+      tryCompactWindowForTask(
+        win = destWin,
+        neededBlock = neededBlock,
+        prefStart = mBirthStart,
+        scheduledTasks = snapshot,
+        interTaskBufferMinutes = interTaskBufferMinutes
+      )
+    } ?: return false
+
+    snapshot.add(
+      movable.copy(
+        startTimeMinute = placedStart,
+        originalStartTimeMinute = mBirthStart,
+        durationMinutes = targetDuration,
+        originalDurationMinutes = movable.originalDurationMinutes ?: mBirthDur,
+        isSplitPart = false,
+        isOverflow = false
+      )
+    )
+    return true
+  }
+
+  private fun canTwinOccupyWindow(
+    task: RoutineTask,
+    destWin: ScheduleGap,
+    snapshot: List<RoutineTask>,
+    dayAnchors: List<RoutineTask>,
+    activeDay: RoutineDay
+  ): Boolean {
+    if (!task.isFluidTwin || task.fluidTwinId.isNullOrEmpty()) return true
+    val partner = snapshot.firstOrNull {
+      it.id != task.id &&
+        it.fluidTwinId == task.fluidTwinId &&
+        it.type == TaskType.DYNAMIC
+    } ?: return true
+    val partnerWinKey = getInterAnchorWindowKey(dayAnchors, partner.startTimeMinute, activeDay)
+    val destWinKey = getInterAnchorWindowKey(dayAnchors, destWin.startMinute, activeDay)
+    return partnerWinKey != destWinKey
+  }
+
+  /**
+   * Attempts Strategy #1 (Cross-Anchor Smart Task Migration) for blocked [task] inside [win].
+   * Moves smaller non-priority tasks out of [win] at full duration into free tail gaps of other windows.
+   */
+  private fun tryCrossAnchorMigration(
+    task: RoutineTask,
+    win: ScheduleGap,
+    anchorGaps: List<ScheduleGap>,
+    dayAnchors: List<RoutineTask>,
+    activeDay: RoutineDay,
+    scheduledTasks: MutableList<RoutineTask>,
+    interTaskBufferMinutes: Int
+  ): Boolean {
+    val birthDur = birthDurationOf(task)
+    val bBuf = task.interTaskBufferMinutes.coerceIn(0, 30)
+    val bFullBlock = birthDur + bBuf
+    val freeInW = win.durationMinutes - windowUsedMinutes(scheduledTasks, win)
+    val neededToFree = bFullBlock - freeInW
+    if (neededToFree <= 0) return false
+
+    val movables = windowNonZeroDynamics(scheduledTasks, win)
+      .filter { !it.isHighPriority }
+      .sortedWith(
+        compareBy<RoutineTask> { it.isFluidTwin }
+          .thenBy { it.durationMinutes + it.interTaskBufferMinutes.coerceIn(0, 30) }
+      )
+    if (movables.isEmpty()) return false
+
+    val snapshot = ArrayList(scheduledTasks)
+    val otherWindows = anchorGaps
+      .filter { it.startMinute != win.startMinute || it.endMinute != win.endMinute }
+      .sortedBy { Math.abs((it.startMinute + it.endMinute) / 2 - (win.startMinute + win.endMinute) / 2) }
+
+    val migratedIds = mutableSetOf<String>()
+    var freedMinutes = 0
+
+    for (m in movables) {
+      if (freedMinutes >= neededToFree) break
+      val mDur = m.durationMinutes.coerceAtLeast(0)
+      val mBlock = mDur + m.interTaskBufferMinutes.coerceIn(0, 30)
+      val destWin = otherWindows.firstOrNull { candWin ->
+        val availInDest = candWin.durationMinutes - windowUsedMinutes(snapshot, candWin)
+        availInDest >= mBlock && canTwinOccupyWindow(m, candWin, snapshot, dayAnchors, activeDay)
+      }
+      if (destWin != null) {
+        snapshot.removeAll { it.id == m.id }
+        if (placeTaskInOtherWindow(snapshot, destWin, m, mDur, interTaskBufferMinutes)) {
+          migratedIds.add(m.id)
+          freedMinutes += mBlock
+        } else {
+          return false
+        }
+      }
+    }
+
+    if (freedMinutes < neededToFree || migratedIds.isEmpty()) return false
+
+    if (repackWindowWithChanges(snapshot, win, incomingTask = task, incomingDuration = birthDur)) {
+      scheduledTasks.clear()
+      scheduledTasks.addAll(snapshot)
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Attempts Strategy #4 (Micro-Deficit Neighbor Borrowing for 1..5m deficits) inside [win].
+   */
+  private fun tryMicroDeficitBorrowing(
+    task: RoutineTask,
+    win: ScheduleGap,
+    scheduledTasks: MutableList<RoutineTask>
+  ): Boolean {
+    val birthDur = birthDurationOf(task)
+    val bBuf = task.interTaskBufferMinutes.coerceIn(0, 30)
+    val bFullBlock = birthDur + bBuf
+    val freeInW = win.durationMinutes - windowUsedMinutes(scheduledTasks, win)
+    val deficit = bFullBlock - freeInW
+    if (deficit !in 1..5) return false
+
+    val donors = windowNonZeroDynamics(scheduledTasks, win)
+      .map { it to availableFlexSlackOf(it) }
+      .filter { it.second > 0 }
+      .sortedWith(
+        compareBy<Pair<RoutineTask, Int>> { it.first.isHighPriority }
+          .thenByDescending { it.second }
+          .thenByDescending { it.first.durationMinutes }
+      )
+    if (donors.isEmpty()) return false
+
+    val cuts = HashMap<String, Int>(2)
+    // Prefer 1 single donor if possible, else up to 2 donors
+    val single = donors.firstOrNull { it.second >= deficit }
+    if (single != null) {
+      cuts[single.first.id] = deficit
+    } else if (donors.size >= 2 && donors[0].second + donors[1].second >= deficit) {
+      val cut0 = minOf(donors[0].second, deficit)
+      cuts[donors[0].first.id] = cut0
+      cuts[donors[1].first.id] = deficit - cut0
+    } else {
+      return false
+    }
+
+    val snapshot = ArrayList(scheduledTasks)
+    if (repackWindowWithChanges(snapshot, win, cutsById = cuts, incomingTask = task, incomingDuration = birthDur)) {
+      scheduledTasks.clear()
+      scheduledTasks.addAll(snapshot)
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Attempts Strategy #2 (Collective Fair-Share Elastic Compression via Largest-Remainder Water-Filling) inside [win].
+   * Exhausts Tier-1 (non-Priority) slack before touching Tier-2 (High Priority) slack.
+   */
+  private fun tryCollectiveFairShareCompression(
+    task: RoutineTask,
+    win: ScheduleGap,
+    scheduledTasks: MutableList<RoutineTask>
+  ): Boolean {
+    val birthDur = birthDurationOf(task)
+    val bBuf = task.interTaskBufferMinutes.coerceIn(0, 30)
+    val bFullBlock = birthDur + bBuf
+    val freeInW = win.durationMinutes - windowUsedMinutes(scheduledTasks, win)
+    val deficit = bFullBlock - freeInW
+    if (deficit <= 0) return false
+
+    val winTasks = windowNonZeroDynamics(scheduledTasks, win)
+    val bSlack = (birthDur - minAllowedDurationOf(task)).coerceAtLeast(0)
+
+    val tier1Existing = winTasks.filter { !it.isHighPriority && availableFlexSlackOf(it) > 0 }
+    val tier1ExistingSlacks = tier1Existing.map { availableFlexSlackOf(it) }
+    val tier1IncludeB = !task.isHighPriority && bSlack > 0
+    val tier1TotalSlack = tier1ExistingSlacks.sum() + (if (tier1IncludeB) bSlack else 0)
+
+    val tier2Existing = winTasks.filter { it.isHighPriority && availableFlexSlackOf(it) > 0 }
+    val tier2ExistingSlacks = tier2Existing.map { availableFlexSlackOf(it) }
+    val tier2IncludeB = task.isHighPriority && bSlack > 0
+    val tier2TotalSlack = tier2ExistingSlacks.sum() + (if (tier2IncludeB) bSlack else 0)
+
+    if (tier1TotalSlack + tier2TotalSlack < deficit) return false
+
+    val cutsById = HashMap<String, Int>()
+    var bCut = 0
+
+    if (tier1TotalSlack >= deficit) {
+      val slacks = IntArray(tier1Existing.size + (if (tier1IncludeB) 1 else 0))
+      for (i in tier1Existing.indices) slacks[i] = tier1ExistingSlacks[i]
+      if (tier1IncludeB) slacks[tier1Existing.size] = bSlack
+      val dist = distributeDeficitWaterFilling(slacks, deficit)
+      for (i in tier1Existing.indices) {
+        if (dist[i] > 0) cutsById[tier1Existing[i].id] = dist[i]
+      }
+      if (tier1IncludeB) bCut = dist[tier1Existing.size]
+    } else {
+      // Exhaust all Tier-1 slack first, then distribute remaining deficit across Tier-2 via water-filling
+      for (i in tier1Existing.indices) {
+        if (tier1ExistingSlacks[i] > 0) cutsById[tier1Existing[i].id] = tier1ExistingSlacks[i]
+      }
+      if (tier1IncludeB) bCut = bSlack
+
+      val remDeficit = deficit - tier1TotalSlack
+      val t2Slacks = IntArray(tier2Existing.size + (if (tier2IncludeB) 1 else 0))
+      for (i in tier2Existing.indices) t2Slacks[i] = tier2ExistingSlacks[i]
+      if (tier2IncludeB) t2Slacks[tier2Existing.size] = bSlack
+      val dist2 = distributeDeficitWaterFilling(t2Slacks, remDeficit)
+      for (i in tier2Existing.indices) {
+        if (dist2[i] > 0) cutsById[tier2Existing[i].id] = dist2[i]
+      }
+      if (tier2IncludeB) bCut = dist2[tier2Existing.size]
+    }
+
+    val bFinalDur = (birthDur - bCut).coerceIn(minAllowedDurationOf(task), birthDur)
+    val snapshot = ArrayList(scheduledTasks)
+    if (repackWindowWithChanges(snapshot, win, cutsById = cutsById, incomingTask = task, incomingDuration = bFinalDur)) {
+      scheduledTasks.clear()
+      scheduledTasks.addAll(snapshot)
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Attempts Strategy #3 (Flex-to-Shrink & Relocate):
+   * - 3A: Self-shrink [task] within its own flexibility into smaller gaps across [candidateWindows].
+   * - 3B: Shrink movable non-priority neighbor [M] inside [win] within M's flex so [M] fits into a smaller
+   *       tail gap in another window, freeing [win] for [task] (with optional fair-share in [win] if needed).
+   */
+  private fun tryFlexToShrinkAndRelocate(
+    task: RoutineTask,
+    candidateWindows: List<ScheduleGap>,
+    anchorGaps: List<ScheduleGap>,
+    dayAnchors: List<RoutineTask>,
+    activeDay: RoutineDay,
+    scheduledTasks: MutableList<RoutineTask>,
+    interTaskBufferMinutes: Int
+  ): Boolean {
+    val birthStart = task.originalStartTimeMinute ?: task.startTimeMinute
+    val birthDur = birthDurationOf(task)
+    val bBuf = task.interTaskBufferMinutes.coerceIn(0, 30)
+    val bMinDur = minAllowedDurationOf(task)
+    val bMinBlock = bMinDur + bBuf
+
+    // Strategy 3A: Self-shrink into smaller open or compacted gap across candidate windows
+    if (birthDur > bMinDur) {
+      val currentGaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
+      val eligibleGaps = if (task.isHighPriority) {
+        val enc = enclosingAnchorGapFor(anchorGaps, birthStart)
+        if (enc != null) {
+          currentGaps.filter { it.startMinute >= enc.startMinute && it.endMinute <= enc.endMinute }
+        } else {
+          emptyList()
+        }
+      } else {
+        currentGaps
+      }
+
+      var bestGap: ScheduleGap? = null
+      var bestStart = -1
+      var bestDur = -1
+      var minDist = Int.MAX_VALUE
+
+      for (gap in eligibleGaps) {
+        if (gap.durationMinutes >= bMinBlock) {
+          val fittedDur = (gap.durationMinutes - bBuf).coerceIn(bMinDur, birthDur)
+          val fittedBlock = fittedDur + bBuf
+          val possibleStart = when {
+            birthStart in gap.startMinute..(gap.endMinute - fittedBlock) -> birthStart
+            birthStart < gap.startMinute -> gap.startMinute
+            else -> gap.endMinute - fittedBlock
+          }
+          val dist = Math.abs(possibleStart - birthStart)
+          if (dist < minDist) {
+            minDist = dist
+            bestGap = gap
+            bestStart = possibleStart
+            bestDur = fittedDur
+          }
+        }
+      }
+
+      if (bestGap != null && bestStart != -1 && bestDur >= bMinDur) {
+        scheduledTasks.add(
+          task.copy(
+            startTimeMinute = bestStart,
+            originalStartTimeMinute = birthStart,
+            durationMinutes = bestDur,
+            originalDurationMinutes = task.originalDurationMinutes ?: birthDur,
+            isSplitPart = false,
+            isOverflow = false
+          )
+        )
+        return true
+      }
+
+      // Also check compacted window tails for self-shrink
+      for (win in candidateWindows) {
+        val freeInW = win.durationMinutes - windowUsedMinutes(scheduledTasks, win)
+        if (freeInW >= bMinBlock) {
+          val fittedDur = (freeInW - bBuf).coerceIn(bMinDur, birthDur)
+          val snapshot = ArrayList(scheduledTasks)
+          if (repackWindowWithChanges(snapshot, win, incomingTask = task, incomingDuration = fittedDur)) {
+            scheduledTasks.clear()
+            scheduledTasks.addAll(snapshot)
+            return true
+          }
+        }
+      }
+    }
+
+    // Strategy 3B: Shrink movable non-priority neighbor M inside win within M's flex to relocate M to another window
+    for (win in candidateWindows) {
+      val freeInW = win.durationMinutes - windowUsedMinutes(scheduledTasks, win)
+      val neededToFree = (birthDur + bBuf) - freeInW
+      if (neededToFree <= 0) continue
+
+      val otherWindows = anchorGaps
+        .filter { it.startMinute != win.startMinute || it.endMinute != win.endMinute }
+        .sortedBy { Math.abs((it.startMinute + it.endMinute) / 2 - (win.startMinute + win.endMinute) / 2) }
+
+      val movables = windowNonZeroDynamics(scheduledTasks, win)
+        .filter { !it.isHighPriority && availableFlexSlackOf(it) > 0 }
+        .sortedWith(
+          compareBy<RoutineTask> { it.isFluidTwin }
+            .thenBy { it.durationMinutes }
+        )
+
+      for (m in movables) {
+        val mBuf = m.interTaskBufferMinutes.coerceIn(0, 30)
+        val mMinDur = minDonorDurationOf(m)
+        val mMinBlock = mMinDur + mBuf
+        val mCurrentBlock = m.durationMinutes + mBuf
+
+        val destTuple = otherWindows.mapNotNull { destWin ->
+          if (!canTwinOccupyWindow(m, destWin, scheduledTasks, dayAnchors, activeDay)) {
+            null
+          } else {
+            val destFree = destWin.durationMinutes - windowUsedMinutes(scheduledTasks, destWin)
+            if (destFree >= mMinBlock) {
+              val fittedMDur = (destFree - mBuf).coerceIn(mMinDur, m.durationMinutes)
+              destWin to fittedMDur
+            } else {
+              null
+            }
+          }
+        }.maxByOrNull { it.second } ?: continue
+
+        val (destWin, fittedMDur) = destTuple
+        val snapshot = ArrayList(scheduledTasks)
+        snapshot.removeAll { it.id == m.id }
+        if (!placeTaskInOtherWindow(snapshot, destWin, m, fittedMDur, interTaskBufferMinutes)) {
+          continue
+        }
+
+        // Now check if win can host task (either directly or via collective fair-share)
+        val newFreeInW = win.durationMinutes - windowUsedMinutes(snapshot, win)
+        if (newFreeInW >= birthDur + bBuf) {
+          if (repackWindowWithChanges(snapshot, win, incomingTask = task, incomingDuration = birthDur)) {
+            scheduledTasks.clear()
+            scheduledTasks.addAll(snapshot)
+            return true
+          }
+        } else if (tryCollectiveFairShareCompression(task, win, snapshot)) {
+          scheduledTasks.clear()
+          scheduledTasks.addAll(snapshot)
+          return true
+        }
+      }
+
+      // Multi-evict combination if single movable wasn't enough (bounded, deterministic)
+      val allMovables = windowNonZeroDynamics(scheduledTasks, win)
+        .filter { !it.isHighPriority }
+        .sortedBy { it.durationMinutes }
+      if (allMovables.size >= 2) {
+        val snapshot = ArrayList(scheduledTasks)
+        var evictedCount = 0
+        for (m in allMovables) {
+          val mBuf = m.interTaskBufferMinutes.coerceIn(0, 30)
+          val mMinDur = minDonorDurationOf(m)
+          val mMinBlock = mMinDur + mBuf
+          val destTuple = otherWindows.mapNotNull { destWin ->
+            if (!canTwinOccupyWindow(m, destWin, snapshot, dayAnchors, activeDay)) {
+              null
+            } else {
+              val destFree = destWin.durationMinutes - windowUsedMinutes(snapshot, destWin)
+              if (destFree >= mMinBlock) {
+                destWin to (destFree - mBuf).coerceIn(mMinDur, m.durationMinutes)
+              } else {
+                null
+              }
+            }
+          }.maxByOrNull { it.second }
+
+          if (destTuple != null) {
+            snapshot.removeAll { it.id == m.id }
+            if (placeTaskInOtherWindow(snapshot, destTuple.first, m, destTuple.second, interTaskBufferMinutes)) {
+              evictedCount++
+              val newFree = win.durationMinutes - windowUsedMinutes(snapshot, win)
+              if (newFree >= birthDur + bBuf) {
+                if (repackWindowWithChanges(snapshot, win, incomingTask = task, incomingDuration = birthDur)) {
+                  scheduledTasks.clear()
+                  scheduledTasks.addAll(snapshot)
+                  return true
+                }
+              } else if (tryCollectiveFairShareCompression(task, win, snapshot)) {
+                scheduledTasks.clear()
+                scheduledTasks.addAll(snapshot)
+                return true
+              }
+            }
+          }
+        }
+        if (evictedCount > 0) {
+          // If still couldn't fit at birthDur or fair-share, check self-shrink inside freed window
+          val newFree = win.durationMinutes - windowUsedMinutes(snapshot, win)
+          if (newFree >= bMinBlock) {
+            val fittedDur = (newFree - bBuf).coerceIn(bMinDur, birthDur)
+            if (repackWindowWithChanges(snapshot, win, incomingTask = task, incomingDuration = fittedDur)) {
+              scheduledTasks.clear()
+              scheduledTasks.addAll(snapshot)
+              return true
+            }
+          }
+        }
+      }
+    }
+
+    return false
+  }
+
+  private fun trySolveStandardPendingTask(
+    task: RoutineTask,
+    anchorGaps: List<ScheduleGap>,
+    dayAnchors: List<RoutineTask>,
+    activeDay: RoutineDay,
+    scheduledTasks: MutableList<RoutineTask>,
+    overflowTasks: MutableList<RoutineTask>,
+    interTaskBufferMinutes: Int
+  ) {
+    val birthStart = task.originalStartTimeMinute ?: task.startTimeMinute
+    val birthDur = birthDurationOf(task)
+    val bBuf = task.interTaskBufferMinutes.coerceIn(0, 30)
+    val bFullBlock = birthDur + bBuf
+
+    val enclosingAnchorGap = if (task.isHighPriority) {
+      enclosingAnchorGapFor(anchorGaps, birthStart)
+    } else {
+      null
+    }
+
+    if (task.isHighPriority && enclosingAnchorGap == null) {
+      overflowTasks.add(
+        task.copy(
+          originalStartTimeMinute = birthStart,
+          durationMinutes = birthDur,
+          originalDurationMinutes = task.originalDurationMinutes ?: birthDur,
+          isOverflow = true,
+          overflowReason = "High Priority task preferred time conflicts directly with an anchor wall."
+        )
+      )
+      return
+    }
+
+    val candidateWindows = if (task.isHighPriority && enclosingAnchorGap != null) {
+      listOf(enclosingAnchorGap)
+    } else {
+      val prefWin = anchorGaps.firstOrNull { birthStart in it.startMinute until it.endMinute }
+      val rest = anchorGaps
+        .filter { it != prefWin }
+        .sortedBy { Math.abs((it.startMinute + it.endMinute) / 2 - birthStart) }
+      if (prefWin != null) listOf(prefWin) + rest else rest
+    }
+
+    // 0. Check if gap opened or local compaction inside any candidate window fits task at full birthDuration
+    val gaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
+    val candidateGaps = if (task.isHighPriority && enclosingAnchorGap != null) {
+      gaps.filter { it.startMinute >= enclosingAnchorGap.startMinute && it.endMinute <= enclosingAnchorGap.endMinute }
+    } else {
+      gaps
+    }
+    if (tryPlaceEdgeAlignedInGaps(task, birthDur, candidateGaps, scheduledTasks)) return
+
+    for (win in candidateWindows) {
+      val compactedStart = tryCompactWindowForTask(
+        win = win,
+        neededBlock = bFullBlock,
+        prefStart = birthStart,
+        scheduledTasks = scheduledTasks,
+        interTaskBufferMinutes = interTaskBufferMinutes
+      )
+      if (compactedStart != null) {
+        scheduledTasks.add(
+          task.copy(
+            startTimeMinute = compactedStart,
+            originalStartTimeMinute = birthStart,
+            durationMinutes = birthDur,
+            originalDurationMinutes = task.originalDurationMinutes ?: birthDur,
+            isSplitPart = false,
+            isOverflow = false
+          )
+        )
+        return
+      }
+    }
+
+    // Strategy #1: Cross-Anchor Smart Task Migration (move smaller non-HP tasks out at full duration)
+    for (win in candidateWindows) {
+      if (tryCrossAnchorMigration(task, win, anchorGaps, dayAnchors, activeDay, scheduledTasks, interTaskBufferMinutes)) {
+        return
+      }
+    }
+
+    // Strategy #4: Micro-Deficit Neighbor Borrowing (1..5m deficit covered by 1-2 flexible donors)
+    for (win in candidateWindows) {
+      if (tryMicroDeficitBorrowing(task, win, scheduledTasks)) {
+        return
+      }
+    }
+
+    // Strategy #2: Collective Fair-Share Elastic Compression (Water-Filling across window participants)
+    for (win in candidateWindows) {
+      if (tryCollectiveFairShareCompression(task, win, scheduledTasks)) {
+        return
+      }
+    }
+
+    // Strategy #3: Flex-to-Shrink & Relocate (3A self-shrink, 3B shrink-and-relocate movable neighbor)
+    if (tryFlexToShrinkAndRelocate(task, candidateWindows, anchorGaps, dayAnchors, activeDay, scheduledTasks, interTaskBufferMinutes)) {
+      return
+    }
+
+    val overflowReason = if (task.isHighPriority) {
+      "High Priority task cannot fit between assigned anchor boundaries without overleaping walls."
+    } else {
+      "No available open slot can accommodate ${birthDur}m without violating anchors"
+    }
+    overflowTasks.add(
+      task.copy(
+        originalStartTimeMinute = birthStart,
+        durationMinutes = birthDur,
+        originalDurationMinutes = task.originalDurationMinutes ?: birthDur,
+        isOverflow = true,
+        overflowReason = overflowReason
+      )
+    )
+  }
+
+  private fun tryEnsureWindowRoomForTwinPart(
+    win: ScheduleGap,
+    minNeededBlock: Int,
+    anchorGaps: List<ScheduleGap>,
+    dayAnchors: List<RoutineTask>,
+    activeDay: RoutineDay,
+    scheduledTasks: MutableList<RoutineTask>,
+    interTaskBufferMinutes: Int,
+    excludedWinKey: Int? = null
+  ): ScheduleGap? {
+    val freeNow = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
+      .filter { it.startMinute >= win.startMinute && it.endMinute <= win.endMinute && it.durationMinutes >= minNeededBlock }
+      .maxByOrNull { it.durationMinutes }
+    if (freeNow != null) return freeNow
+
+    // Try local compaction inside win
+    val snapshotCompact = ArrayList(scheduledTasks)
+    if (tryCompactWindowForTask(win, minNeededBlock, win.startMinute, snapshotCompact, interTaskBufferMinutes) != null) {
+      val compacted = findAvailableGaps(snapshotCompact, interTaskBufferMinutes)
+        .filter { it.startMinute >= win.startMinute && it.endMinute <= win.endMinute && it.durationMinutes >= minNeededBlock }
+        .maxByOrNull { it.durationMinutes }
+      if (compacted != null) {
+        scheduledTasks.clear()
+        scheduledTasks.addAll(snapshotCompact)
+        return compacted
+      }
+    }
+
+    // Try migrating non-priority non-twin tasks out of win into free space in other windows
+    val freeInW = win.durationMinutes - windowUsedMinutes(scheduledTasks, win)
+    val neededToFree = minNeededBlock - freeInW
+    if (neededToFree > 0) {
+      val movables = windowNonZeroDynamics(scheduledTasks, win)
+        .filter { !it.isHighPriority && !it.isFluidTwin }
+        .sortedBy { it.durationMinutes }
+      if (movables.isNotEmpty()) {
+        val snap = ArrayList(scheduledTasks)
+        val otherWins = anchorGaps
+          .filter { (it.startMinute != win.startMinute || it.endMinute != win.endMinute) &&
+            (excludedWinKey == null || getInterAnchorWindowKey(dayAnchors, it.startMinute, activeDay) != excludedWinKey) }
+        var freed = 0
+        for (m in movables) {
+          if (freed >= neededToFree) break
+          val mDur = m.durationMinutes
+          val mBlock = mDur + m.interTaskBufferMinutes.coerceIn(0, 30)
+          val dest = otherWins.firstOrNull { cw -> cw.durationMinutes - windowUsedMinutes(snap, cw) >= mBlock }
+          if (dest != null) {
+            snap.removeAll { it.id == m.id }
+            if (placeTaskInOtherWindow(snap, dest, m, mDur, interTaskBufferMinutes)) {
+              freed += mBlock
+            }
+          }
+        }
+        if (freed >= neededToFree && repackWindowWithChanges(snap, win)) {
+          val after = findAvailableGaps(snap, interTaskBufferMinutes)
+            .filter { it.startMinute >= win.startMinute && it.endMinute <= win.endMinute && it.durationMinutes >= minNeededBlock }
+            .maxByOrNull { it.durationMinutes }
+          if (after != null) {
+            scheduledTasks.clear()
+            scheduledTasks.addAll(snap)
+            return after
+          }
+        }
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Main Dynamic Scheduling Function (v1.3 Two-Tier Human-Level Constraint Solver):
+   * - Pass 1 (Baseline Fit): Evaluates Priority -> Fluid Twins -> Normal tasks at full birth duration
+   *   without premature shrinking or overflowing; queues blocked tasks into [pendingQueue].
+   * - Pass 2 (Human-Level Solver): Resolves [pendingQueue] sorted by Priority/Twin/Duration/Time via:
+   *   Local Compaction -> Strategy #1 Cross-Anchor Migration -> Strategy #4 Micro-Deficit Borrowing ->
+   *   Strategy #2 Fair-Share Water-Filling -> Strategy #3 Flex-to-Shrink & Relocate.
    */
   fun scheduleDay(
     anchors: List<RoutineTask>,
@@ -405,50 +1487,51 @@ object SchedulerEngine {
     interTaskBufferMinutes: Int = 0
   ): ScheduleResult {
     // 1. Anchors active on this day (excluding soft-deleted and paused)
-    val dayAnchors = anchors
-      .filter { !it.isDeleted && !it.isCurrentlyPaused() && it.selectedDays.contains(activeDay) }
-      .map { anchor ->
-        if (anchor.slotNumber == 3 && activeDay == RoutineDay.FRIDAY) {
-          anchor.copy(
-            title = anchor.fridayTitle?.ifBlank { null } ?: anchor.title,
-            startTimeMinute = anchor.fridayStartTimeMinute ?: anchor.startTimeMinute,
-            durationMinutes = anchor.fridayDurationMinutes ?: anchor.durationMinutes,
-            voiceMessage = anchor.fridayVoiceMessage?.ifBlank { null } ?: anchor.voiceMessage
-          )
-        } else {
-          anchor
-        }
-      }
-
-    // List of placed tasks starting with anchors
+    val dayAnchors = resolveEffectiveDayAnchors(anchors, activeDay)
     val scheduledTasks = ArrayList(dayAnchors)
     val overflowTasks = mutableListOf<RoutineTask>()
+    val anchorGaps = findAvailableGaps(dayAnchors, 0)
 
     // Filter dynamic tasks for the active day (excluding soft-deleted and paused)
     val dayDynamicTasks = dynamicTasks.filter { !it.isDeleted && !it.isCurrentlyPaused() && it.selectedDays.contains(activeDay) }
 
-    // 2. Separate Fluid Twins and Standard Dynamic Tasks
     val (fluidTwinTasks, standardTasks) = dayDynamicTasks.partition { it.isFluidTwin && !it.fluidTwinId.isNullOrEmpty() }
-    val fluidTwinGroups = fluidTwinTasks.groupBy { it.fluidTwinId!! }
+    val (highPriorityStandardTasks, normalStandardTasks) = standardTasks.partition { it.isHighPriority }
+    val pendingQueue = mutableListOf<PendingItem>()
 
+    // Pass 1A: High Priority standard tasks (baseline edge fit or fenced window compaction)
+    val sortedHighPriorityTasks = highPriorityStandardTasks.sortedWith(
+      compareByDescending<RoutineTask> { it.manualPlacementOrder }
+        .thenBy { it.originalStartTimeMinute ?: it.startTimeMinute }
+    )
+    for (hpTask in sortedHighPriorityTasks) {
+      if (!tryPass1StandardTask(hpTask, scheduledTasks, overflowTasks, anchorGaps, interTaskBufferMinutes)) {
+        pendingQueue.add(PendingItem.Standard(hpTask))
+      }
+    }
+
+    // Pass 1B: Fluid Twins (after High Priority anchor-fenced tasks)
+    val fluidTwinGroups = fluidTwinTasks.groupBy { it.fluidTwinId!! }
     for ((_, twinGroup) in fluidTwinGroups) {
       val part1 = twinGroup.find { it.fluidTwinPart == 1 } ?: twinGroup.getOrNull(0)
       val part2 = twinGroup.find { it.fluidTwinPart == 2 } ?: twinGroup.getOrNull(1)
 
-      if (part1 == null || part2 == null) {
+      if (part1 == null || part2 == null || part1.id == part2.id) {
         val lone = part1 ?: part2
         if (lone != null) {
-          // Lone twin treated as normal dynamic task
           val birthStart = lone.originalStartTimeMinute ?: lone.startTimeMinute
+          val birthDur = birthDurationOf(lone)
           val gaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
-          val fitGap = gaps.find { birthStart in it.startMinute until it.endMinute && it.durationMinutes >= lone.durationMinutes }
-            ?: gaps.find { it.durationMinutes >= lone.durationMinutes }
+          val fitGap = gaps.find { birthStart in it.startMinute until it.endMinute && it.durationMinutes >= birthDur }
+            ?: gaps.find { it.durationMinutes >= birthDur }
           if (fitGap != null) {
-            val start = if (birthStart in fitGap.startMinute..(fitGap.endMinute - lone.durationMinutes)) birthStart else fitGap.startMinute
+            val start = if (birthStart in fitGap.startMinute..(fitGap.endMinute - birthDur)) birthStart else fitGap.startMinute
             scheduledTasks.add(
               lone.copy(
                 startTimeMinute = start,
                 originalStartTimeMinute = birthStart,
+                durationMinutes = birthDur,
+                originalDurationMinutes = lone.originalDurationMinutes ?: birthDur,
                 isSplitPart = false,
                 isOverflow = false
               )
@@ -457,6 +1540,8 @@ object SchedulerEngine {
             overflowTasks.add(
               lone.copy(
                 originalStartTimeMinute = birthStart,
+                durationMinutes = birthDur,
+                originalDurationMinutes = lone.originalDurationMinutes ?: birthDur,
                 isOverflow = true,
                 overflowReason = "Fluid twin partner missing and no single gap available."
               )
@@ -466,26 +1551,23 @@ object SchedulerEngine {
       } else {
         val p1Birth = part1.originalStartTimeMinute ?: part1.startTimeMinute
         val p2Birth = part2.originalStartTimeMinute ?: part2.startTimeMinute
+        val p1BirthDur = birthDurationOf(part1)
+        val p2BirthDur = birthDurationOf(part2)
 
-        // Strict Anchor Boundary Enforcement: anchors act as impenetrable walls
-        val anchorGaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
-        val gap1 = anchorGaps.find { p1Birth in it.startMinute until it.endMinute }
-          ?: anchorGaps.minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - p1Birth) }
-        val gap2 = anchorGaps.find { p2Birth in it.startMinute until it.endMinute }
-          ?: anchorGaps.minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - p2Birth) }
-
-        val pool = part1.fluidTotalPoolMinutes ?: (part1.durationMinutes + part2.durationMinutes)
-        val floor1 = if (part1.durationMinutes <= 0) 0 else part1.fluidSafetyFloorMinutes.coerceIn(1, part1.durationMinutes)
-        val floor2 = if (part2.durationMinutes <= 0) 0 else part2.fluidSafetyFloorMinutes.coerceIn(1, part2.durationMinutes)
+        val freeGaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
+        val pool = part1.fluidTotalPoolMinutes ?: (p1BirthDur + p2BirthDur)
+        val floor1 = if (p1BirthDur <= 0) 0 else part1.fluidSafetyFloorMinutes.coerceIn(1, p1BirthDur)
+        val floor2 = if (p2BirthDur <= 0) 0 else part2.fluidSafetyFloorMinutes.coerceIn(1, p2BirthDur)
         val b1 = part1.interTaskBufferMinutes.coerceIn(0, 30)
         val b2 = part2.interTaskBufferMinutes.coerceIn(0, 30)
 
-        if (part1.durationMinutes == 0 && part2.durationMinutes == 0) {
+        if (p1BirthDur == 0 && p2BirthDur == 0) {
           scheduledTasks.add(
             part1.copy(
               startTimeMinute = p1Birth.coerceIn(0, 1439),
               originalStartTimeMinute = p1Birth,
               durationMinutes = 0,
+              originalDurationMinutes = part1.originalDurationMinutes ?: 0,
               isSplitPart = false,
               isOverflow = false
             )
@@ -495,6 +1577,7 @@ object SchedulerEngine {
               startTimeMinute = p2Birth.coerceIn(0, 1439),
               originalStartTimeMinute = p2Birth,
               durationMinutes = 0,
+              originalDurationMinutes = part2.originalDurationMinutes ?: 0,
               isSplitPart = false,
               isOverflow = false
             )
@@ -502,319 +1585,343 @@ object SchedulerEngine {
           continue
         }
 
-        if (gap1 == null || gap2 == null || gap1.durationMinutes < floor1 + b1 || gap2.durationMinutes < floor2 + b2) {
-          overflowTasks.add(part1.copy(originalStartTimeMinute = p1Birth, isOverflow = true, overflowReason = "Anchor boundary prevents minimum fluid twin duration."))
-          overflowTasks.add(part2.copy(originalStartTimeMinute = p2Birth, isOverflow = true, overflowReason = "Anchor boundary prevents minimum fluid twin duration."))
-          continue
-        } else if (gap1.startMinute == gap2.startMinute && gap1.endMinute == gap2.endMinute) {
-          // Both twins in same inter-anchor gap
-          val available = (gap1.durationMinutes - b1 - b2).coerceAtLeast(0)
-          if (available < floor1 + floor2) {
-            overflowTasks.add(part1.copy(originalStartTimeMinute = p1Birth, isOverflow = true, overflowReason = "Anchor gap too small to host both fluid twin sessions."))
-            overflowTasks.add(part2.copy(originalStartTimeMinute = p2Birth, isOverflow = true, overflowReason = "Anchor gap too small to host both fluid twin sessions."))
-            continue
-          } else {
-            val maxD1 = (available - floor2).coerceAtLeast(floor1)
-            var d1 = part1.durationMinutes.coerceIn(floor1, maxD1)
-            val maxD2 = (available - d1).coerceAtLeast(floor2)
-            var d2 = (pool - d1).coerceIn(floor2, maxD2)
-            if (d1 + d2 > available) {
-              val extra = (available - floor1 - floor2).coerceAtLeast(0)
-              d1 = floor1 + extra / 2
-              d2 = available - d1
-            }
-            val minStart1 = gap1.startMinute
-            val maxStart1 = gap1.endMinute - (d1 + b1 + d2 + b2)
-            val start1 = if (maxStart1 >= minStart1) {
-              p1Birth.coerceIn(minStart1, maxStart1)
-            } else {
-              minStart1
-            }
-            val minStart2 = start1 + d1 + b1
-            val maxStart2 = gap1.endMinute - (d2 + b2)
-            val start2 = if (maxStart2 >= minStart2) {
-              if (p2Birth >= minStart2) {
-                p2Birth.coerceIn(minStart2, maxStart2)
-              } else {
-                minStart2
-              }
-            } else {
-              minStart2
-            }
-            scheduledTasks.add(part1.copy(startTimeMinute = start1, originalStartTimeMinute = p1Birth, durationMinutes = d1, isSplitPart = false, isOverflow = false))
-            scheduledTasks.add(part2.copy(startTimeMinute = start2, originalStartTimeMinute = p2Birth, durationMinutes = d2, isSplitPart = false, isOverflow = false))
-          }
+        val birthGap1 = freeGaps.find { p1Birth in it.startMinute until it.endMinute }
+          ?: freeGaps.minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - p1Birth) }
+        val gap1 = if (birthGap1 != null && birthGap1.durationMinutes >= floor1 + b1) {
+          birthGap1
         } else {
-          // Distinct inter-anchor gaps: Communicating vessels liquid time sharing
-          val cap1 = (gap1.durationMinutes - b1).coerceAtLeast(0)
-          val cap2 = (gap2.durationMinutes - b2).coerceAtLeast(0)
-          if (cap1 < floor1 || cap2 < floor2) {
-            overflowTasks.add(part1.copy(originalStartTimeMinute = p1Birth, isOverflow = true, overflowReason = "Anchor boundary prevents minimum fluid twin duration."))
-            overflowTasks.add(part2.copy(originalStartTimeMinute = p2Birth, isOverflow = true, overflowReason = "Anchor boundary prevents minimum fluid twin duration."))
-            continue
-          }
-
-          var d1 = part1.durationMinutes.coerceIn(floor1, cap1)
-          var d2 = (pool - d1).coerceAtLeast(floor2)
-
-          // If Part 2 is compressed by anchor wall in Gap 2, surplus flows to Part 1
-          if (d2 > cap2) {
-            d2 = cap2
-            d1 = (pool - d2).coerceIn(floor1, cap1)
-          }
-          // If Part 1 is compressed by anchor wall in Gap 1, surplus flows to Part 2
-          if (d1 > cap1) {
-            d1 = cap1
-            d2 = (pool - d1).coerceIn(floor2, cap2)
-          }
-
-          val maxStart1 = gap1.endMinute - (d1 + b1)
-          val start1 = when {
-            maxStart1 >= gap1.startMinute && p1Birth in gap1.startMinute..maxStart1 -> p1Birth
-            p1Birth < gap1.startMinute -> gap1.startMinute
-            maxStart1 >= gap1.startMinute -> maxStart1
-            else -> gap1.startMinute
-          }
-
-          val maxStart2 = gap2.endMinute - (d2 + b2)
-          val start2 = when {
-            maxStart2 >= gap2.startMinute && p2Birth in gap2.startMinute..maxStart2 -> p2Birth
-            p2Birth < gap2.startMinute -> gap2.startMinute
-            maxStart2 >= gap2.startMinute -> maxStart2
-            else -> gap2.startMinute
-          }
-
-          scheduledTasks.add(part1.copy(startTimeMinute = start1, originalStartTimeMinute = p1Birth, durationMinutes = d1, isSplitPart = false, isOverflow = false))
-          scheduledTasks.add(part2.copy(startTimeMinute = start2, originalStartTimeMinute = p2Birth, durationMinutes = d2, isSplitPart = false, isOverflow = false))
+          freeGaps.filter { it.durationMinutes >= floor1 + b1 }
+            .minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - p1Birth) }
         }
-      }
-    }
 
-    // 3. Schedule Standard Dynamic Tasks
-    val sortedStandardTasks = standardTasks.sortedWith(
-      compareByDescending<RoutineTask> { it.isHighPriority }
-        .thenByDescending { it.manualPlacementOrder }
-        .thenBy { it.originalStartTimeMinute ?: it.startTimeMinute }
-    )
-    val anchorGaps = findAvailableGaps(dayAnchors, interTaskBufferMinutes)
+        if (gap1 == null) {
+          pendingQueue.add(PendingItem.TwinPair(part1, part2))
+          continue
+        }
 
-    for (dynamicTask in sortedStandardTasks) {
-      val requiredDuration = dynamicTask.durationMinutes.coerceAtLeast(0)
-      val birthStart = dynamicTask.originalStartTimeMinute ?: dynamicTask.startTimeMinute
-      val prefStart = birthStart
+        val win1 = getInterAnchorWindowKey(dayAnchors, gap1.startMinute, activeDay)
 
-      // 0-minute instant notification / memory signal: allocate momentary trigger marker without failing gap checks
-      if (requiredDuration == 0) {
+        val preferredGap2 = freeGaps.find { p2Birth in it.startMinute until it.endMinute }
+          ?: freeGaps.minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - p2Birth) }
+
+        val gap2 = if (
+          preferredGap2 != null &&
+          preferredGap2.durationMinutes >= floor2 + b2 &&
+          getInterAnchorWindowKey(dayAnchors, preferredGap2.startMinute, activeDay) != win1
+        ) {
+          preferredGap2
+        } else {
+          freeGaps.filter {
+            it.durationMinutes >= floor2 + b2 &&
+              getInterAnchorWindowKey(dayAnchors, it.startMinute, activeDay) != win1
+          }.minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - p2Birth) }
+        }
+
+        val cap1 = (gap1.durationMinutes - b1).coerceAtLeast(0)
+        if (gap2 == null) {
+          val d1 = p1BirthDur.coerceIn(floor1, cap1)
+          val maxStart1 = (gap1.endMinute - (d1 + b1)).coerceAtLeast(gap1.startMinute)
+          val start1 = when {
+            p1Birth in gap1.startMinute..maxStart1 -> p1Birth
+            p1Birth < gap1.startMinute -> gap1.startMinute
+            else -> maxStart1
+          }
+          scheduledTasks.add(
+            part1.copy(
+              startTimeMinute = start1,
+              originalStartTimeMinute = p1Birth,
+              durationMinutes = d1,
+              originalDurationMinutes = part1.originalDurationMinutes ?: p1BirthDur,
+              isSplitPart = false,
+              isOverflow = false
+            )
+          )
+          pendingQueue.add(PendingItem.TwinPartOnly(part2, win1))
+          continue
+        }
+
+        val cap2 = (gap2.durationMinutes - b2).coerceAtLeast(0)
+        if (cap1 < floor1 || cap2 < floor2) {
+          pendingQueue.add(PendingItem.TwinPair(part1, part2))
+          continue
+        }
+
+        var d1 = p1BirthDur.coerceIn(floor1, cap1)
+        var d2 = (pool - d1).coerceAtLeast(floor2)
+
+        if (d2 > cap2) {
+          d2 = cap2
+          d1 = (pool - d2).coerceIn(floor1, cap1)
+        }
+        if (d1 > cap1) {
+          d1 = cap1
+          d2 = (pool - d1).coerceIn(floor2, cap2)
+        }
+
+        val maxStart1 = gap1.endMinute - (d1 + b1)
+        val start1 = when {
+          maxStart1 >= gap1.startMinute && p1Birth in gap1.startMinute..maxStart1 -> p1Birth
+          p1Birth < gap1.startMinute -> gap1.startMinute
+          maxStart1 >= gap1.startMinute -> maxStart1
+          else -> gap1.startMinute
+        }
+
+        val maxStart2 = gap2.endMinute - (d2 + b2)
+        val start2 = when {
+          maxStart2 >= gap2.startMinute && p2Birth in gap2.startMinute..maxStart2 -> p2Birth
+          p2Birth < gap2.startMinute -> gap2.startMinute
+          maxStart2 >= gap2.startMinute -> maxStart2
+          else -> gap2.startMinute
+        }
+
         scheduledTasks.add(
-          dynamicTask.copy(
-            startTimeMinute = ((prefStart % 1440) + 1440) % 1440,
-            originalStartTimeMinute = birthStart,
-            durationMinutes = 0,
+          part1.copy(
+            startTimeMinute = start1,
+            originalStartTimeMinute = p1Birth,
+            durationMinutes = d1,
+            originalDurationMinutes = part1.originalDurationMinutes ?: p1BirthDur,
             isSplitPart = false,
             isOverflow = false
           )
         )
-        continue
+        scheduledTasks.add(
+          part2.copy(
+            startTimeMinute = start2,
+            originalStartTimeMinute = p2Birth,
+            durationMinutes = d2,
+            originalDurationMinutes = part2.originalDurationMinutes ?: p2BirthDur,
+            isSplitPart = false,
+            isOverflow = false
+          )
+        )
       }
+    }
 
-      val gaps = findAvailableGaps(scheduledTasks, interTaskBufferMinutes)
-      val taskBuffer = dynamicTask.interTaskBufferMinutes.coerceIn(0, 30)
-      val requiredBlock = requiredDuration + taskBuffer
-      val effectiveTolerance = maxOf(dynamicTask.toleranceMinutes, dynamicTask.customFlexibilityMinutes).coerceIn(0, 30)
+    // Pass 1C: Normal Standard Dynamic Tasks (full birth duration edge-fit only; blocked tasks queue for Pass 2)
+    val sortedNormalTasks = normalStandardTasks.sortedWith(
+      compareByDescending<RoutineTask> { it.manualPlacementOrder }
+        .thenBy { it.originalStartTimeMinute ?: it.startTimeMinute }
+    )
+    for (dynamicTask in sortedNormalTasks) {
+      if (!tryPass1StandardTask(dynamicTask, scheduledTasks, overflowTasks, anchorGaps, interTaskBufferMinutes)) {
+        pendingQueue.add(PendingItem.Standard(dynamicTask))
+      }
+    }
 
-      // High Priority Anchor Wall Fence: strictly confine to inter-anchor gap enclosing prefStart
-      if (dynamicTask.isHighPriority) {
-        val enclosingAnchorGap = anchorGaps.find { prefStart in it.startMinute until it.endMinute }
-          ?: anchorGaps.find { prefStart in it.startMinute..it.endMinute }
-          ?: anchorGaps.minByOrNull { Math.abs(prefStart - (it.startMinute + it.endMinute) / 2) }
-        if (enclosingAnchorGap == null) {
-          overflowTasks.add(
-            dynamicTask.copy(
-              originalStartTimeMinute = birthStart,
-              isOverflow = true,
-              overflowReason = "High Priority task preferred time conflicts directly with an anchor wall."
-            )
+    // Pass 2: Human-Level 4-Strategy Constraint Solver on pendingQueue
+    val sortedPending = pendingQueue.sortedWith(
+      compareByDescending<PendingItem> { it.sortIsHighPriority }
+        .thenByDescending { it.sortIsFluidTwin }
+        .thenByDescending { it.sortBirthDuration }
+        .thenBy { it.sortBirthStart }
+    )
+
+    for (item in sortedPending) {
+      when (item) {
+        is PendingItem.Standard -> {
+          trySolveStandardPendingTask(
+            task = item.task,
+            anchorGaps = anchorGaps,
+            dayAnchors = dayAnchors,
+            activeDay = activeDay,
+            scheduledTasks = scheduledTasks,
+            overflowTasks = overflowTasks,
+            interTaskBufferMinutes = interTaskBufferMinutes
           )
-          continue
         }
 
-        val fencedGaps = gaps.filter {
-          it.startMinute >= enclosingAnchorGap.startMinute && it.endMinute <= enclosingAnchorGap.endMinute
-        }
+        is PendingItem.TwinPartOnly -> {
+          val p2 = item.part
+          val p2Birth = p2.originalStartTimeMinute ?: p2.startTimeMinute
+          val p2BirthDur = birthDurationOf(p2)
+          val b2 = p2.interTaskBufferMinutes.coerceIn(0, 30)
+          val floor2 = if (p2BirthDur <= 0) 0 else p2.fluidSafetyFloorMinutes.coerceIn(1, p2BirthDur)
 
-        // Try continuous placement in fencedGaps
-        var bestGap: ScheduleGap? = null
-        var bestPlacementStart = -1
-        var minDistance = Int.MAX_VALUE
+          val distinctWindows = anchorGaps
+            .filter { getInterAnchorWindowKey(dayAnchors, it.startMinute, activeDay) != item.partnerWinKey }
+            .sortedBy { Math.abs((it.startMinute + it.endMinute) / 2 - p2Birth) }
 
-        for (gap in fencedGaps) {
-          if (gap.durationMinutes >= requiredBlock) {
-            val possibleStart = when {
-              prefStart in gap.startMinute..(gap.endMinute - requiredBlock) -> prefStart
-              prefStart < gap.startMinute -> gap.startMinute
-              else -> gap.endMinute - requiredBlock
-            }
-            val distance = Math.abs(possibleStart - prefStart)
-            if (distance < minDistance) {
-              minDistance = distance
-              bestGap = gap
-              bestPlacementStart = possibleStart
-            }
-          }
-        }
-
-        if (bestGap != null && bestPlacementStart != -1) {
-          scheduledTasks.add(
-            dynamicTask.copy(
-              startTimeMinute = bestPlacementStart,
-              originalStartTimeMinute = birthStart,
-              durationMinutes = requiredDuration,
-              isSplitPart = false,
-              isOverflow = false
+          var rescuedGap: ScheduleGap? = null
+          for (win in distinctWindows) {
+            rescuedGap = tryEnsureWindowRoomForTwinPart(
+              win = win,
+              minNeededBlock = floor2 + b2,
+              anchorGaps = anchorGaps,
+              dayAnchors = dayAnchors,
+              activeDay = activeDay,
+              scheduledTasks = scheduledTasks,
+              interTaskBufferMinutes = interTaskBufferMinutes,
+              excludedWinKey = null
             )
-          )
-          continue
-        }
-
-        // Try tolerance / custom flexibility within fencedGaps
-        if (effectiveTolerance > 0) {
-          val minFloor = if (requiredDuration >= 15) 15 else 1
-          val minViable = (requiredDuration - effectiveTolerance).coerceIn(minFloor, requiredDuration)
-          val minBlock = minViable + taskBuffer
-          var flexGap: ScheduleGap? = null
-          var flexStart = -1
-          var flexDuration = -1
-          var minFlexDist = Int.MAX_VALUE
-
-          for (gap in fencedGaps) {
-            if (gap.durationMinutes >= minBlock) {
-              val fittedDuration = (gap.durationMinutes - taskBuffer).coerceIn(minViable, requiredDuration)
-              val fittedBlock = fittedDuration + taskBuffer
-              val possibleStart = when {
-                prefStart in gap.startMinute..(gap.endMinute - fittedBlock) -> prefStart
-                prefStart < gap.startMinute -> gap.startMinute
-                else -> gap.endMinute - fittedBlock
-              }
-              val distance = Math.abs(possibleStart - prefStart)
-              if (distance < minFlexDist) {
-                minFlexDist = distance
-                flexGap = gap
-                flexStart = possibleStart
-                flexDuration = fittedDuration
-              }
-            }
+            if (rescuedGap != null) break
           }
 
-          if (flexGap != null && flexStart != -1 && flexDuration >= minViable) {
+          if (rescuedGap != null) {
+            val cap2 = (rescuedGap.durationMinutes - b2).coerceAtLeast(floor2)
+            val partnerIdx = scheduledTasks.indexOfFirst {
+              it.fluidTwinId == p2.fluidTwinId && it.id != p2.id
+            }
+            val partner = if (partnerIdx >= 0) scheduledTasks[partnerIdx] else null
+            val pool = p2.fluidTotalPoolMinutes ?: ((partner?.let { birthDurationOf(it) } ?: 0) + p2BirthDur)
+            val d1Current = partner?.durationMinutes ?: 0
+            val d2 = (pool - d1Current).coerceIn(floor2, cap2)
+            val maxStart2 = (rescuedGap.endMinute - (d2 + b2)).coerceAtLeast(rescuedGap.startMinute)
+            val start2 = when {
+              p2Birth in rescuedGap.startMinute..maxStart2 -> p2Birth
+              p2Birth < rescuedGap.startMinute -> rescuedGap.startMinute
+              else -> maxStart2
+            }
             scheduledTasks.add(
-              dynamicTask.copy(
-                startTimeMinute = flexStart,
-                originalStartTimeMinute = birthStart,
-                durationMinutes = flexDuration,
+              p2.copy(
+                startTimeMinute = start2,
+                originalStartTimeMinute = p2Birth,
+                durationMinutes = d2,
+                originalDurationMinutes = p2.originalDurationMinutes ?: p2BirthDur,
                 isSplitPart = false,
                 isOverflow = false
               )
             )
+          } else {
+            overflowTasks.add(
+              p2.copy(
+                originalStartTimeMinute = p2Birth,
+                durationMinutes = p2BirthDur,
+                originalDurationMinutes = p2.originalDurationMinutes ?: p2BirthDur,
+                isOverflow = true,
+                overflowReason = "Twin parts must stay in separate anchor gaps; no other open gap available for Part 2."
+              )
+            )
+          }
+        }
+
+        is PendingItem.TwinPair -> {
+          val p1 = item.part1
+          val p2 = item.part2
+          val p1Birth = p1.originalStartTimeMinute ?: p1.startTimeMinute
+          val p2Birth = p2.originalStartTimeMinute ?: p2.startTimeMinute
+          val p1BirthDur = birthDurationOf(p1)
+          val p2BirthDur = birthDurationOf(p2)
+          val pool = p1.fluidTotalPoolMinutes ?: (p1BirthDur + p2BirthDur)
+          val floor1 = if (p1BirthDur <= 0) 0 else p1.fluidSafetyFloorMinutes.coerceIn(1, p1BirthDur)
+          val floor2 = if (p2BirthDur <= 0) 0 else p2.fluidSafetyFloorMinutes.coerceIn(1, p2BirthDur)
+          val b1 = p1.interTaskBufferMinutes.coerceIn(0, 30)
+          val b2 = p2.interTaskBufferMinutes.coerceIn(0, 30)
+
+          val p1Wins = anchorGaps.sortedBy { Math.abs((it.startMinute + it.endMinute) / 2 - p1Birth) }
+          var gap1: ScheduleGap? = null
+          for (win in p1Wins) {
+            gap1 = tryEnsureWindowRoomForTwinPart(win, floor1 + b1, anchorGaps, dayAnchors, activeDay, scheduledTasks, interTaskBufferMinutes)
+            if (gap1 != null) break
+          }
+
+          if (gap1 == null) {
+            overflowTasks.add(
+              p1.copy(
+                originalStartTimeMinute = p1Birth,
+                durationMinutes = p1BirthDur,
+                originalDurationMinutes = p1.originalDurationMinutes ?: p1BirthDur,
+                isOverflow = true,
+                overflowReason = "Anchor boundary prevents minimum fluid twin duration."
+              )
+            )
+            overflowTasks.add(
+              p2.copy(
+                originalStartTimeMinute = p2Birth,
+                durationMinutes = p2BirthDur,
+                originalDurationMinutes = p2.originalDurationMinutes ?: p2BirthDur,
+                isOverflow = true,
+                overflowReason = "Anchor boundary prevents minimum fluid twin duration."
+              )
+            )
             continue
           }
-        }
 
-        // High priority task cannot fit between assigned anchor boundaries without overleaping walls
-        overflowTasks.add(
-          dynamicTask.copy(
-            originalStartTimeMinute = birthStart,
-            isOverflow = true,
-            overflowReason = "High Priority task cannot fit between assigned anchor boundaries without overleaping walls."
-          )
-        )
-        continue
-      }
+          val win1Key = getInterAnchorWindowKey(dayAnchors, gap1.startMinute, activeDay)
+          val cap1 = (gap1.durationMinutes - b1).coerceAtLeast(floor1)
+          val p2Wins = anchorGaps
+            .filter { getInterAnchorWindowKey(dayAnchors, it.startMinute, activeDay) != win1Key }
+            .sortedBy { Math.abs((it.startMinute + it.endMinute) / 2 - p2Birth) }
 
-      // Try continuous placement first near preferred start time across all gaps
-      var bestGap: ScheduleGap? = null
-      var bestPlacementStart = -1
-      var minDistance = Int.MAX_VALUE
-
-      for (gap in gaps) {
-        if (gap.durationMinutes >= requiredBlock) {
-          val possibleStart = when {
-            prefStart in gap.startMinute..(gap.endMinute - requiredBlock) -> prefStart
-            prefStart < gap.startMinute -> gap.startMinute
-            else -> gap.endMinute - requiredBlock
+          var gap2: ScheduleGap? = null
+          for (win in p2Wins) {
+            gap2 = tryEnsureWindowRoomForTwinPart(win, floor2 + b2, anchorGaps, dayAnchors, activeDay, scheduledTasks, interTaskBufferMinutes)
+            if (gap2 != null) break
           }
-          val distance = Math.abs(possibleStart - prefStart)
-          if (distance < minDistance) {
-            minDistance = distance
-            bestGap = gap
-            bestPlacementStart = possibleStart
-          }
-        }
-      }
 
-      if (bestGap != null && bestPlacementStart != -1) {
-        // Continuous placement success
-        val placed = dynamicTask.copy(
-          startTimeMinute = bestPlacementStart,
-          originalStartTimeMinute = birthStart,
-          durationMinutes = requiredDuration,
-          isSplitPart = false,
-          isOverflow = false
-        )
-        scheduledTasks.add(placed)
-        continue
-      }
-
-      // Schedule Float / Tolerance Margin / Custom Flexibility (±5m to ±30m flexibility)
-      if (effectiveTolerance > 0) {
-        val minFloor = if (requiredDuration >= 15) 15 else 1
-        val minViable = (requiredDuration - effectiveTolerance).coerceIn(minFloor, requiredDuration)
-        val minBlock = minViable + taskBuffer
-        var flexGap: ScheduleGap? = null
-        var flexStart = -1
-        var flexDuration = -1
-        var minFlexDist = Int.MAX_VALUE
-
-        for (gap in gaps) {
-          if (gap.durationMinutes >= minBlock) {
-            val fittedDuration = (gap.durationMinutes - taskBuffer).coerceIn(minViable, requiredDuration)
-            val fittedBlock = fittedDuration + taskBuffer
-            val possibleStart = when {
-              prefStart in gap.startMinute..(gap.endMinute - fittedBlock) -> prefStart
-              prefStart < gap.startMinute -> gap.startMinute
-              else -> gap.endMinute - fittedBlock
+          if (gap2 == null) {
+            val d1 = p1BirthDur.coerceIn(floor1, cap1)
+            val maxStart1 = (gap1.endMinute - (d1 + b1)).coerceAtLeast(gap1.startMinute)
+            val start1 = when {
+              p1Birth in gap1.startMinute..maxStart1 -> p1Birth
+              p1Birth < gap1.startMinute -> gap1.startMinute
+              else -> maxStart1
             }
-            val distance = Math.abs(possibleStart - prefStart)
-            if (distance < minFlexDist) {
-              minFlexDist = distance
-              flexGap = gap
-              flexStart = possibleStart
-              flexDuration = fittedDuration
+            scheduledTasks.add(
+              p1.copy(
+                startTimeMinute = start1,
+                originalStartTimeMinute = p1Birth,
+                durationMinutes = d1,
+                originalDurationMinutes = p1.originalDurationMinutes ?: p1BirthDur,
+                isSplitPart = false,
+                isOverflow = false
+              )
+            )
+            overflowTasks.add(
+              p2.copy(
+                originalStartTimeMinute = p2Birth,
+                durationMinutes = p2BirthDur,
+                originalDurationMinutes = p2.originalDurationMinutes ?: p2BirthDur,
+                isOverflow = true,
+                overflowReason = "Twin parts must stay in separate anchor gaps; no other open gap available for Part 2."
+              )
+            )
+          } else {
+            val cap2 = (gap2.durationMinutes - b2).coerceAtLeast(floor2)
+            var d1 = p1BirthDur.coerceIn(floor1, cap1)
+            var d2 = (pool - d1).coerceAtLeast(floor2)
+            if (d2 > cap2) {
+              d2 = cap2
+              d1 = (pool - d2).coerceIn(floor1, cap1)
             }
+            if (d1 > cap1) {
+              d1 = cap1
+              d2 = (pool - d1).coerceIn(floor2, cap2)
+            }
+            val maxStart1 = (gap1.endMinute - (d1 + b1)).coerceAtLeast(gap1.startMinute)
+            val start1 = when {
+              p1Birth in gap1.startMinute..maxStart1 -> p1Birth
+              p1Birth < gap1.startMinute -> gap1.startMinute
+              else -> maxStart1
+            }
+            val maxStart2 = (gap2.endMinute - (d2 + b2)).coerceAtLeast(gap2.startMinute)
+            val start2 = when {
+              p2Birth in gap2.startMinute..maxStart2 -> p2Birth
+              p2Birth < gap2.startMinute -> gap2.startMinute
+              else -> maxStart2
+            }
+            scheduledTasks.add(
+              p1.copy(
+                startTimeMinute = start1,
+                originalStartTimeMinute = p1Birth,
+                durationMinutes = d1,
+                originalDurationMinutes = p1.originalDurationMinutes ?: p1BirthDur,
+                isSplitPart = false,
+                isOverflow = false
+              )
+            )
+            scheduledTasks.add(
+              p2.copy(
+                startTimeMinute = start2,
+                originalStartTimeMinute = p2Birth,
+                durationMinutes = d2,
+                originalDurationMinutes = p2.originalDurationMinutes ?: p2BirthDur,
+                isSplitPart = false,
+                isOverflow = false
+              )
+            )
           }
         }
-
-        if (flexGap != null && flexStart != -1 && flexDuration >= minViable) {
-          val placed = dynamicTask.copy(
-            startTimeMinute = flexStart,
-            originalStartTimeMinute = birthStart,
-            durationMinutes = flexDuration,
-            isSplitPart = false,
-            isOverflow = false
-          )
-          scheduledTasks.add(placed)
-          continue
-        }
       }
-
-      // If we reach here, it could not be scheduled continuously
-      val reason = "No available open slot can accommodate ${requiredDuration}m without violating anchors"
-      overflowTasks.add(
-        dynamicTask.copy(
-          originalStartTimeMinute = birthStart,
-          isOverflow = true,
-          overflowReason = reason
-        )
-      )
     }
 
     scheduledTasks.sortBy { it.startTimeMinute }
@@ -833,21 +1940,325 @@ object SchedulerEngine {
   }
 
   /**
-   * Resolves effective anchor tasks for [day] (accounting for Friday Jumu'ah override on Slot 3).
+   * Smart Schedule Compaction & Overflow Rescue (with Priority Displacement Rescue):
+   * - Step A: Packs non-zero dynamic tasks tightly inside each inter-anchor window to merge fragmented slack.
+   * - Step B: Rescues overflow tasks into open / newly merged gaps (respecting HP fencing & Twin partner exclusion),
+   *           and displaces lower-priority normal tasks from a fenced High Priority window into free windows elsewhere
+   *           when needed to rescue High Priority overflow tasks.
+   */
+  fun compactAndRescueSchedule(
+    anchors: List<RoutineTask>,
+    allDynamicTasks: List<RoutineTask>,
+    activeDay: RoutineDay,
+    interTaskBufferMinutes: Int = 0,
+    baseManualOrder: Long = System.currentTimeMillis()
+  ): CompactionOutcome {
+    val initialResult = scheduleDay(anchors, allDynamicTasks, activeDay, interTaskBufferMinutes)
+    val initialScheduledById = initialResult.scheduledTasks
+      .filter { it.type == TaskType.DYNAMIC }
+      .associateBy { it.id }
+    val initialOverflowIds = initialResult.overflowTasks.map { it.id }.toSet()
+
+    val dayAnchors = resolveEffectiveDayAnchors(anchors, activeDay)
+    val anchorGaps = findAvailableGaps(dayAnchors, 0)
+    val workingMap = allDynamicTasks.associateBy { it.id }.toMutableMap()
+    var orderCursor = baseManualOrder
+
+    // Step A: Sequential inter-anchor window compaction (skips 0-minute signal markers)
+    for (win in anchorGaps) {
+      val winTasks = initialResult.scheduledTasks
+        .filter {
+          it.type == TaskType.DYNAMIC &&
+            it.durationMinutes > 0 &&
+            it.startTimeMinute in win.startMinute until win.endMinute
+        }
+        .sortedBy { it.startTimeMinute }
+      var cursor = win.startMinute
+      for (task in winTasks) {
+        val dur = task.durationMinutes.coerceAtLeast(0)
+        val buf = task.interTaskBufferMinutes.coerceIn(0, 30)
+        if (task.startTimeMinute != cursor) {
+          workingMap[task.id]?.let { orig ->
+            val origBirthDur = birthDurationOf(orig)
+            workingMap[task.id] = orig.copy(
+              startTimeMinute = cursor,
+              originalStartTimeMinute = cursor,
+              durationMinutes = origBirthDur,
+              originalDurationMinutes = orig.originalDurationMinutes ?: origBirthDur,
+              manualPlacementOrder = ++orderCursor
+            )
+          }
+        }
+        cursor += dur + buf
+      }
+    }
+
+    // Step B: Overflow Rescue + Priority Displacement Rescue
+    val afterStepA = scheduleDay(anchors, workingMap.values.toList(), activeDay, interTaskBufferMinutes)
+    val rescueQueue = afterStepA.overflowTasks.sortedWith(
+      compareByDescending<RoutineTask> { it.isHighPriority && !it.isFluidTwin }
+        .thenBy { it.originalStartTimeMinute ?: it.startTimeMinute }
+    )
+
+    for (ovTask in rescueQueue) {
+      val currentRes = scheduleDay(anchors, workingMap.values.toList(), activeDay, interTaskBufferMinutes)
+      if (currentRes.scheduledTasks.any { it.id == ovTask.id }) continue
+
+      val ovSource = workingMap[ovTask.id] ?: ovTask
+      val ovBirth = ovSource.originalStartTimeMinute ?: ovSource.startTimeMinute
+      val ovBirthDur = birthDurationOf(ovSource)
+      val ovBuf = ovSource.interTaskBufferMinutes.coerceIn(0, 30)
+      val ovMinDur = minAllowedDurationOf(ovSource)
+      val ovFullBlock = ovBirthDur + ovBuf
+      val ovMinBlock = ovMinDur + ovBuf
+
+      val partnerWin = if (ovSource.isFluidTwin && !ovSource.fluidTwinId.isNullOrEmpty()) {
+        val activePartner = currentRes.scheduledTasks.firstOrNull {
+          it.id != ovSource.id &&
+            it.fluidTwinId == ovSource.fluidTwinId &&
+            !it.isDeleted &&
+            !it.isCurrentlyPaused()
+        }
+        activePartner?.let { getInterAnchorWindowKey(dayAnchors, it.startTimeMinute, activeDay) }
+      } else {
+        null
+      }
+
+      val freeGaps = findAvailableGaps(currentRes.scheduledTasks, interTaskBufferMinutes)
+      val eligibleGaps = when {
+        ovSource.isHighPriority && !ovSource.isFluidTwin -> {
+          val enclosing = findEnclosingAnchorBounds(anchors, ovBirth, activeDay)
+          freeGaps.filter { it.startMinute >= enclosing.first && it.endMinute <= enclosing.second }
+        }
+        ovSource.isFluidTwin && partnerWin != null -> {
+          freeGaps.filter { getInterAnchorWindowKey(dayAnchors, it.startMinute, activeDay) != partnerWin }
+        }
+        else -> freeGaps
+      }
+
+      val fitGap = eligibleGaps
+        .filter { it.durationMinutes >= ovFullBlock }
+        .minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - ovBirth) }
+        ?: eligibleGaps
+          .filter { it.durationMinutes >= ovMinBlock }
+          .minByOrNull { Math.abs((it.startMinute + it.endMinute) / 2 - ovBirth) }
+
+      if (fitGap != null) {
+        workingMap[ovSource.id] = ovSource.copy(
+          startTimeMinute = fitGap.startMinute,
+          originalStartTimeMinute = fitGap.startMinute,
+          durationMinutes = ovBirthDur,
+          originalDurationMinutes = ovSource.originalDurationMinutes ?: ovBirthDur,
+          isOverflow = false,
+          overflowReason = null,
+          manualPlacementOrder = ++orderCursor
+        )
+        continue
+      }
+
+      // Priority Displacement Rescue for fenced High Priority overflow tasks
+      if (ovSource.isHighPriority && !ovSource.isFluidTwin) {
+        val enclosing = findEnclosingAnchorBounds(anchors, ovBirth, activeDay)
+        val enclosingWinStart = enclosing.first
+        val enclosingWinEnd = enclosing.second
+        val freeInsideWin = freeGaps
+          .filter { it.startMinute >= enclosingWinStart && it.endMinute <= enclosingWinEnd }
+          .sumOf { it.durationMinutes }
+        val neededExtra = (ovFullBlock - freeInsideWin).coerceAtLeast(0)
+
+        if (neededExtra > 0) {
+          val displaceables = currentRes.scheduledTasks
+            .filter {
+              it.type == TaskType.DYNAMIC &&
+                !it.isHighPriority &&
+                !it.isFluidTwin &&
+                it.durationMinutes > 0 &&
+                it.startTimeMinute in enclosingWinStart until enclosingWinEnd
+            }
+            .sortedBy { it.durationMinutes }
+
+          val otherFreeMutable = freeGaps
+            .filter { it.endMinute <= enclosingWinStart || it.startMinute >= enclosingWinEnd }
+            .map { it.startMinute to it.endMinute }
+            .toMutableList()
+
+          val plannedDisplacements = mutableListOf<Pair<RoutineTask, Int>>()
+          var freedMinutes = 0
+
+          for (disp in displaceables) {
+            if (freedMinutes >= neededExtra) break
+            val dispBlock = disp.durationMinutes.coerceAtLeast(0) + disp.interTaskBufferMinutes.coerceIn(0, 30)
+            val gapIdx = otherFreeMutable.indexOfFirst { (gStart, gEnd) -> (gEnd - gStart) >= dispBlock }
+            if (gapIdx >= 0) {
+              val (gStart, gEnd) = otherFreeMutable[gapIdx]
+              plannedDisplacements.add(disp to gStart)
+              freedMinutes += dispBlock
+              if (gStart + dispBlock < gEnd) {
+                otherFreeMutable[gapIdx] = (gStart + dispBlock) to gEnd
+              } else {
+                otherFreeMutable.removeAt(gapIdx)
+              }
+            }
+          }
+
+          if (freedMinutes >= neededExtra && plannedDisplacements.isNotEmpty()) {
+            for ((dispTask, newStart) in plannedDisplacements) {
+              workingMap[dispTask.id]?.let { orig ->
+                val origBirthDur = birthDurationOf(orig)
+                workingMap[dispTask.id] = orig.copy(
+                  startTimeMinute = newStart,
+                  originalStartTimeMinute = newStart,
+                  durationMinutes = origBirthDur,
+                  originalDurationMinutes = orig.originalDurationMinutes ?: origBirthDur,
+                  manualPlacementOrder = ++orderCursor
+                )
+              }
+            }
+            val remainingInWin = currentRes.scheduledTasks
+              .filter {
+                it.type == TaskType.DYNAMIC &&
+                  it.durationMinutes > 0 &&
+                  it.startTimeMinute in enclosingWinStart until enclosingWinEnd &&
+                  plannedDisplacements.none { (d, _) -> d.id == it.id }
+              }
+              .sortedBy { it.startTimeMinute }
+            var winCursor = enclosingWinStart
+            for (rem in remainingInWin) {
+              workingMap[rem.id]?.let { orig ->
+                if (orig.startTimeMinute != winCursor) {
+                  val origBirthDur = birthDurationOf(orig)
+                  workingMap[rem.id] = orig.copy(
+                    startTimeMinute = winCursor,
+                    originalStartTimeMinute = winCursor,
+                    durationMinutes = origBirthDur,
+                    originalDurationMinutes = orig.originalDurationMinutes ?: origBirthDur,
+                    manualPlacementOrder = ++orderCursor
+                  )
+                }
+              }
+              winCursor += rem.durationMinutes.coerceAtLeast(0) + rem.interTaskBufferMinutes.coerceIn(0, 30)
+            }
+            if (enclosingWinEnd - winCursor >= ovFullBlock) {
+              workingMap[ovSource.id] = ovSource.copy(
+                startTimeMinute = winCursor,
+                originalStartTimeMinute = winCursor,
+                durationMinutes = ovBirthDur,
+                originalDurationMinutes = ovSource.originalDurationMinutes ?: ovBirthDur,
+                isOverflow = false,
+                overflowReason = null,
+                manualPlacementOrder = ++orderCursor
+              )
+            }
+          }
+        }
+      }
+    }
+
+    val candidateList = allDynamicTasks.map { workingMap[it.id] ?: it }
+    val finalResult = scheduleDay(anchors, candidateList, activeDay, interTaskBufferMinutes)
+    val finalOverflowIds = finalResult.overflowTasks.map { it.id }.toSet()
+    val rescuedCount = initialOverflowIds.count { it !in finalOverflowIds }
+    val movedCount = finalResult.scheduledTasks.count { task ->
+      task.type == TaskType.DYNAMIC &&
+        task.id !in initialOverflowIds &&
+        initialScheduledById[task.id]?.startTimeMinute != task.startTimeMinute
+    }
+    val flexedCount = finalResult.scheduledTasks.count { task ->
+      task.type == TaskType.DYNAMIC &&
+        task.id !in initialOverflowIds &&
+        initialScheduledById[task.id]?.durationMinutes != task.durationMinutes
+    }
+
+    if (movedCount == 0 && rescuedCount == 0 && flexedCount == 0) {
+      return CompactionOutcome(
+        updatedDynamicTasks = allDynamicTasks,
+        scheduleResult = initialResult,
+        movedCount = 0,
+        rescuedCount = 0,
+        flexedCount = 0
+      )
+    }
+
+    return CompactionOutcome(
+      updatedDynamicTasks = candidateList,
+      scheduleResult = finalResult,
+      movedCount = movedCount,
+      rescuedCount = rescuedCount,
+      flexedCount = flexedCount
+    )
+  }
+
+  /**
+   * Resolves effective anchor tasks for [day] (accounting for active-day visibility, pause state,
+   * and Friday Jumu'ah override on Slot 3).
    */
   private fun resolveEffectiveDayAnchors(anchors: List<RoutineTask>, day: RoutineDay): List<RoutineTask> {
     val isFriday = day == RoutineDay.FRIDAY
-    return anchors.map { anchor ->
-      if (isFriday && anchor.slotNumber == 3) {
-        anchor.copy(
-          title = anchor.fridayTitle?.ifBlank { null } ?: anchor.title,
-          startTimeMinute = anchor.fridayStartTimeMinute ?: anchor.startTimeMinute,
-          durationMinutes = anchor.fridayDurationMinutes ?: anchor.durationMinutes
-        )
-      } else {
-        anchor
+    return anchors
+      .filter { !it.isDeleted && !it.isCurrentlyPaused() && it.selectedDays.contains(day) }
+      .map { anchor ->
+        if (isFriday && anchor.slotNumber == 3) {
+          anchor.copy(
+            title = anchor.fridayTitle?.ifBlank { null } ?: anchor.title,
+            startTimeMinute = anchor.fridayStartTimeMinute ?: anchor.startTimeMinute,
+            durationMinutes = anchor.fridayDurationMinutes ?: anchor.durationMinutes,
+            voiceMessage = anchor.fridayVoiceMessage?.ifBlank { null } ?: anchor.voiceMessage
+          )
+        } else {
+          anchor
+        }
       }
+  }
+
+  /**
+   * Returns a canonical inter-anchor window key for [minute] on [day].
+   * Respects Friday Slot 3 overrides, inactive/paused anchors (e.g. Slot 5 disabled),
+   * and midnight-contiguous wrap-around.
+   */
+  fun getInterAnchorWindowKey(
+    anchors: List<RoutineTask>,
+    minute: Int,
+    day: RoutineDay = RoutineDay.today()
+  ): Int {
+    val dayAnchors = resolveEffectiveDayAnchors(anchors, day)
+    val anchorGaps = findAvailableGaps(dayAnchors, 0)
+    if (anchorGaps.isEmpty()) return 0
+
+    val safeMin = ((minute % 1440) + 1440) % 1440
+    val containing = anchorGaps.firstOrNull { safeMin in it.startMinute until it.endMinute }
+      ?: anchorGaps.firstOrNull { safeMin in it.startMinute..it.endMinute }
+      ?: anchorGaps.minByOrNull { Math.abs(safeMin - (it.startMinute + it.endMinute) / 2) }
+      ?: anchorGaps.first()
+
+    val wrapsAroundMidnight = anchorGaps.size > 1 &&
+      anchorGaps.first().startMinute == 0 &&
+      anchorGaps.last().endMinute == 1440
+
+    return if (wrapsAroundMidnight && containing == anchorGaps.last()) {
+      anchorGaps.first().startMinute
+    } else {
+      containing.startMinute
     }
+  }
+
+  private fun findActiveTwinPartnerWindow(
+    anchors: List<RoutineTask>,
+    allDynamicTasks: List<RoutineTask>,
+    scheduledTasks: List<RoutineTask>?,
+    task: RoutineTask,
+    day: RoutineDay
+  ): Int? {
+    if (!task.isFluidTwin || task.fluidTwinId.isNullOrEmpty()) return null
+    val partner = allDynamicTasks.firstOrNull {
+      it.id != task.id &&
+        it.fluidTwinId == task.fluidTwinId &&
+        !it.isDeleted &&
+        !it.isCurrentlyPaused() &&
+        it.selectedDays.contains(day)
+    } ?: return null
+    val partnerMin = scheduledTasks?.firstOrNull { it.id == partner.id }?.startTimeMinute
+      ?: partner.startTimeMinute
+    return getInterAnchorWindowKey(anchors, partnerMin, day)
   }
 
   /**
@@ -910,7 +2321,9 @@ object SchedulerEngine {
   /**
    * Pure reposition operation for drag scrubbing / vertical reordering.
    * Returns Pair(updatedDynamicTasks, hitAnchorWall).
-   * - High Priority & Fluid Twin tasks are strictly fenced inside their enclosing anchor gap.
+   * - High Priority non-twin tasks are strictly fenced inside their enclosing anchor gap.
+   * - Fluid Twin tasks can cross anchor walls freely UNLESS their active twin partner occupies
+   *   the destination inter-anchor window (Same-Gap Partner Exclusion).
    * - Normal Dynamic tasks can cross anchor walls vertically to reposition into other day gaps.
    */
   fun applyDragReposition(
@@ -924,16 +2337,14 @@ object SchedulerEngine {
     val target = allDynamicTasks.firstOrNull { it.id == taskId } ?: return allDynamicTasks to false
     var hitAnchorWall = false
     val clampedGlobalStart = targetStartMinute.coerceIn(0, 1439)
+    val birthDur = birthDurationOf(target)
+    val minDur = minAllowedDurationOf(target)
+    val targetBuf = target.interTaskBufferMinutes.coerceIn(0, 30)
 
-    val finalStart = if (target.isHighPriority || target.isFluidTwin) {
+    val finalStart = if (target.isHighPriority && !target.isFluidTwin) {
       val currentAnchorMinute = target.originalStartTimeMinute ?: target.startTimeMinute
       val (gapStart, gapEnd) = findEnclosingAnchorBounds(anchors, currentAnchorMinute, day)
-      val minRequiredDur = if (target.isFluidTwin) {
-        target.fluidSafetyFloorMinutes.coerceAtLeast(1)
-      } else {
-        target.durationMinutes.coerceAtLeast(0)
-      }
-      val block = minRequiredDur + target.interTaskBufferMinutes.coerceIn(0, 30)
+      val block = birthDur + targetBuf
       val maxAllowedStart = (gapEnd - block).coerceAtLeast(gapStart)
 
       if (clampedGlobalStart < gapStart || clampedGlobalStart > maxAllowedStart) {
@@ -941,25 +2352,49 @@ object SchedulerEngine {
       }
       clampedGlobalStart.coerceIn(gapStart, maxAllowedStart)
     } else {
-      // Normal dynamic tasks can jump across anchors; if landing inside an anchor body, snap to nearest anchor gap edge
       val dayAnchors = resolveEffectiveDayAnchors(anchors, day)
       val anchorGaps = findAvailableGaps(dayAnchors, 0)
-      val block = target.durationMinutes.coerceAtLeast(0) + target.interTaskBufferMinutes.coerceIn(0, 30)
+      val fullBlock = birthDur + targetBuf
+      val minBlock = minDur + targetBuf
+
+      val currentAnchorMinute = target.originalStartTimeMinute ?: target.startTimeMinute
+      val currentWinKey = getInterAnchorWindowKey(anchors, currentAnchorMinute, day)
+      val partnerWinKey = findActiveTwinPartnerWindow(anchors, allDynamicTasks, null, target, day)
+
+      val candidateGaps = if (target.isFluidTwin && partnerWinKey != null && currentWinKey != partnerWinKey) {
+        anchorGaps.filter { getInterAnchorWindowKey(anchors, it.startMinute, day) != partnerWinKey }
+      } else {
+        anchorGaps
+      }
+
       val insideGap = anchorGaps.firstOrNull { clampedGlobalStart in it.startMinute until it.endMinute }
-      if (insideGap != null) {
-        val maxInGap = (insideGap.endMinute - block).coerceAtLeast(insideGap.startMinute)
+      val destWinKey = insideGap?.let { getInterAnchorWindowKey(anchors, it.startMinute, day) }
+        ?: getInterAnchorWindowKey(anchors, clampedGlobalStart, day)
+
+      if (target.isFluidTwin && partnerWinKey != null && destWinKey == partnerWinKey && currentWinKey != partnerWinKey) {
+        // Blocked by Same-Gap Partner Exclusion -> fence at current enclosing anchor boundary
+        hitAnchorWall = true
+        val (gapStart, gapEnd) = findEnclosingAnchorBounds(anchors, currentAnchorMinute, day)
+        val maxAllowedStart = (gapEnd - minBlock).coerceAtLeast(gapStart)
+        clampedGlobalStart.coerceIn(gapStart, maxAllowedStart)
+      } else if (insideGap != null && candidateGaps.any { it.startMinute == insideGap.startMinute }) {
+        val gapBlock = if ((target.isFluidTwin || effectiveFlexOf(target) > 0) && insideGap.durationMinutes < fullBlock) minBlock else fullBlock
+        val maxInGap = (insideGap.endMinute - gapBlock).coerceAtLeast(insideGap.startMinute)
         clampedGlobalStart.coerceIn(insideGap.startMinute, maxInGap)
       } else {
-        val viableGap = anchorGaps.filter { it.durationMinutes >= block }
+        val pool = if (candidateGaps.isNotEmpty()) candidateGaps else anchorGaps
+        val viableGap = pool.filter { it.durationMinutes >= minBlock }
           .minByOrNull { gap ->
-            val maxS = (gap.endMinute - block).coerceAtLeast(gap.startMinute)
+            val gapBlock = if ((target.isFluidTwin || effectiveFlexOf(target) > 0) && gap.durationMinutes < fullBlock) minBlock else fullBlock
+            val maxS = (gap.endMinute - gapBlock).coerceAtLeast(gap.startMinute)
             val edge = clampedGlobalStart.coerceIn(gap.startMinute, maxS)
             Math.abs(edge - clampedGlobalStart)
-          } ?: anchorGaps.minByOrNull { gap ->
+          } ?: pool.minByOrNull { gap ->
           Math.abs(clampedGlobalStart.coerceIn(gap.startMinute, gap.endMinute) - clampedGlobalStart)
         }
         if (viableGap != null) {
-          val maxS = (viableGap.endMinute - block).coerceAtLeast(viableGap.startMinute)
+          val gapBlock = if ((target.isFluidTwin || effectiveFlexOf(target) > 0) && viableGap.durationMinutes < fullBlock) minBlock else fullBlock
+          val maxS = (viableGap.endMinute - gapBlock).coerceAtLeast(viableGap.startMinute)
           clampedGlobalStart.coerceIn(viableGap.startMinute, maxS)
         } else {
           clampedGlobalStart
@@ -972,6 +2407,8 @@ object SchedulerEngine {
         task.copy(
           startTimeMinute = finalStart,
           originalStartTimeMinute = finalStart,
+          durationMinutes = birthDur,
+          originalDurationMinutes = task.originalDurationMinutes ?: birthDur,
           manualPlacementOrder = newManualOrder
         )
       } else {
@@ -1015,6 +2452,8 @@ object SchedulerEngine {
 
       val statusChange = when {
         !oldInOverflow && newInOverflow -> "Moved to Overflow"
+        oldInOverflow && !newInOverflow && newStart != null && oldDur != newDur ->
+          "Recovered at ${RoutineTask.formatTime(newStart)} (${oldDur}m → ${newDur}m)"
         oldInOverflow && !newInOverflow && newStart != null ->
           "Recovered at ${RoutineTask.formatTime(newStart)}"
         oldStart != null && newStart != null && oldStart != newStart && oldDur != newDur ->
@@ -1068,18 +2507,18 @@ object SchedulerEngine {
   ): Pair<List<RoutineTask>, Boolean> {
     val draggedSource = allDynamicTasks.firstOrNull { it.id == taskId } ?: return allDynamicTasks to false
     val draggedScheduled = scheduledTasks.firstOrNull { it.id == taskId }
-    val isFenced = draggedSource.isHighPriority || draggedSource.isFluidTwin
+    val isStrictlyFenced = draggedSource.isHighPriority && !draggedSource.isFluidTwin
     val draggedCurrStart = draggedScheduled?.startTimeMinute
       ?: draggedSource.originalStartTimeMinute
       ?: draggedSource.startTimeMinute
     val draggedGap = findEnclosingAnchorBounds(anchors, draggedCurrStart, day)
-    val minDraggedDur = if (draggedSource.isFluidTwin) {
-      draggedSource.fluidSafetyFloorMinutes.coerceAtLeast(1)
-    } else {
-      draggedSource.durationMinutes.coerceAtLeast(0)
-    }
-    val draggedMinBlock = minDraggedDur + draggedSource.interTaskBufferMinutes.coerceIn(0, 30)
-    val draggedFullBlock = draggedSource.durationMinutes.coerceAtLeast(0) + draggedSource.interTaskBufferMinutes.coerceIn(0, 30)
+    val draggedWinKey = getInterAnchorWindowKey(anchors, draggedCurrStart, day)
+    val partnerWinKey = findActiveTwinPartnerWindow(anchors, allDynamicTasks, scheduledTasks, draggedSource, day)
+    val draggedBirthDur = birthDurationOf(draggedSource)
+    val minDraggedDur = minAllowedDurationOf(draggedSource)
+    val draggedBuf = draggedSource.interTaskBufferMinutes.coerceIn(0, 30)
+    val draggedMinBlock = minDraggedDur + draggedBuf
+    val draggedFullBlock = draggedBirthDur + draggedBuf
 
     when (dropTarget) {
       is VerticalDropTarget.IntoGap -> {
@@ -1121,7 +2560,14 @@ object SchedulerEngine {
         }
 
         val targetGap = findEnclosingAnchorBounds(anchors, targetScheduled.startTimeMinute, day)
-        if (isFenced && targetGap != draggedGap) {
+        val targetWinKey = getInterAnchorWindowKey(anchors, targetScheduled.startTimeMinute, day)
+        val isBlockedByAnchorWall = isStrictlyFenced && targetGap != draggedGap
+        val isBlockedByTwinPartner = draggedSource.isFluidTwin &&
+          partnerWinKey != null &&
+          targetWinKey == partnerWinKey &&
+          draggedWinKey != partnerWinKey
+
+        if (isBlockedByAnchorWall || isBlockedByTwinPartner) {
           val clampedEdge = if (targetScheduled.startTimeMinute < draggedGap.first) {
             draggedGap.first
           } else {
@@ -1309,9 +2755,12 @@ object SchedulerEngine {
               val updated = allDynamicTasks.map { task ->
                 val pair = updatesById[task.id]
                 if (pair != null) {
+                  val bDur = birthDurationOf(task)
                   task.copy(
                     startTimeMinute = pair.first,
                     originalStartTimeMinute = pair.first,
+                    durationMinutes = bDur,
+                    originalDurationMinutes = task.originalDurationMinutes ?: bDur,
                     manualPlacementOrder = pair.second
                   )
                 } else {
@@ -1323,21 +2772,29 @@ object SchedulerEngine {
           }
         }
 
-        // Case B: Cross-Anchor Drop (Normal task moved into a different gap onto/before/after targetTask)
+        // Case B: Cross-Anchor Drop (Normal or Fluid Twin task moved into a distinct anchor gap)
         val (targetGapStart, targetGapEnd) = targetGap
         val rawStart = if (dropTarget is VerticalDropTarget.InsertBeforeTask) {
           targetScheduled.startTimeMinute
         } else {
           targetScheduled.startTimeMinute + targetScheduled.durationMinutes + targetScheduled.interTaskBufferMinutes.coerceIn(0, 30)
         }
-        val maxInTargetGap = (targetGapEnd - draggedFullBlock).coerceAtLeast(targetGapStart)
+        val effectiveTargetBlock = if ((draggedSource.isFluidTwin || effectiveFlexOf(draggedSource) > 0) && (targetGapEnd - targetGapStart) < draggedFullBlock) {
+          draggedMinBlock
+        } else {
+          draggedFullBlock
+        }
+        val maxInTargetGap = (targetGapEnd - effectiveTargetBlock).coerceAtLeast(targetGapStart)
         val clampedStart = rawStart.coerceIn(targetGapStart, maxInTargetGap)
 
         val updated = allDynamicTasks.map { task ->
           if (task.id == taskId) {
+            val bDur = birthDurationOf(task)
             task.copy(
               startTimeMinute = clampedStart,
               originalStartTimeMinute = clampedStart,
+              durationMinutes = bDur,
+              originalDurationMinutes = task.originalDurationMinutes ?: bDur,
               manualPlacementOrder = baseManualOrder + 100L
             )
           } else {
@@ -1351,7 +2808,8 @@ object SchedulerEngine {
 
   /**
    * Computes exact preview start/end minutes and Anchor Wall flag for the glowing drop shadow
-   * using the exact same rules as [applyVerticalDropReposition].
+   * using the exact same rules as [applyVerticalDropReposition], including recovered birth duration
+   * when hovering a spacious target anchor window.
    */
   fun previewVerticalDrop(
     allDynamicTasks: List<RoutineTask>,
@@ -1376,7 +2834,27 @@ object SchedulerEngine {
     )
     val moved = updated.firstOrNull { it.id == taskId } ?: dragged
     val startMin = moved.startTimeMinute
-    val endMin = (startMin + moved.durationMinutes) % 1440
+    val birthDur = birthDurationOf(dragged)
+    val previewDur = if (birthDur == 0) {
+      0
+    } else if (birthDur > dragged.durationMinutes && !hitWall) {
+      val minDur = minAllowedDurationOf(dragged)
+      val (wStart, wEnd) = findEnclosingAnchorBounds(anchors, startMin, day)
+      val otherUsedInWin = scheduledTasks
+        .filter {
+          it.type == TaskType.DYNAMIC &&
+            it.id != taskId &&
+            it.durationMinutes > 0 &&
+            it.startTimeMinute in wStart until wEnd
+        }
+        .sumOf { it.durationMinutes.coerceAtLeast(0) + it.interTaskBufferMinutes.coerceIn(0, 30) }
+      val buf = dragged.interTaskBufferMinutes.coerceIn(0, 30)
+      val freeWinCap = ((wEnd - wStart) - otherUsedInWin - buf).coerceAtLeast(dragged.durationMinutes)
+      freeWinCap.coerceIn(minDur, birthDur)
+    } else {
+      moved.durationMinutes
+    }
+    val endMin = (startMin + previewDur) % 1440
     return VerticalDropPreview(
       previewStartMinute = startMin,
       previewEndMinute = endMin,

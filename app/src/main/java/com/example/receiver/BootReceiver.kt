@@ -4,8 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.service.AutomationManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class BootReceiver : BroadcastReceiver() {
@@ -21,7 +19,7 @@ class BootReceiver : BroadcastReceiver() {
       val appContext = context.applicationContext ?: context
       val pendingResult: PendingResult? = goAsync()
       if (pendingResult != null) {
-        CoroutineScope(Dispatchers.Default).launch {
+        AutomationManager.receiverScope.launch {
           try {
             AutomationManager.rescheduleAllAlarms(appContext)
           } finally {

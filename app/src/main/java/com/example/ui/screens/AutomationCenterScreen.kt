@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -87,7 +86,6 @@ fun AutomationCenterScreen(
       .fillMaxSize()
       .background(OneUiBackground)
       .statusBarsPadding()
-      .animateContentSize()
       .verticalScroll(rememberScrollState())
       .padding(20.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)

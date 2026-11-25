@@ -7,8 +7,6 @@ import android.os.Build
 import com.example.data.RoutineRepository
 import com.example.service.AutomationManager
 import com.example.service.RoutineAutomationService
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class RoutineAlarmReceiver : BroadcastReceiver() {
@@ -41,7 +39,7 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
           }
           val pendingResult: PendingResult? = goAsync()
           if (pendingResult != null) {
-            CoroutineScope(Dispatchers.Default).launch {
+            AutomationManager.receiverScope.launch {
               try {
                 handleApplyDnd(context, appContext, taskId)
                 AutomationManager.rescheduleAllAlarms(appContext)
@@ -63,7 +61,7 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
 
         val pendingResult: PendingResult? = goAsync()
         if (pendingResult != null) {
-          CoroutineScope(Dispatchers.Default).launch {
+          AutomationManager.receiverScope.launch {
             try {
               handleEndTask(context, taskId, hasExplicitEnableDnd, enableDnd)
               AutomationManager.rescheduleAllAlarms(appContext)
@@ -113,7 +111,7 @@ class RoutineAlarmReceiver : BroadcastReceiver() {
     block: () -> Unit
   ) {
     if (pendingResult == null) return
-    CoroutineScope(Dispatchers.Default).launch {
+    AutomationManager.receiverScope.launch {
       try {
         block()
       } finally {

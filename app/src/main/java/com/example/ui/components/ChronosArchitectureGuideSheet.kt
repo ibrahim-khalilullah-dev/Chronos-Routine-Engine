@@ -157,7 +157,7 @@ fun ChronosArchitectureGuideSheet(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-              text = "VOL. IX • OFFICIAL ARCHITECTURAL SPECIFICATION (v1.1)",
+              text = "VOL. XI • OFFICIAL ARCHITECTURAL SPECIFICATION (v1.5)",
               fontSize = 9.sp,
               fontWeight = FontWeight.Bold,
               fontFamily = FontFamily.Monospace,
@@ -207,7 +207,7 @@ fun ChronosArchitectureGuideSheet(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-          text = "An authoritative engineering specification on zero-encroachment anchors, reverse sleep math, dynamic elastic buffers, hydraulic communicating vessels, launcher-grade drag scheduling, buffer-excluded gap telemetry, and zero-lag 4GB RAM optimization.",
+          text = "An authoritative engineering specification on zero-encroachment anchors, reverse sleep math, elastic buffers, hydraulic Fluid Twins, Human-Level water-filling compression, Alarm-stream TTS with hardware-button stop, and zero-lag 4GB RAM optimization.",
           fontSize = 12.sp,
           fontStyle = FontStyle.Italic,
           color = Color(0xFF94A3B8),
@@ -376,8 +376,8 @@ fun ChronosArchitectureGuideSheet(
             text = "Fluid Twins link two separate routine sessions (such as Morning Architecture and Afternoon Review) under a unified total duration pool:\n\n" +
               "• Communicating Vessels: Adding time to Session A proportionally contracts Session B while maintaining total pool integrity (P = D1 + D2), supporting pools from 2m up to 12h (including <45m short sprints).\n" +
               "• Per-Session Safety Floors: Each twin part supports an optional custom safety floor (fluidSafetyFloorMinutes, 0 = unconstrained down to 1m) while strictly respecting immovable anchor walls and per-part rest buffers.\n" +
-              "• Surplus Flow: If one session is compressed by an anchor boundary, surplus minutes automatically flow to the partner twin.\n" +
-              "• Autonomous Telemetry: Each twin session maintains independent voice toggles, speech messages, and volume sliders alongside shared alerts, category, flexibility, buffer, and DND rules.",
+              "• Surplus Flow & Absorption: If one session is compressed by an anchor boundary, surplus minutes flow to its twin partner; deleting one part lets you Delete Both or Absorb its pool cleanly into a standalone task.\n" +
+              "• Autonomous Telemetry: Each twin session maintains independent voice toggles, speech messages, and always-on 0%–100% per-session volume sliders alongside shared alerts, category, flexibility, buffer, and DND rules.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp
@@ -448,7 +448,7 @@ fun ChronosArchitectureGuideSheet(
             text = "Engineered specifically for zero-lag 4GB RAM reliability and complete immunity against aggressive OEM task killers (such as Samsung One UI Device Care deep sleep):\n\n" +
               "• Single-Earliest setAlarmClock() Promotion + 7-Day Horizon: Only the single earliest upcoming alarm across Start, bounded Delayed DND (delay < duration), and DND-End uses AlarmManager.setAlarmClock() to pierce Deep Doze without flooding SystemUI; remaining alarms across dayOffset -1..6 register cleanly via setExactAndAllowWhileIdle(), with goAsync() coroutines offloading receiver and BootReceiver alarm promotion off the main thread.\n" +
               "• Silent Notification Channel & USAGE_ALARM Ringtone Playback: Foreground banners run on chronos_automation_silent_channel (setSound(null, null), enableVibration(false)) to eliminate double chimes, while custom user ringtones play cleanly via AudioAttributes.USAGE_ALARM Ringtone with automatic MediaPlayer fallback.\n" +
-              "• Lazy Self-Releasing TTS & 25s WakeLock Cap: TextToSpeech(applicationContext) initializes strictly when isVoiceEnabled == true, immediately executes stop() + shutdown() upon UtteranceProgressListener.onDone/onError or a 20-second safety timeout so com.google.android.tts RAM unbinds immediately, caps WakeLocks at 25 seconds, uses START_NOT_STICKY lifecycle semantics, and keeps 12 offline bilingual BN/EN Voice Personas + 4-Tier chronos_vault.json backup intact without waking background activity.",
+              "• Lazy Self-Releasing TTS & 25s WakeLock Cap: TextToSpeech(applicationContext) initializes strictly when isVoiceEnabled == true, immediately executes stop() + shutdown() upon UtteranceProgressListener.onDone/onError or a 20-second safety timeout so com.google.android.tts RAM unbinds immediately, caps WakeLocks at 25 seconds, uses START_NOT_STICKY lifecycle semantics, and keeps 4-Tier chronos_vault.json backup intact without idle background polling.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp
@@ -621,8 +621,8 @@ fun ChronosArchitectureGuideSheet(
               "• Horizontal Speed-Sensitive Scrubbing: Drag left/right to glide start times minute-by-minute within open surrounding bounds (strictly locked when adjacent tasks/anchors leave 0m free room).\n" +
               "• Vertical Reordering & Auto-Scroll: Outer-container PointerEventPass.Initial tracking drives an elevated overlay card and frame-rate-independent withFrameNanos edge auto-scroll, gliding neighbors cleanly via Modifier.animateItem with zero LazyColumn flicker.\n" +
               "• Dual Shadow Choreography: Leaves a dimmed dashed Source Shadow (alpha = 0.28) at origin while opening a full-card-height Destination Drop Shadow with ±8dp anti-ping-pong hysteresis and live start/end preview times.\n" +
-              "• Anchor Fencing & Cross-Anchor Drops: High Priority and Fluid Twin tasks clamp safely at enclosing Anchor Walls; Normal Dynamic tasks cross anchors, leap into open gaps, or swap and cascade adjacent neighbors cleanly via manualPlacementOrder.\n" +
-              "• Non-Destructive Top Header Confirmation: Pending edits swap the top-right countdown pill for a 3-button confirmation bar ([History] diff preview dialog, [Check] Apply, [Close] Discard).",
+              "• Anchor Fencing & Same-Gap Partner Exclusion: Non-twin High Priority tasks clamp safely at enclosing Anchor Walls; Fluid Twin sessions can drag freely across anchors into unoccupied windows while enforcing Same-Gap Partner Exclusion if their active twin partner already occupies that gap; Normal tasks swap, cross anchors, or cascade smoothly via manualPlacementOrder.\n" +
+              "• Sticky Glass Confirmation Bar & Auto-Dismiss: Pending edits transform the sticky top-right glass countdown capsule into the 3-button confirmation bar ([History] impact diff dialog, [Check] Apply, [Close] Discard), automatically dismissing if edits return the timeline to baseline and auto-hiding while dragging.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp
@@ -636,16 +636,62 @@ fun ChronosArchitectureGuideSheet(
         // ==============================================================
         EditorialArticleCard(
           dispatchNumber = "DISPATCH X",
-          title = "Minimalist Header Countdown & Net Gap Telemetry",
-          lead = "Zero-Clutter Timeline Awareness & Buffer-Excluded Gap Pills",
+          title = "Sticky Glass Countdown & Net Gap Telemetry",
+          lead = "Pinned Top-Right Awareness & Buffer-Excluded Gap Pills",
           icon = Icons.Outlined.Timer,
           accentColor = Color(0xFF818CF8)
         ) {
           Text(
             text = "Real-time free space and upcoming boundary telemetry stay scannable without extra cards:\n\n" +
-              "• Minimalist Header Countdown Pill: Opposite the Chronos masthead, a compact badge ticks down to the next scheduled task or anchor—wrapping smoothly past midnight to tomorrow's earliest slot late at night—with zero duplicate lower banners.\n" +
+              "• Sticky Top-Right Obsidian Glass Capsule: Opposite the Chronos masthead and pinned above a 48.dp vertical fade scrim while scrolling, a frosted capsule ticks down to the next scheduled task or anchor—wrapping smoothly past midnight to tomorrow's earliest slot.\n" +
               "• Corner Stopwatch Gap Pills: Under Earliest Start sorting, sleek right-aligned dark obsidian capsules display exact net open intervals between tasks (excluding reserved interTaskBufferMinutes via computeNetFreeGapMinutes), hiding automatically whenever net gap ≤ 0m.\n" +
               "• Live Scrub Telemetry: While scrubbing a task horizontally, neighboring corner gap pills recalculate live frame-by-frame (e.g., 3m → 2m → 1m → hidden at 0m) so tight fits are visible before you lift your finger.",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+          )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // ==============================================================
+        // 13. EDITORIAL DISPATCH XI: HUMAN-LEVEL SMART SOLVER
+        // ==============================================================
+        EditorialArticleCard(
+          dispatchNumber = "DISPATCH XI",
+          title = "Human-Level Smart Solver & Birth Auto-Return",
+          lead = "O(N log N) Two-Tier Elastic Rescue & Largest-Remainder Water-Filling",
+          icon = Icons.Default.Star,
+          accentColor = Color(0xFF22D3EE)
+        ) {
+          Text(
+            text = "Bounded for instant < 3ms deterministic scheduling on 4GB RAM hardware:\n\n" +
+              "• Two-Tier Solver & 4 Elastic Strategies: Pass 1 places tasks at full birth duration (originalDurationMinutes). When blocked, Pass 2 executes Cross-Anchor Smart Migration, 1–5m Micro-Deficit Borrowing, Collective Fair-Share Water-Filling (non-priority Tier-1 flex exhausted before Priority Tier-2), and Flex-to-Shrink & Relocate.\n" +
+              "• Birth-Duration Auto-Return & Anti-Double-Flexing: Canonical originalDurationMinutes persists across JSON vault, Console CLI, Task Studio modals, and drag previews—snapping flexed tasks back to full length automatically once blockers clear.\n" +
+              "• Live Telemetry Badges & 1-Tap Compact / Auto-Fit: Timeline cards surface ⚡ flex badges (e.g., ⚡ 60m→45m) and ↪ relocation markers alongside non-destructive Compact and Auto-Fit schedule impact previews.",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+          )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // ==============================================================
+        // 14. EDITORIAL DISPATCH XII: ALARM-STREAM VOICE & HARDWARE STOP
+        // ==============================================================
+        EditorialArticleCard(
+          dispatchNumber = "DISPATCH XII",
+          title = "Alarm-Stream Voice & Hardware-Button Stop",
+          lead = "Strict STREAM_ALARM Routing, Per-Task Sliders & Instant Mute",
+          icon = Icons.Default.Security,
+          accentColor = Color(0xFF10B981)
+        ) {
+          Text(
+            text = "Spoken announcements bypass muted Media channels and silence on instinct:\n\n" +
+              "• Strict USAGE_ALARM / STREAM_ALARM Routing: Live RoutineAutomationService TTS and all Task Studio / Voice Persona Studio previews bind AudioAttributes.USAGE_ALARM + CONTENT_TYPE_SPEECH with AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK—remaining clearly audible even when Media volume is 0%.\n" +
+              "• Always-On Per-Task 0%–100% Sliders: Every voice-enabled Dynamic Task, Fluid Twin Session 1 & 2, and Circadian Anchor (Slots 1–7, including Friday Jumu'ah mode) exposes its own 0%–100% alarm-stream volume slider synced across 12 bilingual BN/EN Voice Personas.\n" +
+              "• Instant Power & Volume-Key Stop: Pressing Power (ACTION_SCREEN_ON/OFF with 200ms guard) or Volume Up/Down (Activity/Modal dispatchKeyEvent + scoped lockscreen VOLUME_CHANGED_ACTION & Settings.System observer strictly active while speaking) silences ONLY active voice playback while keeping Task-Owned DND, notifications, and future alarms intact with zero idle overhead.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 17.sp
@@ -655,12 +701,12 @@ fun ChronosArchitectureGuideSheet(
         Spacer(modifier = Modifier.height(24.dp))
 
         // ==============================================================
-        // 13. EDITORIAL COLOPHON (Footer)
+        // 15. EDITORIAL COLOPHON (Footer)
         // ==============================================================
         HorizontalDivider(thickness = 1.dp, color = Color(0xFF1E293B))
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-          text = "PRINTED & COMPILED OFFLINE FOR SAMSUNG GALAXY A24 (SM-A245N) • HELIO G99 ENGINE\nCHRONOS DETERMINISTIC TIME SYSTEM v1.1 • 100% PRIVATE • ZERO ANALYTICS",
+          text = "PRINTED & COMPILED OFFLINE FOR SAMSUNG GALAXY A24 (SM-A245N) • HELIO G99 ENGINE\nCHRONOS DETERMINISTIC TIME SYSTEM v1.5 • 100% PRIVATE • ZERO ANALYTICS",
           fontSize = 9.sp,
           fontFamily = FontFamily.Monospace,
           color = Color(0xFF64748B),

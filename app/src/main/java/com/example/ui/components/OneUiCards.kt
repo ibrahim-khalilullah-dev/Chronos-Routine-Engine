@@ -1,7 +1,6 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -147,7 +146,6 @@ fun TaskCompletionRatingBar(
   ) {
     Column(
       modifier = Modifier
-        .animateContentSize()
         .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
       if (existingRating != null) {
@@ -272,6 +270,7 @@ fun AnchorSlotCard(
   sleepDurationMinutes: Int = 420,
   currentMinute: Int = -1,
   isToday: Boolean = true,
+  isCompleted: Boolean = isTaskCompletedAt(task, currentMinute, isToday),
   onQuickAdjust: (deltaMinutes: Int) -> Unit,
   onEditClick: () -> Unit,
   onRateTask: ((taskId: String, ratingPct: Int) -> Unit)? = null,
@@ -455,7 +454,7 @@ fun AnchorSlotCard(
       if (isActive && currentMinute >= 0) {
         Spacer(modifier = Modifier.height(10.dp))
         ActiveTaskLiveProgressBar(task = task, currentMinute = currentMinute, accentColor = Color(0xFF10B981))
-      } else if (isTaskCompletedAt(task, currentMinute, isToday) || (isToday && taskRatingCache.containsKey(task.id))) {
+      } else if (isCompleted || (isToday && taskRatingCache.containsKey(task.id))) {
         Spacer(modifier = Modifier.height(10.dp))
         TaskCompletionRatingBar(task = task, onRate = { r -> onRateTask?.invoke(task.id, r) })
       }
@@ -689,6 +688,7 @@ fun DynamicTaskCard(
   task: RoutineTask,
   currentMinute: Int = -1,
   isToday: Boolean = true,
+  isCompleted: Boolean = isTaskCompletedAt(task, currentMinute, isToday),
   isDragging: Boolean = false,
   isDragSourceGhost: Boolean = false,
   onEditClick: () -> Unit,
@@ -889,7 +889,7 @@ fun DynamicTaskCard(
       if (isActive && currentMinute >= 0) {
         Spacer(modifier = Modifier.height(10.dp))
         ActiveTaskLiveProgressBar(task = task, currentMinute = currentMinute, accentColor = DynamicGradientEnd)
-      } else if (isTaskCompletedAt(task, currentMinute, isToday) || (isToday && taskRatingCache.containsKey(task.id))) {
+      } else if (isCompleted || (isToday && taskRatingCache.containsKey(task.id))) {
         Spacer(modifier = Modifier.height(10.dp))
         TaskCompletionRatingBar(task = task, onRate = { r -> onRateTask?.invoke(task.id, r) })
       }
@@ -969,6 +969,55 @@ fun DynamicTaskCard(
             tint = if (task.isVoiceEnabled) Color(0xFF67E8F9) else TextTertiary,
             modifier = Modifier.size(14.dp)
           )
+        }
+      }
+
+      val birthDur = task.originalDurationMinutes ?: task.durationMinutes
+      val isDurationFlexed = birthDur > task.durationMinutes && task.durationMinutes > 0
+      val birthStart = task.originalStartTimeMinute ?: task.startTimeMinute
+      val isRelocated = task.originalStartTimeMinute != null && birthStart != task.startTimeMinute
+
+      if (isDurationFlexed || isRelocated) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          if (isDurationFlexed) {
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFF59E0B).copy(alpha = 0.16f))
+                .border(BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.45f)), RoundedCornerShape(8.dp))
+                .padding(horizontal = 7.dp, vertical = 2.dp)
+                .testTag("flexed_duration_badge_${task.id}")
+            ) {
+              Text(
+                text = "⚡ ${birthDur}m→${task.durationMinutes}m",
+                color = Color(0xFFFCD34D),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+              )
+            }
+          }
+          if (isRelocated) {
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF38BDF8).copy(alpha = 0.14f))
+                .border(BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)), RoundedCornerShape(8.dp))
+                .padding(horizontal = 7.dp, vertical = 2.dp)
+                .testTag("relocated_task_badge_${task.id}")
+            ) {
+              Text(
+                text = "↪ ${RoutineTask.formatTime(birthStart)}",
+                color = Color(0xFF7DD3FC),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+              )
+            }
+          }
         }
       }
 

@@ -847,7 +847,7 @@ class ExampleUnitTest {
     assertTrue("High-Priority task must signal Anchor Wall hit", hpHitWall)
     assertEquals(750, hpUpdated.first { it.id == "hp_drag" }.startTimeMinute) // 795 - 45
 
-    // Attempt to drag Fluid Twin past Slot 3 (into 860m) -> fenced inside 335..795
+    // Attempt to drag single Fluid Twin (no active partner in Gap 3-4) past Slot 3 into 860m -> allowed across anchors!
     val (twinUpdated, twinHitWall) = com.example.engine.SchedulerEngine.applyDragReposition(
       allDynamicTasks = list,
       taskId = "twin_drag_p1",
@@ -856,8 +856,8 @@ class ExampleUnitTest {
       anchors = anchors,
       day = RoutineDay.MONDAY
     )
-    assertTrue("Fluid Twin must signal Anchor Wall hit", twinHitWall)
-    assertTrue(twinUpdated.first { it.id == "twin_drag_p1" }.startTimeMinute <= 780) // 795 - 15 floor
+    assertFalse("Fluid Twin without partner in destination gap can cross anchors freely", twinHitWall)
+    assertEquals(860, twinUpdated.first { it.id == "twin_drag_p1" }.startTimeMinute)
 
     // Attempt to drag Normal task across Slot 3 into Gap 3-4 (860m) -> allowed across anchors
     val (normUpdated, normHitWall) = com.example.engine.SchedulerEngine.applyDragReposition(
@@ -1110,7 +1110,7 @@ class ExampleUnitTest {
     val hpEnd = hpUpdated.first { it.id == "hp_vdrop" }.startTimeMinute + 45
     assertTrue("High-priority must remain inside Gap 2-3 (<= 795)", hpEnd <= 795)
 
-    // 2. Fluid Twin vertical drop across Slot 3 -> clamped inside Gap 2-3 with hitAnchorWall = true
+    // 2. Single Fluid Twin (no partner in Gap 3-4) vertical drop across Slot 3 -> allowed cross-anchor!
     val (twinUpdated, twinHitWall) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
       allDynamicTasks = allTasks,
       scheduledTasks = baseline.scheduledTasks,
@@ -1120,8 +1120,8 @@ class ExampleUnitTest {
       anchors = anchors,
       day = RoutineDay.MONDAY
     )
-    assertTrue("Fluid Twin cross-anchor vertical drop must hit Anchor Wall", twinHitWall)
-    assertTrue(twinUpdated.first { it.id == "twin_vdrop_p1" }.startTimeMinute <= 780)
+    assertFalse("Fluid Twin without partner in destination gap can cross anchors vertically", twinHitWall)
+    assertEquals(840, twinUpdated.first { it.id == "twin_vdrop_p1" }.startTimeMinute)
 
     // 3. Normal task cross-anchor drop before gap34_blocker -> lands at 840m and cascades afternoonTarget down!
     val (normUpdated, normHitWall) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
@@ -1295,7 +1295,797 @@ class ExampleUnitTest {
     assertEquals(660, reschedTight.scheduledTasks.first { it.id == "wide_morning" }.startTimeMinute)
     assertEquals(690, reschedTight.scheduledTasks.first { it.id == "wide_noon" }.startTimeMinute)
   }
+
+  @Test
+  fun testFindAvailableGapsIntervalMergingHandlesWrapAroundTouchingAndZeroDuration() {
+    val wrapAnchor = RoutineTask(
+      id = "wrap_sleep",
+      title = "Sleep",
+      type = TaskType.ANCHOR_SLEEP,
+      slotNumber = 1,
+      startTimeMinute = 1380, // 23:00 -> wraps to 05:00 (300m)
+      durationMinutes = 360
+    )
+    val zeroSignal = RoutineTask(
+      id = "signal_0m",
+      title = "Marker",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 600,
+      durationMinutes = 0,
+      interTaskBufferMinutes = 0
+    )
+    val t1 = RoutineTask(
+      id = "touch_1",
+      title = "Block 1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 600,
+      durationMinutes = 60,
+      interTaskBufferMinutes = 10 // covers 600..670
+    )
+    val t2 = RoutineTask(
+      id = "touch_2",
+      title = "Block 2",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 670,
+      durationMinutes = 50,
+      interTaskBufferMinutes = 0 // covers 670..720 (touching Block 1)
+    )
+
+    val gaps = com.example.engine.SchedulerEngine.findAvailableGaps(
+      committedTasks = listOf(wrapAnchor, zeroSignal, t1, t2),
+      interTaskBufferMinutes = 0
+    )
+    assertEquals(2, gaps.size)
+    assertEquals(300 to 600, gaps[0].startMinute to gaps[0].endMinute)
+    assertEquals(720 to 1380, gaps[1].startMinute to gaps[1].endMinute)
+  }
+
+  @Test
+  fun testGetInterAnchorWindowKeyRespectsFridaySlot3DisabledSlot5AndMidnightWrap() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Friday Slot 3 Jumu'ah is 12:30 (750) .. 14:30 (870)
+    val monMorningKey = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(anchors, 760, RoutineDay.MONDAY)
+    val friJumuahAfterKey = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(anchors, 880, RoutineDay.FRIDAY)
+    assertEquals(335, monMorningKey) // On Monday, 760 is still inside Gap 2-3 (335..795)
+    assertEquals(870, friJumuahAfterKey) // On Friday, Slot 3 ends at 870
+
+    // Midnight wrap-around: 23:00 (1380) -> 05:00 (300); e.g. if Slot 1 is 1380 for 300m -> 04:00 (240),
+    // or standard Slot 7 ends at 1235 (20:35) and Slot 1 starts at 1380 (23:00): [1235..1380) is separate from Slot 1..Slot 2.
+    // Test Slot 1 disabled (so [1235..1440) and [0..300) merge across midnight):
+    val noSleepAnchors = anchors.filterNot { it.slotNumber == 1 }
+    val preMidnightKey = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(noSleepAnchors, 1400, RoutineDay.MONDAY)
+    val postMidnightKey = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(noSleepAnchors, 60, RoutineDay.MONDAY)
+    assertEquals("Wrap-around window across midnight shares canonical key", postMidnightKey, preMidnightKey)
+
+    // Slot 5 disabled on Monday merges Gap 4-5 (1015..1015) and Gap 5-6 into single Gap 4-6 (1015..1080)
+    val slot5DisabledAnchors = anchors.map {
+      if (it.slotNumber == 5) it.copy(selectedDays = setOf(RoutineDay.TUESDAY)) else it
+    }
+    val kEarly = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(slot5DisabledAnchors, 1020, RoutineDay.MONDAY)
+    val kLate = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(slot5DisabledAnchors, 1070, RoutineDay.MONDAY)
+    assertEquals(1015, kEarly)
+    assertEquals(kEarly, kLate)
+  }
+
+  @Test
+  fun testFluidTwinCrossAnchorAllowedAndSameGapPartnerExclusionEnforced() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360).map {
+      if (it.slotNumber == 5) it.copy(selectedDays = RoutineDay.allDays() - RoutineDay.MONDAY) else it
+    }
+    val twinP1 = RoutineTask(
+      id = "ex_twin_p1",
+      title = "Study A",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420, // Gap 2-3 (335..795)
+      originalStartTimeMinute = 420,
+      durationMinutes = 40,
+      isFluidTwin = true,
+      fluidTwinId = "ex_twin",
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 80,
+      fluidSafetyFloorMinutes = 15,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val twinP2 = RoutineTask(
+      id = "ex_twin_p2",
+      title = "Study B",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 840, // Gap 3-4 (830..990)
+      originalStartTimeMinute = 840,
+      durationMinutes = 40,
+      isFluidTwin = true,
+      fluidTwinId = "ex_twin",
+      fluidTwinPart = 2,
+      fluidTotalPoolMinutes = 80,
+      fluidSafetyFloorMinutes = 15,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val blockerInGap46 = RoutineTask(
+      id = "gap46_item",
+      title = "Evening Drill",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1020, // Inside merged Gap 4-6 (1015..1080) since Slot 5 is disabled on Monday
+      originalStartTimeMinute = 1020,
+      durationMinutes = 30,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val all = listOf(twinP1, twinP2, blockerInGap46)
+    val baseline = com.example.engine.SchedulerEngine.scheduleDay(anchors, all, RoutineDay.MONDAY)
+
+    // 1. Drag P1 into Partner P2's gap (Gap 3-4, 840m) -> BLOCKED (Same-Gap Partner Exclusion)
+    val (blockedDrop, blockedWall) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = all,
+      scheduledTasks = baseline.scheduledTasks,
+      taskId = "ex_twin_p1",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertBeforeTask("ex_twin_p2"),
+      baseManualOrder = 100L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertTrue("Dropping Twin P1 into P2's gap must trigger Same-Gap Partner Exclusion", blockedWall)
+    assertTrue(blockedDrop.first { it.id == "ex_twin_p1" }.startTimeMinute < 795)
+
+    // 2. Drag P1 across Slot 3 & 4 into merged Gap 4-6 (no partner there) -> ALLOWED!
+    val (allowedDrop, allowedWall) = com.example.engine.SchedulerEngine.applyVerticalDropReposition(
+      allDynamicTasks = all,
+      scheduledTasks = baseline.scheduledTasks,
+      taskId = "ex_twin_p1",
+      dropTarget = com.example.engine.VerticalDropTarget.InsertBeforeTask("gap46_item"),
+      baseManualOrder = 200L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertFalse("Dropping Twin P1 into unoccupied Gap 4-6 must be allowed", allowedWall)
+    assertEquals(1020, allowedDrop.first { it.id == "ex_twin_p1" }.startTimeMinute)
+
+    // 3. Recovery: if BOTH start in the same gap, dragging P1 out into Gap 4-6 must be ALLOWED
+    val bothInGap23 = listOf(
+      twinP1,
+      twinP2.copy(startTimeMinute = 500, originalStartTimeMinute = 500),
+      blockerInGap46
+    )
+    val (_, recoveryWall) = com.example.engine.SchedulerEngine.applyDragReposition(
+      allDynamicTasks = bothInGap23,
+      taskId = "ex_twin_p1",
+      targetStartMinute = 1020,
+      newManualOrder = 300L,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertFalse("Dragging twin out when both started in the same gap must succeed", recoveryWall)
+  }
+
+  @Test
+  fun testScheduleDayPlacesHighPriorityBeforeFluidTwinsEnforcesSameGapExclusionAndLocalCompacts() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Gap 3-4: 830..990 (160m total).
+    // Twin P1 at 420 (Gap 2-3); Twin P2 requests 830 (Gap 3-4) for 90m.
+    // High Priority task (created AFTER Twin P2) requests 830 (Gap 3-4) for 80m.
+    // Even though Twin P2 was earlier in list, High Priority must schedule BEFORE Twin P2 and claim 830..910;
+    // Twin P2 compresses/places in remaining 910..990 (or moves cleanly)!
+    val twinP1 = RoutineTask(
+      id = "hp_vs_twin_p1",
+      title = "Twin Part 1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 420,
+      durationMinutes = 60,
+      isFluidTwin = true,
+      fluidTwinId = "hp_vs_twin",
+      fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 150,
+      fluidSafetyFloorMinutes = 20,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val twinP2 = RoutineTask(
+      id = "hp_vs_twin_p2",
+      title = "Twin Part 2",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 830,
+      durationMinutes = 90,
+      isFluidTwin = true,
+      fluidTwinId = "hp_vs_twin",
+      fluidTwinPart = 2,
+      fluidTotalPoolMinutes = 150,
+      fluidSafetyFloorMinutes = 20,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val highPri = RoutineTask(
+      id = "hp_first",
+      title = "Critical Deadline",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 830,
+      durationMinutes = 80,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val result = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(twinP1, twinP2, highPri),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val scheduledHp = result.scheduledTasks.firstOrNull { it.id == "hp_first" }
+    assertNotNull("High Priority task must be scheduled in its fenced Gap 3-4", scheduledHp)
+    assertEquals(830, scheduledHp!!.startTimeMinute)
+
+    // Test Same-Gap Partner Exclusion during scheduleDay: if both twins request Gap 2-3 and no other free gaps exist,
+    // wait - Gap 3-4 IS open, so Part 2 relocates out of Gap 2-3 into another gap instead of sharing Gap 2-3!
+    val sameGapP1 = twinP1.copy(id = "sg_p1", fluidTwinId = "sg", startTimeMinute = 400, durationMinutes = 40)
+    val sameGapP2 = twinP2.copy(id = "sg_p2", fluidTwinId = "sg", startTimeMinute = 500, durationMinutes = 40)
+    val sameGapRes = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(sameGapP1, sameGapP2),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val placedP1 = sameGapRes.scheduledTasks.firstOrNull { it.id == "sg_p1" }
+    val placedP2 = sameGapRes.scheduledTasks.firstOrNull { it.id == "sg_p2" }
+    assertNotNull(placedP1)
+    assertNotNull(placedP2)
+    val win1 = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(anchors, placedP1!!.startTimeMinute, RoutineDay.MONDAY)
+    val win2 = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(anchors, placedP2!!.startTimeMinute, RoutineDay.MONDAY)
+    assertTrue("Scheduled Fluid Twin parts must reside in separate inter-anchor windows", win1 != win2)
+
+    // Test targeted local compaction inside candidate window:
+    // Gap 3-4 (830..990 = 160m) has two normal tasks at 850..890 (40m) and 920..950 (30m) -> split slack (20m + 30m + 40m = 90m).
+    // Adding an 80m High Priority task at 830m inside Gap 3-4 packs existing tasks to fit ALL THREE without overflowing!
+    val normA = RoutineTask(
+      id = "compact_a",
+      title = "Normal A",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 850,
+      durationMinutes = 40,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val normB = RoutineTask(
+      id = "compact_b",
+      title = "Normal B",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 920,
+      durationMinutes = 30,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val hpFitsViaCompaction = RoutineTask(
+      id = "hp_local_compact",
+      title = "Priority 80m",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 830,
+      durationMinutes = 80,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val localCompRes = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(normA, normB, hpFitsViaCompaction),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue(
+      "All 3 tasks (80 + 40 + 30 = 150m <= 160m) must fit via targeted local window compaction",
+      localCompRes.overflowTasks.isEmpty()
+    )
+  }
+
+  @Test
+  fun testCompactAndRescueSchedulePacksGapsRescuesOverflowAndDisplacesForHighPriority() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Scenario 1: Split slack inside Gap 3-4 (830..990 = 160m) prevents a Fluid Twin part (40m floor, 50m dur)
+    // from fitting in Gap 3-4 until hp1 & hp2 are compacted sequentially.
+    val fill23 = RoutineTask(
+      id = "f23",
+      title = "Fill 2-3",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 335,
+      durationMinutes = 460,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val fill71 = RoutineTask(
+      id = "f71",
+      title = "Fill 7-1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1235,
+      durationMinutes = 145,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val hp1 = RoutineTask(
+      id = "cr_hp1",
+      title = "Priority 1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 855, // leaves 25m before (830..855)
+      durationMinutes = 70,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val hp2 = RoutineTask(
+      id = "cr_hp2",
+      title = "Priority 2",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 950, // leaves 25m between (925..950)
+      durationMinutes = 40,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val twinP1 = RoutineTask(
+      id = "cr_twin1",
+      title = "Twin Part 1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 1110, // fills Gap 6-7 (1110..1200)
+      durationMinutes = 90,
+      isFluidTwin = true,
+      fluidTwinId = "twin_rescue_pair",
+      fluidTotalPoolMinutes = 140,
+      fluidSafetyFloorMinutes = 45,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val twinP2 = RoutineTask(
+      id = "cr_twin2",
+      title = "Twin Part 2",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 830, // needs >= 40m in Gap 3-4 (max uncompacted gap is 25m -> overflows!)
+      durationMinutes = 50,
+      isFluidTwin = true,
+      fluidTwinId = "twin_rescue_pair",
+      fluidTotalPoolMinutes = 140,
+      fluidSafetyFloorMinutes = 40,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    // v1.3 Two-Tier Human-Level Solver automatically compacts Gap 3-4 inside scheduleDay() to fit twinP2!
+    val autoSolved = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(fill23, fill71, hp1, hp2, twinP1, twinP2),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue("v1.3 scheduleDay must auto-compact Gap 3-4 and rescue twinP2 with zero overflow", autoSolved.overflowTasks.isEmpty())
+    assertTrue(autoSolved.scheduledTasks.any { it.id == "cr_twin2" })
+
+    // Scenario 1: Compact fragmented non-overflowing tasks into tight sequential blocks
+    val frag1 = RoutineTask(
+      id = "cr_frag1",
+      title = "Frag 1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 855, // leaves 25m before (830..855)
+      durationMinutes = 70,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val frag2 = RoutineTask(
+      id = "cr_frag2",
+      title = "Frag 2",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 950, // leaves 25m between (925..950)
+      durationMinutes = 40,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val outcome = com.example.engine.SchedulerEngine.compactAndRescueSchedule(
+      anchors = anchors,
+      allDynamicTasks = listOf(fill23, fill71, frag1, frag2, twinP1),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue("Sequential compaction must move fragmented tasks", outcome.movedCount >= 2)
+    assertTrue("No overflow tasks should remain after compaction", outcome.scheduleResult.overflowTasks.isEmpty())
+
+    // Scenario 2: Optimal schedule returns movedCount == 0 && rescuedCount == 0 && flexedCount == 0
+    val optimalOutcome = com.example.engine.SchedulerEngine.compactAndRescueSchedule(
+      anchors = anchors,
+      allDynamicTasks = outcome.updatedDynamicTasks,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertEquals(0, optimalOutcome.movedCount)
+    assertEquals(0, optimalOutcome.rescuedCount)
+    assertEquals(0, optimalOutcome.flexedCount)
+  }
+
+  @Test
+  fun testSolverFairShareEqualAndAsymmetricFlexCompression() {
+    // Single 240m window (360..600) bounded by two anchors (0..360 and 600..1440)
+    val windowAnchors = listOf(
+      RoutineTask(id = "a1", title = "Early Block", type = TaskType.ANCHOR_STANDARD, slotNumber = 2, startTimeMinute = 0, durationMinutes = 360, selectedDays = RoutineDay.allDays()),
+      RoutineTask(id = "a2", title = "Late Block", type = TaskType.ANCHOR_SLEEP, slotNumber = 1, startTimeMinute = 600, durationMinutes = 840, selectedDays = RoutineDay.allDays())
+    )
+
+    // Case A: 5 x 60m tasks (each flex=15) in 240m -> 300m total, 60m deficit -> ALL 5 become 48m with originalDurationMinutes=60
+    val fiveTasks = (1..5).map { idx ->
+      RoutineTask(
+        id = "fs_eq_$idx",
+        title = "Equal Task $idx",
+        type = TaskType.DYNAMIC,
+        startTimeMinute = 360 + (idx - 1) * 45,
+        originalStartTimeMinute = 360 + (idx - 1) * 45,
+        durationMinutes = 60,
+        originalDurationMinutes = 60,
+        customFlexibilityMinutes = 15,
+        toleranceMinutes = 15,
+        selectedDays = setOf(RoutineDay.MONDAY)
+      )
+    }
+    val eqRes = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = windowAnchors,
+      dynamicTasks = fiveTasks,
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue("All 5 equal-flex tasks must fit cleanly in 240m window", eqRes.overflowTasks.isEmpty())
+    val eqScheduled = eqRes.scheduledTasks.filter { it.type == TaskType.DYNAMIC }.sortedBy { it.startTimeMinute }
+    assertEquals(5, eqScheduled.size)
+    eqScheduled.forEach { t ->
+      assertEquals("Each equal-flex task must compress fairly to 48m", 48, t.durationMinutes)
+      assertEquals("Canonical birth duration must stay 60m", 60, t.originalDurationMinutes)
+    }
+
+    // Case B: 4 x 60m flex=15 + 1 x 60m flex=0 -> 45m x 4 + 60m x 1 (tested with 0-flex both early and late)
+    for (zeroIdx in listOf(1, 5)) {
+      val asymTasks = (1..5).map { idx ->
+        val flex = if (idx == zeroIdx) 0 else 15
+        RoutineTask(
+          id = "fs_asym_${zeroIdx}_$idx",
+          title = "Asym Task $idx",
+          type = TaskType.DYNAMIC,
+          startTimeMinute = 360 + (idx - 1) * 45,
+          originalStartTimeMinute = 360 + (idx - 1) * 45,
+          durationMinutes = 60,
+          originalDurationMinutes = 60,
+          customFlexibilityMinutes = flex,
+          toleranceMinutes = flex,
+          selectedDays = setOf(RoutineDay.MONDAY)
+        )
+      }
+      val asymRes = com.example.engine.SchedulerEngine.scheduleDay(
+        anchors = windowAnchors,
+        dynamicTasks = asymTasks,
+        activeDay = RoutineDay.MONDAY,
+        interTaskBufferMinutes = 0
+      )
+      assertTrue("All 5 asymmetric tasks must fit cleanly (zeroIdx=$zeroIdx)", asymRes.overflowTasks.isEmpty())
+      val asymById = asymRes.scheduledTasks.filter { it.type == TaskType.DYNAMIC }.associateBy { it.id }
+      for (idx in 1..5) {
+        val t = asymById["fs_asym_${zeroIdx}_$idx"]!!
+        val expected = if (idx == zeroIdx) 60 else 45
+        assertEquals("Task $idx with zeroIdx=$zeroIdx expected ${expected}m", expected, t.durationMinutes)
+        assertEquals(60, t.originalDurationMinutes)
+      }
+    }
+  }
+
+  @Test
+  fun testSolverMicroDeficitNeighborBorrowing() {
+    // 240m window (360..600): Task A (222m, flex=10) + Task B (20m, flex=0) -> 2m deficit covered by A -> A=220m, B=20m!
+    val windowAnchors = listOf(
+      RoutineTask(id = "a1", title = "Early Block", type = TaskType.ANCHOR_STANDARD, slotNumber = 2, startTimeMinute = 0, durationMinutes = 360, selectedDays = RoutineDay.allDays()),
+      RoutineTask(id = "a2", title = "Late Block", type = TaskType.ANCHOR_SLEEP, slotNumber = 1, startTimeMinute = 600, durationMinutes = 840, selectedDays = RoutineDay.allDays())
+    )
+    val donorA = RoutineTask(
+      id = "micro_donor_a",
+      title = "Flexible Block",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360,
+      originalStartTimeMinute = 360,
+      durationMinutes = 222,
+      originalDurationMinutes = 222,
+      customFlexibilityMinutes = 10,
+      toleranceMinutes = 10,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val rigidB = RoutineTask(
+      id = "micro_rigid_b",
+      title = "Rigid 20m Task",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 580,
+      originalStartTimeMinute = 580,
+      durationMinutes = 20,
+      originalDurationMinutes = 20,
+      customFlexibilityMinutes = 0,
+      toleranceMinutes = 0,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val res = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = windowAnchors,
+      dynamicTasks = listOf(donorA, rigidB),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue("Micro-deficit 2m must be absorbed without overflow", res.overflowTasks.isEmpty())
+    val schedA = res.scheduledTasks.first { it.id == "micro_donor_a" }
+    val schedB = res.scheduledTasks.first { it.id == "micro_rigid_b" }
+    assertEquals("Donor A must lend 2m (222 -> 220)", 220, schedA.durationMinutes)
+    assertEquals("Rigid B must stay at full 20m", 20, schedB.durationMinutes)
+    assertEquals(222, schedA.originalDurationMinutes)
+  }
+
+  @Test
+  fun testSolverCrossAnchorMigrationAndFlexToShrinkRelocate() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+    // Fill Gap 2-3 (460m), Gap 6-7 (90m), and leave 35m in Gap 7-1 (145m = 110m filler + 35m open).
+    // Gap 3-4 is 160m (830..990):
+    // - Movable M (40m, flex=10, min=30m) at 830
+    // - Rigid filler R (100m, flex=0, HP) at 870
+    // - New HP B (60m, flex=0) at 830 inside Gap 3-4!
+    // Initially Gap 3-4 has 140m used -> 20m free. B needs 60m (needs 40m more).
+    // Strategy 1 migrates M (40m) to Gap 7-1 if Gap 7-1 has >= 40m; if Gap 7-1 only has 35m,
+    // Strategy 3B shrinks M from 40m -> 35m within M's 10m flex and relocates M to Gap 7-1, fitting B at full 60m!
+    val fill23 = RoutineTask(id = "m_f23", title = "Fill 2-3", type = TaskType.DYNAMIC, startTimeMinute = 335, durationMinutes = 460, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+    val fill67 = RoutineTask(id = "m_f67", title = "Fill 6-7", type = TaskType.DYNAMIC, startTimeMinute = 1110, durationMinutes = 90, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+
+    // Test Strategy 1 (Cross-Anchor Migration at full 40m when Gap 7-1 has 45m open)
+    val fill71Strategy1 = RoutineTask(id = "m_f71_s1", title = "Fill 7-1", type = TaskType.DYNAMIC, startTimeMinute = 1235, durationMinutes = 100, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+    val movable1 = RoutineTask(id = "m_mov1", title = "Movable 40m", type = TaskType.DYNAMIC, startTimeMinute = 830, originalStartTimeMinute = 830, durationMinutes = 40, originalDurationMinutes = 40, customFlexibilityMinutes = 10, toleranceMinutes = 10, selectedDays = setOf(RoutineDay.MONDAY))
+    val hpFiller = RoutineTask(id = "m_hp_fill", title = "HP Filler", type = TaskType.DYNAMIC, startTimeMinute = 870, durationMinutes = 100, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+    val hpIncoming = RoutineTask(id = "m_hp_in", title = "HP Incoming 60m", type = TaskType.DYNAMIC, startTimeMinute = 830, durationMinutes = 60, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+
+    val s1Res = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(fill23, fill67, fill71Strategy1, movable1, hpFiller, hpIncoming),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue("Strategy 1 migration must eliminate all overflow", s1Res.overflowTasks.isEmpty())
+    val s1Moved = s1Res.scheduledTasks.first { it.id == "m_mov1" }
+    val s1Incoming = s1Res.scheduledTasks.first { it.id == "m_hp_in" }
+    assertEquals("Migrated movable keeps full 40m duration", 40, s1Moved.durationMinutes)
+    assertTrue("Migrated movable lands in Gap 7-1 (1235..1380)", s1Moved.startTimeMinute in 1235 until 1380)
+    assertEquals("Original birth start preserved for telemetry", 830, s1Moved.originalStartTimeMinute)
+    assertTrue("HP incoming fits inside fenced Gap 3-4 (830..990)", s1Incoming.startTimeMinute in 830 until 990)
+
+    // Test Strategy 3B (Flex-to-Shrink & Relocate when Gap 7-1 only has 35m open)
+    val fill71Strategy3B = RoutineTask(id = "m_f71_s3b", title = "Fill 7-1 Tight", type = TaskType.DYNAMIC, startTimeMinute = 1235, durationMinutes = 110, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+    val s3bRes = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(fill23, fill67, fill71Strategy3B, movable1, hpFiller, hpIncoming),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue("Strategy 3B flex-shrink-relocate must eliminate all overflow", s3bRes.overflowTasks.isEmpty())
+    val s3bMoved = s3bRes.scheduledTasks.first { it.id == "m_mov1" }
+    val s3bIncoming = s3bRes.scheduledTasks.first { it.id == "m_hp_in" }
+    assertEquals("Movable M shrinks within flex to 35m in destination Gap 7-1", 35, s3bMoved.durationMinutes)
+    assertEquals("Canonical birth duration stays 40m", 40, s3bMoved.originalDurationMinutes)
+    assertTrue("Relocated M lands in Gap 7-1", s3bMoved.startTimeMinute in 1235 until 1380)
+    assertEquals("HP incoming gets full 60m inside fenced Gap 3-4", 60, s3bIncoming.durationMinutes)
+  }
+
+  @Test
+  fun testBirthDurationAutoReturnAntiDoubleFlexAndConsoleSync() {
+    val windowAnchors = listOf(
+      RoutineTask(id = "a1", title = "Early Block", type = TaskType.ANCHOR_STANDARD, slotNumber = 2, startTimeMinute = 0, durationMinutes = 360, selectedDays = RoutineDay.allDays()),
+      RoutineTask(id = "a2", title = "Late Block", type = TaskType.ANCHOR_SLEEP, slotNumber = 1, startTimeMinute = 600, durationMinutes = 840, selectedDays = RoutineDay.allDays())
+    )
+    // 240m window: Blocker 195m (HP, flex=0) + FlexTask 60m (flex=15, min=45) -> FlexTask becomes 45m, originalDurationMinutes=60
+    val blocker = RoutineTask(
+      id = "ad_blocker",
+      title = "Blocker",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 360,
+      originalStartTimeMinute = 360,
+      durationMinutes = 195,
+      originalDurationMinutes = 195,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val flexTask = RoutineTask(
+      id = "ad_flex",
+      title = "Elastic Study",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 555,
+      originalStartTimeMinute = 555,
+      durationMinutes = 60,
+      originalDurationMinutes = 60,
+      customFlexibilityMinutes = 15,
+      toleranceMinutes = 15,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+
+    val day1 = com.example.engine.SchedulerEngine.scheduleDay(windowAnchors, listOf(blocker, flexTask), RoutineDay.MONDAY)
+    val flexed1 = day1.scheduledTasks.first { it.id == "ad_flex" }
+    assertEquals(45, flexed1.durationMinutes)
+    assertEquals(60, flexed1.originalDurationMinutes)
+
+    // Anti-double-flexing: passing already-flexed scheduled output back into scheduleDay MUST NOT shrink 45m -> 30m!
+    val extraPressure = RoutineTask(
+      id = "ad_pressure",
+      title = "Extra 15m",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 540,
+      originalStartTimeMinute = 540,
+      durationMinutes = 15,
+      originalDurationMinutes = 15,
+      isHighPriority = true,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val dayReEvaluated = com.example.engine.SchedulerEngine.scheduleDay(
+      windowAnchors,
+      listOf(blocker, flexed1, extraPressure),
+      RoutineDay.MONDAY
+    )
+    assertFalse("Anti-double-flexing must refuse shrinking below birthDuration - flex (45m)",
+      dayReEvaluated.scheduledTasks.any { it.id == "ad_flex" && it.durationMinutes < 45 })
+
+    // Birth-Duration Auto-Return: pausing/deleting blocker restores Elastic Study to full 60m automatically!
+    val dayRecovered = com.example.engine.SchedulerEngine.scheduleDay(
+      windowAnchors,
+      listOf(blocker.copy(isPausedTodayOnly = true), flexed1),
+      RoutineDay.MONDAY
+    )
+    val restored = dayRecovered.scheduledTasks.first { it.id == "ad_flex" }
+    assertEquals("Birth duration 60m must auto-restore once blocker is paused", 60, restored.durationMinutes)
+    assertEquals(60, restored.originalDurationMinutes)
+
+    // Console export/parse must preserve canonical birth duration (60m, not 45m)
+    val exported = ConsoleParser.generateRoutineScript(windowAnchors, listOf(flexed1), sleepMinutes = 360, bufferMinutes = 0)
+    assertTrue("Exported CLI script must emit birth duration 60m", exported.contains("| 60 |"))
+    val reparsed = ConsoleParser.parse(exported)
+    assertEquals(0, reparsed.errorCount)
+    val parsedTask = reparsed.validTasks.first()
+    assertEquals(60, parsedTask.durationMinutes)
+    assertEquals(60, parsedTask.originalDurationMinutes)
+  }
+
+  @Test
+  fun testSolverEnforcesPriorityWallsTwinExclusionBuffersDiffAndDropPreview() {
+    val anchors = com.example.engine.SchedulerEngine.createDefaultAnchors(360)
+
+    // 1. High Priority Tier-2 slack is NOT touched while Tier-1 non-HP slack can satisfy deficit,
+    //    and HP never crosses its enclosing anchor wall even when compressed.
+    val hpIn34 = RoutineTask(
+      id = "tier_hp",
+      title = "HP Flexible",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 830,
+      originalStartTimeMinute = 830,
+      durationMinutes = 80,
+      originalDurationMinutes = 80,
+      isHighPriority = true,
+      customFlexibilityMinutes = 20,
+      toleranceMinutes = 20,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val norm1In34 = RoutineTask(
+      id = "tier_n1",
+      title = "Normal 1",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 910,
+      originalStartTimeMinute = 910,
+      durationMinutes = 50,
+      originalDurationMinutes = 50,
+      customFlexibilityMinutes = 20,
+      toleranceMinutes = 20,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val norm2In34 = RoutineTask(
+      id = "tier_n2",
+      title = "Normal 2",
+      type = TaskType.DYNAMIC,
+      startTimeMinute = 830,
+      originalStartTimeMinute = 830,
+      durationMinutes = 40,
+      originalDurationMinutes = 40,
+      customFlexibilityMinutes = 20,
+      toleranceMinutes = 20,
+      selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    // Gap 3-4 is 160m. Fill other gaps so Migration won't move norm1In34 out.
+    val f23 = RoutineTask(id = "c_f23", title = "F23", type = TaskType.DYNAMIC, startTimeMinute = 335, durationMinutes = 460, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+    val f67 = RoutineTask(id = "c_f67", title = "F67", type = TaskType.DYNAMIC, startTimeMinute = 1110, durationMinutes = 90, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+    val f71 = RoutineTask(id = "c_f71", title = "F71", type = TaskType.DYNAMIC, startTimeMinute = 1235, durationMinutes = 145, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY))
+
+    val tierRes = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(f23, f67, f71, hpIn34, norm1In34, norm2In34),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue(tierRes.overflowTasks.isEmpty())
+    val schedHp = tierRes.scheduledTasks.first { it.id == "tier_hp" }
+    assertEquals("Tier-2 High Priority duration must remain untouched when Tier-1 slack covers deficit", 80, schedHp.durationMinutes)
+    assertTrue("HP must stay inside Gap 3-4", schedHp.startTimeMinute in 830 until 990)
+
+    // 2. Fluid Twin Same-Gap Partner Exclusion enforced during Cross-Anchor Migration / 3B
+    // Put twinP1 in Gap 7-1 (1235..1380), and twinP2 in Gap 3-4; force an HP blocker into Gap 3-4
+    // so twinP2 is migrated: twinP2 MUST NOT migrate into Gap 7-1 even though Gap 7-1 has room;
+    // it must pick Gap 6-7 (1110..1200) or Gap 2-3 instead!
+    val twin1 = RoutineTask(
+      id = "ex_m_p1", title = "Twin 1", type = TaskType.DYNAMIC, startTimeMinute = 1235, originalStartTimeMinute = 1235,
+      durationMinutes = 60, originalDurationMinutes = 60, isFluidTwin = true, fluidTwinId = "ex_m", fluidTwinPart = 1,
+      fluidTotalPoolMinutes = 120, fluidSafetyFloorMinutes = 30, selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val twin2 = RoutineTask(
+      id = "ex_m_p2", title = "Twin 2", type = TaskType.DYNAMIC, startTimeMinute = 830, originalStartTimeMinute = 830,
+      durationMinutes = 60, originalDurationMinutes = 60, isFluidTwin = true, fluidTwinId = "ex_m", fluidTwinPart = 2,
+      fluidTotalPoolMinutes = 120, fluidSafetyFloorMinutes = 30, selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val hpBlock34 = RoutineTask(
+      id = "ex_hp_34", title = "HP 34", type = TaskType.DYNAMIC, startTimeMinute = 830, originalStartTimeMinute = 830,
+      durationMinutes = 130, originalDurationMinutes = 130, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val exRes = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(f23, twin1, twin2, hpBlock34),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    val resP1 = exRes.scheduledTasks.first { it.id == "ex_m_p1" }
+    val resP2 = exRes.scheduledTasks.first { it.id == "ex_m_p2" }
+    val w1 = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(anchors, resP1.startTimeMinute, RoutineDay.MONDAY)
+    val w2 = com.example.engine.SchedulerEngine.getInterAnchorWindowKey(anchors, resP2.startTimeMinute, RoutineDay.MONDAY)
+    assertTrue("Migrated twin must respect Same-Gap Partner Exclusion", w1 != w2)
+
+    // 3. Buffer preservation + Recovered impact diff format + previewVerticalDrop recovery duration
+    val bufTask = RoutineTask(
+      id = "buf_keep", title = "Buffered", type = TaskType.DYNAMIC, startTimeMinute = 1110, originalStartTimeMinute = 1110,
+      durationMinutes = 80, originalDurationMinutes = 80, interTaskBufferMinutes = 10,
+      customFlexibilityMinutes = 10, toleranceMinutes = 10, selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val incomingFor90 = RoutineTask(
+      id = "buf_in", title = "Incoming", type = TaskType.DYNAMIC, startTimeMinute = 1110, originalStartTimeMinute = 1110,
+      durationMinutes = 10, originalDurationMinutes = 10, isHighPriority = true, selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val bufRes = com.example.engine.SchedulerEngine.scheduleDay(
+      anchors = anchors,
+      dynamicTasks = listOf(f23, f71, hpBlock34, bufTask, incomingFor90),
+      activeDay = RoutineDay.MONDAY,
+      interTaskBufferMinutes = 0
+    )
+    assertTrue(bufRes.overflowTasks.isEmpty())
+    val schedBuf = bufRes.scheduledTasks.first { it.id == "buf_keep" }
+    val schedIn = bufRes.scheduledTasks.first { it.id == "buf_in" }
+    assertTrue("10m interTaskBufferMinutes must remain preserved between tasks",
+      schedBuf.startTimeMinute + schedBuf.durationMinutes + 10 <= schedIn.startTimeMinute ||
+        schedIn.startTimeMinute + schedIn.durationMinutes <= schedBuf.startTimeMinute)
+
+    // Impact diff format: "Recovered at <time> (60m → 45m)"
+    val ovBase = com.example.engine.ScheduleResult(
+      scheduledTasks = emptyList(),
+      overflowTasks = listOf(flexTaskStub(60)),
+      availableGaps = emptyList(),
+      totalScheduledMinutes = 0,
+      totalGapsMinutes = 0
+    )
+    val recDraft = com.example.engine.ScheduleResult(
+      scheduledTasks = listOf(flexTaskStub(45).copy(startTimeMinute = 830, isOverflow = false)),
+      overflowTasks = emptyList(),
+      availableGaps = emptyList(),
+      totalScheduledMinutes = 45,
+      totalGapsMinutes = 0
+    )
+    val diff = com.example.engine.SchedulerEngine.computeScheduleImpactDiff(ovBase, recDraft)
+    assertEquals(1, diff.size)
+    assertEquals("Recovered at ${RoutineTask.formatTime(830)} (60m → 45m)", diff.first().statusChange)
+
+    // Vertical drop preview recovers full birth duration when hovering spacious target window
+    val flexedSource = RoutineTask(
+      id = "drop_flexed", title = "Drop Flexed", type = TaskType.DYNAMIC,
+      startTimeMinute = 1110, originalStartTimeMinute = 1110,
+      durationMinutes = 45, originalDurationMinutes = 60,
+      customFlexibilityMinutes = 15, selectedDays = setOf(RoutineDay.MONDAY)
+    )
+    val spaciousAnchorTarget = com.example.engine.VerticalDropTarget.IntoGap(400) // Gap 2-3 (460m wide!)
+    val dropPreview = com.example.engine.SchedulerEngine.previewVerticalDrop(
+      allDynamicTasks = listOf(flexedSource),
+      scheduledTasks = anchors + flexedSource,
+      taskId = "drop_flexed",
+      dropTarget = spaciousAnchorTarget,
+      anchors = anchors,
+      day = RoutineDay.MONDAY
+    )
+    assertEquals("Hovering spacious Gap 2-3 must preview recovered 60m duration", 60, dropPreview.previewEndMinute - dropPreview.previewStartMinute)
+  }
+
+  private fun flexTaskStub(duration: Int) = RoutineTask(
+    id = "impact_stub",
+    title = "Impact Stub",
+    type = TaskType.DYNAMIC,
+    startTimeMinute = 830,
+    originalStartTimeMinute = 830,
+    durationMinutes = duration,
+    originalDurationMinutes = 60,
+    selectedDays = setOf(RoutineDay.MONDAY)
+  )
 }
-
-
-

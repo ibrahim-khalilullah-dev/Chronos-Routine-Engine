@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -10,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -85,6 +87,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -120,6 +125,7 @@ import com.example.ui.components.AnchorSlotCard
 import com.example.ui.components.DynamicTaskCard
 import com.example.ui.components.OverflowTaskCard
 import com.example.ui.components.isTaskActiveAt
+import com.example.ui.components.isTaskCompletedAt
 import com.example.ui.theme.AnchorGradientStart
 import com.example.ui.theme.CyanAccent
 import com.example.ui.theme.DangerRed
@@ -181,6 +187,7 @@ fun TimelineScreen(
   onPreviewVerticalDropMove: ((taskId: String, dropTarget: VerticalDropTarget, onAnchorWallHit: () -> Unit) -> Unit)? = null,
   onCommitPendingEdits: (() -> Unit)? = null,
   onDiscardPendingEdits: (() -> Unit)? = null,
+  onCompactAndRescueSchedule: ((onNoChanges: () -> Unit) -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
@@ -278,10 +285,15 @@ fun TimelineScreen(
   var openSlotTopPx by remember { mutableFloatStateOf(-1f) }
   var lockedHoveredDrop by remember { mutableStateOf<HoveredDropVisual?>(null) }
   var isSettlingVerticalDrop by remember { mutableStateOf(false) }
+  var settlingPhase by remember { mutableIntStateOf(0) } // 0 = idle, 1 = awaiting new schedule, 2 = gliding to settled cardTop
+  var settlingAnimProgress by remember { mutableFloatStateOf(0f) }
   var settlingBaselineTasks by remember { mutableStateOf<List<RoutineTask>?>(null) }
   var lastClearWasCommit by remember { mutableStateOf(false) }
   var anchorWallToastVisible by remember { mutableStateOf(false) }
   var anchorWallHitCounter by remember { mutableIntStateOf(0) }
+  var lastWallHitWasTwin by remember { mutableStateOf(false) }
+  var optimalToastVisible by remember { mutableStateOf(false) }
+  var optimalToastCounter by remember { mutableIntStateOf(0) }
   var showImpactDialog by remember { mutableStateOf(false) }
 
   val latestScheduledTasks by rememberUpdatedState(scheduleResult.scheduledTasks)
@@ -290,33 +302,91 @@ fun TimelineScreen(
   val latestHeaderOffset by rememberUpdatedState(headerItemsOffset)
   val latestSortMode by rememberUpdatedState(sortMode)
 
-  // Clear settling drag state the exact frame the updated schedule arrives (zero 1-frame snap-back blink)
-  LaunchedEffect(isSettlingVerticalDrop, scheduleResult.scheduledTasks) {
-    if (isSettlingVerticalDrop && scheduleResult.scheduledTasks !== settlingBaselineTasks) {
+  val nextCountdownLabel = remember(scheduleResult.scheduledTasks, currentMinute, isToday) {
+    computeNextCountdownLabel(scheduleResult.scheduledTasks, currentMinute, isToday)
+  }
+  val showTopScrim by remember {
+    derivedStateOf {
+      listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8
+    }
+  }
+
+  // Two-phase silky-smooth vertical drop settling:
+  // Phase 1: hold ghost source + open destination slot until updated scheduleResult arrives (or 180ms fallback).
+  // Phase 2: snap destination slot closed, hide only the permanent target card (alpha = 0f),
+  //          and smoothly glide the floating overlay onto cardTopsById[task.id] with scale/elevation settle.
+  LaunchedEffect(isSettlingVerticalDrop, settlingPhase, scheduleResult.scheduledTasks) {
+    if (isSettlingVerticalDrop && settlingPhase == 1 && scheduleResult.scheduledTasks !== settlingBaselineTasks) {
       lastClearWasCommit = true
-      isSettlingVerticalDrop = false
-      settlingBaselineTasks = null
-      draggedTask = null
-      dragAxis = TimelineDragAxis.UNDECIDED
       lockedHoveredDrop = null
       openSlotSplitIndex = -1
       openSlotTopPx = -1f
+      settlingPhase = 2
     }
   }
-  LaunchedEffect(isSettlingVerticalDrop) {
-    if (isSettlingVerticalDrop) {
-      delay(150L)
-      if (isSettlingVerticalDrop) {
+  LaunchedEffect(isSettlingVerticalDrop, settlingPhase) {
+    if (isSettlingVerticalDrop && settlingPhase == 1) {
+      delay(180L)
+      if (isSettlingVerticalDrop && settlingPhase == 1) {
         lastClearWasCommit = true
-        isSettlingVerticalDrop = false
-        settlingBaselineTasks = null
-        draggedTask = null
-        dragAxis = TimelineDragAxis.UNDECIDED
         lockedHoveredDrop = null
         openSlotSplitIndex = -1
         openSlotTopPx = -1f
+        settlingPhase = 2
       }
     }
+  }
+  LaunchedEffect(settlingPhase) {
+    if (settlingPhase != 2) return@LaunchedEffect
+    val settlingTask = draggedTask
+    if (settlingTask == null) {
+      isSettlingVerticalDrop = false
+      settlingPhase = 0
+      settlingAnimProgress = 0f
+      settlingBaselineTasks = null
+      dragAxis = TimelineDragAxis.UNDECIDED
+      cardTopsById.clear()
+      return@LaunchedEffect
+    }
+
+    val startY = dragOverlayY
+    val startNanos = withFrameNanos { it }
+    val durationNs = 260_000_000L
+    val capNs = 360_000_000L
+    var frameCount = 0
+
+    while (isSettlingVerticalDrop && settlingPhase == 2) {
+      val nowNanos = withFrameNanos { it }
+      frameCount++
+      val elapsedNs = (nowNanos - startNanos).coerceAtLeast(0L)
+      val t = (elapsedNs.toFloat() / durationNs.toFloat()).coerceIn(0f, 1f)
+      val eased = FastOutSlowInEasing.transform(t)
+      settlingAnimProgress = eased
+      val destY = cardTopsById[settlingTask.id]
+      if (destY != null) {
+        val currentY = startY + (destY - startY) * eased
+        dragOverlayY = currentY
+        val deltaPx = abs(destY - currentY)
+        if ((t >= 1f || (frameCount >= 2 && deltaPx <= 1f && t >= 0.45f)) || elapsedNs >= capNs) {
+          dragOverlayY = destY
+          settlingAnimProgress = 1f
+          break
+        }
+      } else if (elapsedNs >= capNs) {
+        break
+      }
+    }
+
+    isSettlingVerticalDrop = false
+    settlingPhase = 0
+    settlingAnimProgress = 0f
+    settlingBaselineTasks = null
+    draggedTask = null
+    dragAxis = TimelineDragAxis.UNDECIDED
+    lockedHoveredDrop = null
+    openSlotSplitIndex = -1
+    openSlotTopPx = -1f
+    cardTopsById.clear()
   }
 
   // Hover Slot Calculation with Anti-Ping-Pong Hysteresis
@@ -360,8 +430,24 @@ fun TimelineScreen(
         return@collect
       }
 
-      val isFenced = task.isHighPriority || task.isFluidTwin
-      val fenceBounds = if (isFenced) {
+      val isHighPriorityLocked = task.isHighPriority && !task.isFluidTwin
+      val activePartner = if (task.isFluidTwin && !task.fluidTwinId.isNullOrEmpty()) {
+        scheduled.firstOrNull {
+          it.id != task.id &&
+            it.fluidTwinId == task.fluidTwinId &&
+            !it.isDeleted &&
+            !it.isCurrentlyPaused()
+        }
+      } else {
+        null
+      }
+      val partnerWinKey = activePartner?.let {
+        SchedulerEngine.getInterAnchorWindowKey(currAnchors, it.startTimeMinute, day)
+      }
+      val draggedWinKey = SchedulerEngine.getInterAnchorWindowKey(currAnchors, task.startTimeMinute, day)
+      val enforceTwinExclusion = task.isFluidTwin && partnerWinKey != null && draggedWinKey != partnerWinKey
+
+      val fenceBounds = if (isHighPriorityLocked || enforceTwinExclusion) {
         SchedulerEngine.findEnclosingAnchorBounds(
           currAnchors,
           task.originalStartTimeMinute ?: task.startTimeMinute,
@@ -371,17 +457,24 @@ fun TimelineScreen(
         0 to 1440
       }
 
-      val candidateInfos = if (isFenced) {
-        visibleScheduled.filter { info ->
+      val candidateInfos = when {
+        isHighPriorityLocked -> visibleScheduled.filter { info ->
           val itemTask = scheduled[info.index - headerOff]
           itemTask.type == TaskType.DYNAMIC && itemTask.startTimeMinute in fenceBounds.first until fenceBounds.second
         }
-      } else {
-        visibleScheduled
+        enforceTwinExclusion -> visibleScheduled.filter { info ->
+          val itemTask = scheduled[info.index - headerOff]
+          if (itemTask.type != TaskType.DYNAMIC) {
+            true
+          } else {
+            SchedulerEngine.getInterAnchorWindowKey(currAnchors, itemTask.startTimeMinute, day) != partnerWinKey
+          }
+        }
+        else -> visibleScheduled
       }
 
       var isOutsideFence = false
-      if (isFenced) {
+      if (isHighPriorityLocked) {
         val pointerInListY = pointerViewportY - lazyColumnTopInBoxPx - beforePad
         val hitRaw = visibleScheduled.firstOrNull { info ->
           pointerInListY >= info.offset && pointerInListY <= info.offset + info.size
@@ -399,6 +492,19 @@ fun TimelineScreen(
           val lastTop = cardTopsById[lastTask.id] ?: (lazyColumnTopInBoxPx + beforePad + candidateInfos.last().offset)
           val lastH = (cardHeightsById[lastTask.id] ?: candidateInfos.last().size).toFloat()
           if (floatingCenterY < firstTop - hysteresisPx || floatingCenterY > lastTop + lastH + hysteresisPx) {
+            isOutsideFence = true
+          }
+        }
+      } else if (enforceTwinExclusion) {
+        val pointerInListY = pointerViewportY - lazyColumnTopInBoxPx - beforePad
+        val hitRaw = visibleScheduled.firstOrNull { info ->
+          pointerInListY >= info.offset && pointerInListY <= info.offset + info.size
+        }
+        if (hitRaw != null) {
+          val hitRawTask = scheduled[hitRaw.index - headerOff]
+          if (hitRawTask.type == TaskType.DYNAMIC &&
+            SchedulerEngine.getInterAnchorWindowKey(currAnchors, hitRawTask.startTimeMinute, day) == partnerWinKey
+          ) {
             isOutsideFence = true
           }
         }
@@ -593,6 +699,13 @@ fun TimelineScreen(
       anchorWallToastVisible = false
     }
   }
+  LaunchedEffect(optimalToastCounter) {
+    if (optimalToastCounter > 0) {
+      optimalToastVisible = true
+      delay(1800L)
+      optimalToastVisible = false
+    }
+  }
 
   // Frame-Rate Independent Smooth Edge Auto-Scroll during Vertical Drag Reordering (60Hz/90Hz/120Hz)
   LaunchedEffect(draggedTask?.id, dragAxis) {
@@ -652,7 +765,7 @@ fun TimelineScreen(
         val hitTask = scheduled.getOrNull(schedIdx) ?: return@awaitEachGesture
         if (hitTask.type != TaskType.DYNAMIC) return@awaitEachGesture
 
-        val hitCardTopInBox = cardTopsById[hitTask.id] ?: (lazyColumnTopInBoxPx + beforePad + hitInfo.offset)
+        val hitCardTopInBox = lazyColumnTopInBoxPx + beforePad + hitInfo.offset
         val actualCardHeight = cardHeightsById[hitTask.id] ?: hitInfo.size
         val touchLocalY = down.position.y - hitCardTopInBox
         if (touchLocalY < 0f || touchLocalY > actualCardHeight) return@awaitEachGesture
@@ -684,6 +797,8 @@ fun TimelineScreen(
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         lastClearWasCommit = false
         isSettlingVerticalDrop = false
+        settlingPhase = 0
+        settlingAnimProgress = 0f
         settlingBaselineTasks = null
 
         val localScrubBounds = SchedulerEngine.computeHorizontalScrubBounds(
@@ -757,23 +872,30 @@ fun TimelineScreen(
             draggedTask = null
             dragAxis = TimelineDragAxis.UNDECIDED
             lockedHoveredDrop = null
+            cardTopsById.clear()
             if (releasedScrubMin != hitTask.startTimeMinute) {
               onPreviewDragTaskMove?.invoke(hitTask.id, releasedScrubMin) {
+                lastWallHitWasTwin = hitTask.isFluidTwin
                 anchorWallHitCounter++
               }
             }
           } else if (releasedAxis == TimelineDragAxis.VERTICAL_REORDER && releasedDrop != null) {
             if (releasedDrop.preview.hitAnchorWall) {
+              lastWallHitWasTwin = hitTask.isFluidTwin
               anchorWallHitCounter++
             }
             settlingBaselineTasks = latestScheduledTasks
+            settlingPhase = 1
+            settlingAnimProgress = 0f
             isSettlingVerticalDrop = true
             if (onPreviewVerticalDropMove != null) {
               onPreviewVerticalDropMove.invoke(hitTask.id, releasedDrop.target) {
+                lastWallHitWasTwin = hitTask.isFluidTwin
                 anchorWallHitCounter++
               }
             } else {
               onPreviewDragTaskMove?.invoke(hitTask.id, releasedDrop.preview.previewStartMinute) {
+                lastWallHitWasTwin = hitTask.isFluidTwin
                 anchorWallHitCounter++
               }
             }
@@ -781,6 +903,7 @@ fun TimelineScreen(
             draggedTask = null
             dragAxis = TimelineDragAxis.UNDECIDED
             lockedHoveredDrop = null
+            cardTopsById.clear()
           }
         }
       }
@@ -828,16 +951,21 @@ fun TimelineScreen(
           overflowCount = scheduleResult.overflowTasks.size,
           deletedCount = deletedCount,
           scheduledTasks = scheduleResult.scheduledTasks,
-          currentMinute = currentMinute,
-          isToday = isToday,
           hasPendingEdits = hasPendingEdits,
-          onShowImpactDialog = { showImpactDialog = true },
-          onCommitPendingEdits = { onCommitPendingEdits?.invoke() },
-          onDiscardPendingEdits = { onDiscardPendingEdits?.invoke() },
+          hasCountdownPill = nextCountdownLabel != null,
           sortMode = sortMode,
           onSelectSortMode = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onSelectSortMode(it)
+          },
+          onCompactAndRescue = if (onCompactAndRescueSchedule != null) {
+            {
+              onCompactAndRescueSchedule {
+                optimalToastCounter++
+              }
+            }
+          } else {
+            null
           },
           onOpenTrashBin = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -887,8 +1015,9 @@ fun TimelineScreen(
       ) { index, task ->
         val activeDrag = draggedTask
         val hoveredDrop = lockedHoveredDrop
-        val isVerticalDropActive = activeDrag != null && dragAxis == TimelineDragAxis.VERTICAL_REORDER
+        val isVerticalDropActive = activeDrag != null && dragAxis == TimelineDragAxis.VERTICAL_REORDER && settlingPhase != 2
         val isHorizontalScrubActive = activeDrag != null && dragAxis == TimelineDragAxis.HORIZONTAL_SCRUB
+        val isTrackPosActive = (activeDrag != null && dragAxis == TimelineDragAxis.VERTICAL_REORDER) || isSettlingVerticalDrop
         val targetCardHeightDp = with(density) { draggedCardHeightPx.coerceAtLeast(0).toDp() }
         val isDropBeforeThisItem = isVerticalDropActive && hoveredDrop != null && hoveredDrop.splitIndex == index
         val isDropAtEndAfterLastItem = isVerticalDropActive &&
@@ -906,6 +1035,9 @@ fun TimelineScreen(
 
         val liveCurrentTask = liveTaskFor(task)
         val isScrubbingThisCard = isHorizontalScrubActive && activeDrag?.id == task.id
+        val isCardActive = isTaskActiveAt(liveCurrentTask, currentMinute, isToday)
+        val isCardCompleted = isTaskCompletedAt(liveCurrentTask, currentMinute, isToday)
+        val cardCurrentMinute = if (isCardActive) currentMinute else -1
         val horizontalNudgePx = if (isScrubbingThisCard && activeScrubBounds.last > activeScrubBounds.first) {
           val span = (activeScrubBounds.last - activeScrubBounds.first).coerceAtLeast(1)
           val maxNudgePx = with(density) { 10.dp.toPx() }
@@ -919,8 +1051,11 @@ fun TimelineScreen(
         val trackCardPositionModifier = Modifier
           .onGloballyPositioned { coords ->
             if (coords.isAttached) {
-              cardHeightsById[task.id] = coords.size.height
-              if (outerBoxTopInRootPx >= 0f) {
+              val h = coords.size.height
+              if (cardHeightsById[task.id] != h) {
+                cardHeightsById[task.id] = h
+              }
+              if (isTrackPosActive && outerBoxTopInRootPx >= 0f) {
                 cardTopsById[task.id] = coords.positionInRoot().y - outerBoxTopInRootPx
               }
             }
@@ -944,6 +1079,7 @@ fun TimelineScreen(
             targetCardHeightDp = targetCardHeightDp,
             snapClose = lastClearWasCommit,
             draggedTitle = activeDrag?.title ?: "",
+            isFluidTwin = activeDrag?.isFluidTwin == true,
             preview = hoveredDrop?.preview,
             durationMinutes = activeDrag?.durationMinutes ?: 0,
             onSlotTopPositioned = { slotRootY ->
@@ -961,8 +1097,9 @@ fun TimelineScreen(
               AnchorSlotCard(
                 task = liveCurrentTask,
                 sleepDurationMinutes = sleepDurationMinutes,
-                currentMinute = currentMinute,
+                currentMinute = cardCurrentMinute,
                 isToday = isToday,
+                isCompleted = isCardCompleted,
                 onQuickAdjust = { delta ->
                   liveCurrentTask.slotNumber?.let { slot -> onQuickAdjustAnchor(slot, delta) }
                 },
@@ -973,10 +1110,12 @@ fun TimelineScreen(
             }
             TaskType.DYNAMIC -> {
               val isGhostSource = isVerticalDropActive && activeDrag?.id == task.id
+              val isSettlingHiddenCard = settlingPhase == 2 && activeDrag?.id == task.id
               DynamicTaskCard(
                 task = liveCurrentTask,
-                currentMinute = currentMinute,
+                currentMinute = cardCurrentMinute,
                 isToday = isToday,
+                isCompleted = isCardCompleted,
                 isDragging = isScrubbingThisCard,
                 isDragSourceGhost = isGhostSource,
                 onEditClick = { onEditTask(task) },
@@ -984,6 +1123,7 @@ fun TimelineScreen(
                 onRateTask = { _, rating -> onRateTask?.invoke(task, rating) },
                 modifier = trackCardPositionModifier.graphicsLayer {
                   translationX = horizontalNudgePx
+                  alpha = if (isSettlingHiddenCard) 0f else 1f
                 }
               )
             }
@@ -1042,6 +1182,7 @@ fun TimelineScreen(
               targetCardHeightDp = targetCardHeightDp,
               snapClose = lastClearWasCommit,
               draggedTitle = activeDrag?.title ?: "",
+              isFluidTwin = activeDrag?.isFluidTwin == true,
               preview = hoveredDrop?.preview,
               durationMinutes = activeDrag?.durationMinutes ?: 0,
               isBottomSlot = true,
@@ -1106,7 +1247,10 @@ fun TimelineScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.weight(1f)
+            ) {
               Icon(
                 imageVector = Icons.Default.Warning,
                 contentDescription = null,
@@ -1120,6 +1264,40 @@ fun TimelineScreen(
                 fontWeight = FontWeight.Bold,
                 color = WarningAmber
               )
+            }
+
+            if (onCompactAndRescueSchedule != null) {
+              Surface(
+                onClick = {
+                  haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                  onCompactAndRescueSchedule {
+                    optimalToastCounter++
+                  }
+                },
+                shape = RoundedCornerShape(10.dp),
+                color = CyanAccent.copy(alpha = 0.16f),
+                border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.45f)),
+                modifier = Modifier.testTag("auto_fit_overflow_button")
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = "Auto-Fit Overflow",
+                    tint = CyanAccent,
+                    modifier = Modifier.size(14.dp)
+                  )
+                  Text(
+                    text = "Auto-Fit",
+                    color = CyanAccent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                  )
+                }
+              }
             }
           }
         }
@@ -1221,16 +1399,136 @@ fun TimelineScreen(
       }
     }
 
-    // Floating Elevated Card Overlay (only during vertical reorder so horizontal scrub keeps in-list gap pills unobscured)
-    val hoveredDropVisual = lockedHoveredDrop
+    // Top 48dp Vertical Fade Scrim behind pinned top-right glass capsule while scrolled
     val currentActiveDrag = draggedTask
-    if (currentActiveDrag != null && dragAxis == TimelineDragAxis.VERTICAL_REORDER) {
-      val previewStart = hoveredDropVisual?.preview?.previewStartMinute ?: currentActiveDrag.startTimeMinute
-      val displayFloatingTask = if (previewStart != currentActiveDrag.startTimeMinute) {
-        currentActiveDrag.copy(startTimeMinute = previewStart)
-      } else {
-        currentActiveDrag
+    AnimatedVisibility(
+      visible = showTopScrim && (hasPendingEdits || nextCountdownLabel != null) && currentActiveDrag == null,
+      enter = fadeIn(tween(180)),
+      exit = fadeOut(tween(180)),
+      modifier = Modifier.align(Alignment.TopCenter)
+    ) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(48.dp)
+          .background(
+            Brush.verticalGradient(
+              colors = listOf(
+                OneUiBackground.copy(alpha = 0.92f),
+                OneUiBackground.copy(alpha = 0.55f),
+                Color.Transparent
+              )
+            )
+          )
+      )
+    }
+
+    // Sticky Top-Right Obsidian Glass Countdown Pill / 3-Button Drag Confirmation Bar
+    if (currentActiveDrag == null && (hasPendingEdits || nextCountdownLabel != null)) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(top = 10.dp, end = 20.dp)
+      ) {
+        if (hasPendingEdits) {
+          Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF0F172A).copy(alpha = 0.92f),
+            border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.35f)),
+            shadowElevation = 8.dp,
+            modifier = Modifier.testTag("pending_edits_header_controls")
+          ) {
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(2.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            ) {
+              IconButton(
+                onClick = { showImpactDialog = true },
+                modifier = Modifier
+                  .size(48.dp)
+                  .testTag("pending_impact_history_button")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.History,
+                  contentDescription = "Review Schedule Impact",
+                  tint = CyanAccent
+                )
+              }
+              IconButton(
+                onClick = { onCommitPendingEdits?.invoke() },
+                modifier = Modifier
+                  .size(48.dp)
+                  .testTag("pending_commit_button")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Check,
+                  contentDescription = "Commit Schedule Edits",
+                  tint = SuccessGreen
+                )
+              }
+              IconButton(
+                onClick = { onDiscardPendingEdits?.invoke() },
+                modifier = Modifier
+                  .size(48.dp)
+                  .testTag("pending_discard_button")
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Close,
+                  contentDescription = "Discard Schedule Edits",
+                  tint = DangerRed
+                )
+              }
+            }
+          }
+        } else if (nextCountdownLabel != null) {
+          Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = Color(0xFF0F172A).copy(alpha = 0.90f),
+            border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.4f)),
+            shadowElevation = 6.dp,
+            modifier = Modifier.testTag("next_task_countdown_pill")
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.Timer,
+                contentDescription = null,
+                tint = CyanAccent,
+                modifier = Modifier.size(13.dp)
+              )
+              Text(
+                text = nextCountdownLabel,
+                color = CyanAccent,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+              )
+            }
+          }
+        }
       }
+    }
+
+    // Floating Elevated Card Overlay (only during vertical reorder / two-phase settle so horizontal scrub keeps gap pills unobscured)
+    val hoveredDropVisual = lockedHoveredDrop
+    if (currentActiveDrag != null && dragAxis == TimelineDragAxis.VERTICAL_REORDER) {
+      val displayFloatingTask = if (settlingPhase == 2) {
+        scheduleResult.scheduledTasks.firstOrNull { it.id == currentActiveDrag.id } ?: currentActiveDrag
+      } else {
+        val previewStart = hoveredDropVisual?.preview?.previewStartMinute ?: currentActiveDrag.startTimeMinute
+        if (previewStart != currentActiveDrag.startTimeMinute) {
+          currentActiveDrag.copy(startTimeMinute = previewStart)
+        } else {
+          currentActiveDrag
+        }
+      }
+      val overlayScale = if (settlingPhase == 2) 1.025f - (0.025f * settlingAnimProgress) else 1.025f
+      val overlayShadow = if (settlingPhase == 2) (18f - (16f * settlingAnimProgress)).dp else 18.dp
+      val isFloatingActive = isTaskActiveAt(displayFloatingTask, currentMinute, isToday)
+      val isFloatingCompleted = isTaskCompletedAt(displayFloatingTask, currentMinute, isToday)
 
       Box(
         modifier = Modifier
@@ -1238,17 +1536,18 @@ fun TimelineScreen(
           .padding(horizontal = 20.dp)
           .offset { IntOffset(0, dragOverlayY.roundToInt()) }
           .graphicsLayer {
-            scaleX = 1.025f
-            scaleY = 1.025f
+            scaleX = overlayScale
+            scaleY = overlayScale
           }
-          .shadow(elevation = 18.dp, shape = RoundedCornerShape(24.dp), clip = false)
+          .shadow(elevation = overlayShadow, shape = RoundedCornerShape(24.dp), clip = false)
           .testTag("floating_drag_card_overlay")
       ) {
         DynamicTaskCard(
           task = displayFloatingTask,
-          currentMinute = currentMinute,
+          currentMinute = if (isFloatingActive) currentMinute else -1,
           isToday = isToday,
-          isDragging = true,
+          isCompleted = isFloatingCompleted,
+          isDragging = settlingPhase != 2,
           onEditClick = {},
           onDeleteClick = null,
           onRateTask = null
@@ -1256,7 +1555,7 @@ fun TimelineScreen(
       }
     }
 
-    // Top Floating Live Time Banner & Anchor Wall Status Pill during drag
+    // Top Floating Live Time Banner, Anchor Wall / Twin Exclusion Status Pill & Optimal Schedule Toast
     Column(
       modifier = Modifier
         .fillMaxWidth()
@@ -1265,7 +1564,7 @@ fun TimelineScreen(
       verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
       AnimatedVisibility(
-        visible = currentActiveDrag != null,
+        visible = currentActiveDrag != null && settlingPhase != 2,
         enter = fadeIn() + slideInVertically { -it / 2 },
         exit = fadeOut() + slideOutVertically { -it / 2 }
       ) {
@@ -1276,8 +1575,17 @@ fun TimelineScreen(
             hoveredDropVisual.preview.previewStartMinute
           else -> activeDragSafe.startTimeMinute
         }
-        val shownEnd = (shownStart + activeDragSafe.durationMinutes) % 1440
+        val shownEnd = when {
+          dragAxis == TimelineDragAxis.VERTICAL_REORDER && hoveredDropVisual != null ->
+            hoveredDropVisual.preview.previewEndMinute
+          else -> (shownStart + activeDragSafe.durationMinutes) % 1440
+        }
         val showFencePill = hoveredDropVisual?.preview?.hitAnchorWall == true || anchorWallToastVisible
+        val wallText = if (activeDragSafe.isFluidTwin) {
+          "Twin parts must stay in separate anchor gaps"
+        } else {
+          "Anchor Wall"
+        }
 
         Surface(
           shape = RoundedCornerShape(16.dp),
@@ -1317,7 +1625,7 @@ fun TimelineScreen(
                 modifier = Modifier.testTag("anchor_wall_toast")
               ) {
                 Text(
-                  text = "Anchor Wall",
+                  text = wallText,
                   color = WarningAmber,
                   fontSize = 10.sp,
                   fontWeight = FontWeight.Bold,
@@ -1342,8 +1650,30 @@ fun TimelineScreen(
           modifier = Modifier.testTag("anchor_wall_toast")
         ) {
           Text(
-            text = "Anchor Wall",
+            text = if (lastWallHitWasTwin) "Twin parts must stay in separate anchor gaps" else "Anchor Wall",
             color = WarningAmber,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+          )
+        }
+      }
+
+      AnimatedVisibility(
+        visible = currentActiveDrag == null && optimalToastVisible,
+        enter = fadeIn() + slideInVertically { -it / 2 },
+        exit = fadeOut() + slideOutVertically { -it / 2 }
+      ) {
+        Surface(
+          shape = RoundedCornerShape(14.dp),
+          color = Color(0xFF0F172A).copy(alpha = 0.96f),
+          border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.75f)),
+          shadowElevation = 8.dp,
+          modifier = Modifier.testTag("optimal_schedule_toast")
+        ) {
+          Text(
+            text = "Schedule already optimal",
+            color = SuccessGreen,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
@@ -1606,6 +1936,31 @@ fun TimelineScreen(
   }
 }
 
+private fun computeNextCountdownLabel(
+  scheduledTasks: List<RoutineTask>,
+  currentMinute: Int,
+  isToday: Boolean
+): String? {
+  if (!isToday || currentMinute < 0 || scheduledTasks.isEmpty()) return null
+  val nextTaskToday = scheduledTasks
+    .filter { it.startTimeMinute > currentMinute }
+    .minByOrNull { it.startTimeMinute }
+  val diff = if (nextTaskToday != null) {
+    nextTaskToday.startTimeMinute - currentMinute
+  } else {
+    val earliestTomorrow = scheduledTasks.minByOrNull { it.startTimeMinute }
+    if (earliestTomorrow != null) (earliestTomorrow.startTimeMinute + 1440) - currentMinute else 0
+  }
+  if (diff <= 0) return null
+  val h = diff / 60
+  val m = diff % 60
+  return when {
+    h > 0 && m > 0 -> "${h}h ${m}m"
+    h > 0 -> "${h}h"
+    else -> "${m}m"
+  }
+}
+
 @Composable
 fun OneUiHeader(
   activeDay: RoutineDay,
@@ -1616,44 +1971,20 @@ fun OneUiHeader(
   overflowCount: Int,
   deletedCount: Int,
   scheduledTasks: List<RoutineTask>,
-  currentMinute: Int = -1,
-  isToday: Boolean = true,
   hasPendingEdits: Boolean = false,
-  onShowImpactDialog: () -> Unit = {},
-  onCommitPendingEdits: () -> Unit = {},
-  onDiscardPendingEdits: () -> Unit = {},
+  hasCountdownPill: Boolean = false,
   sortMode: TimelineSortMode,
   onSelectSortMode: (TimelineSortMode) -> Unit,
+  onCompactAndRescue: (() -> Unit)? = null,
   onOpenTrashBin: () -> Unit
 ) {
   val haptic = LocalHapticFeedback.current
   var sortMenuExpanded by remember { mutableStateOf(false) }
 
-  val nextCountdownLabel = remember(scheduledTasks, currentMinute, isToday) {
-    if (!isToday || currentMinute < 0 || scheduledTasks.isEmpty()) {
-      null
-    } else {
-      val nextTaskToday = scheduledTasks
-        .filter { it.startTimeMinute > currentMinute }
-        .minByOrNull { it.startTimeMinute }
-      val diff = if (nextTaskToday != null) {
-        nextTaskToday.startTimeMinute - currentMinute
-      } else {
-        val earliestTomorrow = scheduledTasks.minByOrNull { it.startTimeMinute }
-        if (earliestTomorrow != null) (earliestTomorrow.startTimeMinute + 1440) - currentMinute else 0
-      }
-      if (diff <= 0) {
-        null
-      } else {
-        val h = diff / 60
-        val m = diff % 60
-        when {
-          h > 0 && m > 0 -> "${h}h ${m}m"
-          h > 0 -> "${h}h"
-          else -> "${m}m"
-        }
-      }
-    }
+  val titleEndClearance = when {
+    hasPendingEdits -> 164.dp
+    hasCountdownPill -> 92.dp
+    else -> 0.dp
   }
 
   Column(
@@ -1661,86 +1992,24 @@ fun OneUiHeader(
       .fillMaxWidth()
       .padding(top = 8.dp, bottom = 8.dp)
   ) {
-    // Top Row: App Title & Subtitle + Top-Right Countdown Pill or Pending Drag Controls
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
+    // Top Row: App Title & Subtitle with right clearance for pinned top-right Countdown / Pending Controls
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(end = titleEndClearance)
     ) {
-      Column(modifier = Modifier.weight(1f)) {
-        Text(
-          text = "Chronos",
-          fontSize = 32.sp,
-          fontWeight = FontWeight.ExtraBold,
-          color = TextPrimary
-        )
-        Text(
-          text = "Smart Dynamic Routine & Device Automation",
-          fontSize = 13.sp,
-          color = TextSecondary,
-          fontWeight = FontWeight.Medium
-        )
-      }
-
-      if (hasPendingEdits) {
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(2.dp),
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.testTag("pending_edits_header_controls")
-        ) {
-          IconButton(
-            onClick = onShowImpactDialog,
-            modifier = Modifier
-              .size(48.dp)
-              .testTag("pending_impact_history_button")
-          ) {
-            Icon(
-              imageVector = Icons.Default.History,
-              contentDescription = "Review Schedule Impact",
-              tint = CyanAccent
-            )
-          }
-          IconButton(
-            onClick = onCommitPendingEdits,
-            modifier = Modifier
-              .size(48.dp)
-              .testTag("pending_commit_button")
-          ) {
-            Icon(
-              imageVector = Icons.Default.Check,
-              contentDescription = "Commit Schedule Edits",
-              tint = SuccessGreen
-            )
-          }
-          IconButton(
-            onClick = onDiscardPendingEdits,
-            modifier = Modifier
-              .size(48.dp)
-              .testTag("pending_discard_button")
-          ) {
-            Icon(
-              imageVector = Icons.Default.Close,
-              contentDescription = "Discard Schedule Edits",
-              tint = DangerRed
-            )
-          }
-        }
-      } else if (nextCountdownLabel != null) {
-        Surface(
-          shape = RoundedCornerShape(14.dp),
-          color = OneUiSurfaceElevated,
-          border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.4f)),
-          modifier = Modifier.testTag("next_task_countdown_pill")
-        ) {
-          Text(
-            text = nextCountdownLabel,
-            color = CyanAccent,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-          )
-        }
-      }
+      Text(
+        text = "Chronos",
+        fontSize = 32.sp,
+        fontWeight = FontWeight.ExtraBold,
+        color = TextPrimary
+      )
+      Text(
+        text = "Smart Dynamic Routine & Device Automation",
+        fontSize = 13.sp,
+        color = TextSecondary,
+        fontWeight = FontWeight.Medium
+      )
     }
 
     Spacer(modifier = Modifier.height(14.dp))
@@ -1750,7 +2019,7 @@ fun OneUiHeader(
       horizontalArrangement = Arrangement.spacedBy(8.dp),
       modifier = Modifier.fillMaxWidth()
     ) {
-      items(RoutineDay.entries) { day ->
+      items(RoutineDay.entries, key = { it.name }) { day ->
         val isRealToday = day == systemToday
         val isSelected = day == activeDay
 
@@ -1869,43 +2138,78 @@ fun OneUiHeader(
         ) {
           Text(text = "24-Hour Cycle Map", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
 
-          // Sorting Dropdown Chip (Requirement 2)
-          Box {
-            Row(
-              modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.White.copy(alpha = 0.08f))
-                .clickable { sortMenuExpanded = true }
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .testTag("timeline_sort_chip"),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Icon(imageVector = Icons.AutoMirrored.Filled.Sort, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(13.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text(text = sortMode.label, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-              Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            if (onCompactAndRescue != null) {
+              Row(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(CyanAccent.copy(alpha = 0.14f))
+                  .border(1.dp, CyanAccent.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                  .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onCompactAndRescue()
+                  }
+                  .padding(horizontal = 8.dp, vertical = 4.dp)
+                  .testTag("compact_schedule_button"),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Icon(
+                  imageVector = Icons.Default.AutoAwesome,
+                  contentDescription = "Compact Schedule",
+                  tint = CyanAccent,
+                  modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                  text = "Compact",
+                  color = CyanAccent,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold
+                )
+              }
             }
 
-            DropdownMenu(
-              expanded = sortMenuExpanded,
-              onDismissRequest = { sortMenuExpanded = false },
-              modifier = Modifier.background(OneUiSurfaceElevated)
-            ) {
-              TimelineSortMode.entries.forEach { mode ->
-                DropdownMenuItem(
-                  text = {
-                    Text(
-                      text = mode.label,
-                      color = if (mode == sortMode) AnchorGradientStart else TextPrimary,
-                      fontWeight = if (mode == sortMode) FontWeight.Bold else FontWeight.Normal,
-                      fontSize = 12.sp
-                    )
-                  },
-                  onClick = {
-                    sortMenuExpanded = false
-                    onSelectSortMode(mode)
-                  }
-                )
+            // Sorting Dropdown Chip (Requirement 2)
+            Box {
+              Row(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(Color.White.copy(alpha = 0.08f))
+                  .clickable { sortMenuExpanded = true }
+                  .padding(horizontal = 8.dp, vertical = 4.dp)
+                  .testTag("timeline_sort_chip"),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Icon(imageVector = Icons.AutoMirrored.Filled.Sort, contentDescription = null, tint = AnchorGradientStart, modifier = Modifier.size(13.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(text = sortMode.label, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+              }
+
+              DropdownMenu(
+                expanded = sortMenuExpanded,
+                onDismissRequest = { sortMenuExpanded = false },
+                modifier = Modifier.background(OneUiSurfaceElevated)
+              ) {
+                TimelineSortMode.entries.forEach { mode ->
+                  DropdownMenuItem(
+                    text = {
+                      Text(
+                        text = mode.label,
+                        color = if (mode == sortMode) AnchorGradientStart else TextPrimary,
+                        fontWeight = if (mode == sortMode) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 12.sp
+                      )
+                    },
+                    onClick = {
+                      sortMenuExpanded = false
+                      onSelectSortMode(mode)
+                    }
+                  )
+                }
               }
             }
           }
@@ -1913,28 +2217,41 @@ fun OneUiHeader(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Visual Ribbon Bar
-        Row(
+        // Visual Ribbon Bar (single Canvas draw pass instead of N child composables)
+        val cycleSegments = remember(scheduledTasks) {
+          val raw = scheduledTasks.map { task ->
+            val segColor = when (task.type) {
+              TaskType.ANCHOR_SLEEP -> SleepGradientStart
+              TaskType.ANCHOR_ELASTIC -> ElasticGradientStart
+              TaskType.ANCHOR_STANDARD -> AnchorGradientStart
+              TaskType.DYNAMIC -> DynamicGradientStart
+            }
+            val w = (task.durationMinutes.toFloat() / 1440f).coerceAtLeast(0.01f)
+            segColor to w
+          }
+          val totalW = raw.sumOf { it.second.toDouble() }.toFloat().coerceAtLeast(1f)
+          raw.map { (c, w) -> c to (w / totalW) }
+        }
+        Canvas(
           modifier = Modifier
             .fillMaxWidth()
             .height(10.dp)
             .clip(RoundedCornerShape(5.dp))
             .background(Color.White.copy(alpha = 0.08f))
         ) {
-          for (task in scheduledTasks) {
-            val weight = (task.durationMinutes.toFloat() / 1440f).coerceAtLeast(0.01f)
-            val segmentColor = when (task.type) {
-              TaskType.ANCHOR_SLEEP -> SleepGradientStart
-              TaskType.ANCHOR_ELASTIC -> ElasticGradientStart
-              TaskType.ANCHOR_STANDARD -> AnchorGradientStart
-              TaskType.DYNAMIC -> DynamicGradientStart
+          var x = 0f
+          val totalWidth = size.width
+          val h = size.height
+          for ((segColor, normFraction) in cycleSegments) {
+            val segWidth = totalWidth * normFraction
+            if (segWidth > 0f) {
+              drawRect(
+                color = segColor,
+                topLeft = Offset(x, 0f),
+                size = Size(segWidth, h)
+              )
+              x += segWidth
             }
-            Box(
-              modifier = Modifier
-                .weight(weight)
-                .height(10.dp)
-                .background(segmentColor)
-            )
           }
         }
       }
@@ -2161,6 +2478,7 @@ private fun DestinationDropShadowSlot(
   targetCardHeightDp: Dp,
   snapClose: Boolean,
   draggedTitle: String,
+  isFluidTwin: Boolean = false,
   preview: VerticalDropPreview?,
   durationMinutes: Int,
   isBottomSlot: Boolean = false,
@@ -2242,7 +2560,11 @@ private fun DestinationDropShadowSlot(
                 border = BorderStroke(1.dp, accentColor.copy(alpha = 0.7f))
               ) {
                 Text(
-                  text = if (preview.hitAnchorWall) "Anchor Wall" else "Drop here",
+                  text = when {
+                    preview.hitAnchorWall && isFluidTwin -> "Same-Gap Excluded"
+                    preview.hitAnchorWall -> "Anchor Wall"
+                    else -> "Drop here"
+                  },
                   color = accentColor,
                   fontSize = 10.sp,
                   fontWeight = FontWeight.Bold,

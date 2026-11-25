@@ -26,14 +26,16 @@ class RoutineRepository(context: Context) {
   private val prefs: SharedPreferences =
     appContext.getSharedPreferences("chronos_routine_prefs", Context.MODE_PRIVATE)
 
-  @OptIn(ExperimentalCoroutinesApi::class)
-  private val ioScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1) + SupervisorJob())
-  @Volatile
-  private var vaultPersistJob: Job? = null
-
   companion object {
     @Volatile
     private var hasCheckedStartupVault: Boolean = false
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val ioScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1) + SupervisorJob())
+    @Volatile
+    private var vaultPersistJob: Job? = null
+    @Volatile
+    private var lastPersistedVaultBody: String? = null
 
     private const val VAULT_DEBOUNCE_MS = 400L
     private const val KEY_ANCHORS = "key_anchors_json"
@@ -44,6 +46,7 @@ class RoutineRepository(context: Context) {
     private const val KEY_SORT_MODE = "key_sort_mode"
     private const val KEY_TASK_RATING_HISTORY = "key_task_rating_history_json"
     private const val KEY_VOICE_PRESET_ID = "key_voice_preset_id"
+    private const val LEGACY_KEY_USE_SAME_VOICE_VOLUME_FOR_ALL = "key_use_same_voice_volume_for_all"
     private const val PURGE_THRESHOLD_MILLIS = 30L * 24 * 60 * 60 * 1000L // 30 Days
     private const val RATING_HISTORY_THRESHOLD_MILLIS = 90L * 24 * 60 * 60 * 1000L // 90 Days
     private const val VAULT_FILE_NAME = "chronos_vault.json"
@@ -54,6 +57,12 @@ class RoutineRepository(context: Context) {
     // Force-migrate any legacy 5-minute global buffer to 0 minutes
     if (prefs.getInt(KEY_BUFFER_DURATION, 0) == 5) {
       prefs.edit().putInt(KEY_BUFFER_DURATION, 0).apply()
+    }
+    // Upgrade safety from v1.4: scrub legacy unified-voice-volume flag from SharedPreferences & vault JSON
+    if (prefs.contains(LEGACY_KEY_USE_SAME_VOICE_VOLUME_FOR_ALL)) {
+      prefs.edit().remove(LEGACY_KEY_USE_SAME_VOICE_VOLUME_FOR_ALL).apply()
+      lastPersistedVaultBody = null
+      persistVaultAsync()
     }
     if (!hasCheckedStartupVault) {
       hasCheckedStartupVault = true
@@ -108,7 +117,11 @@ class RoutineRepository(context: Context) {
         restoredSomething = true
       }
 
-      val sortModeName = vaultObj.optString("sortMode", null)
+      val sortModeName = if (vaultObj.has("sortMode") && !vaultObj.isNull("sortMode")) {
+        vaultObj.optString("sortMode")
+      } else {
+        null
+      }
       if (sortModeName != null && !prefs.contains(KEY_SORT_MODE)) {
         editor.putString(KEY_SORT_MODE, sortModeName)
         restoredSomething = true
@@ -194,26 +207,34 @@ class RoutineRepository(context: Context) {
   }
 
   private fun persistVaultInternal() {
-    val anchorsRaw = prefs.getString(KEY_ANCHORS, null)
-    val dynamicRaw = prefs.getString(KEY_DYNAMIC_TASKS, null)
+    val anchorsRaw = prefs.getString(KEY_ANCHORS, null)?.takeIf { it.isNotBlank() } ?: "[]"
+    val dynamicRaw = prefs.getString(KEY_DYNAMIC_TASKS, null)?.takeIf { it.isNotBlank() } ?: "[]"
     val sleepDuration = getSleepDurationMinutes()
     val bufferMinutes = getBufferMinutes()
-
     val sortModeName = prefs.getString(KEY_SORT_MODE, TimelineSortMode.EARLIEST_START.name)
-    val ratingHistoryRaw = prefs.getString(KEY_TASK_RATING_HISTORY, null)
+      ?: TimelineSortMode.EARLIEST_START.name
+    val voicePresetId = getVoicePresetId()
+    val ratingHistoryRaw = prefs.getString(KEY_TASK_RATING_HISTORY, null)?.takeIf { it.isNotBlank() } ?: "[]"
 
-    val vaultObj = JSONObject().apply {
-      put("version", 1)
-      put("timestamp", System.currentTimeMillis())
-      put("sleepDurationMinutes", sleepDuration)
-      put("bufferMinutes", bufferMinutes)
-      put("sortMode", sortModeName)
-      put("voicePresetId", getVoicePresetId())
-      put("anchors", if (!anchorsRaw.isNullOrEmpty()) JSONArray(anchorsRaw) else JSONArray())
-      put("dynamicTasks", if (!dynamicRaw.isNullOrEmpty()) JSONArray(dynamicRaw) else JSONArray())
-      put("ratingHistory", if (!ratingHistoryRaw.isNullOrEmpty()) JSONArray(ratingHistoryRaw) else JSONArray())
+    val payloadBody = buildString {
+      append("\"version\":1,")
+      append("\"sleepDurationMinutes\":").append(sleepDuration).append(',')
+      append("\"bufferMinutes\":").append(bufferMinutes).append(',')
+      append("\"sortMode\":").append(JSONObject.quote(sortModeName)).append(',')
+      append("\"voicePresetId\":").append(JSONObject.quote(voicePresetId)).append(',')
+      append("\"anchors\":").append(anchorsRaw).append(',')
+      append("\"dynamicTasks\":").append(dynamicRaw).append(',')
+      append("\"ratingHistory\":").append(ratingHistoryRaw)
     }
-    val content = vaultObj.toString()
+
+    val internalDir = File(appContext.filesDir, VAULT_DIRECTORY_NAME)
+    val internalFile = File(internalDir, VAULT_FILE_NAME)
+    if (payloadBody == lastPersistedVaultBody && internalFile.exists() && internalFile.length() > 0L) {
+      return
+    }
+    lastPersistedVaultBody = payloadBody
+
+    val content = "{\"timestamp\":${System.currentTimeMillis()},$payloadBody}"
 
     // 1. App-specific external files root directory (guaranteed accessible)
     try {
@@ -253,11 +274,9 @@ class RoutineRepository(context: Context) {
 
     // 4. App internal files directory (included in backup_rules.xml)
     try {
-      val internalDir = File(appContext.filesDir, VAULT_DIRECTORY_NAME)
       if (!internalDir.exists()) {
         internalDir.mkdirs()
       }
-      val internalFile = File(internalDir, VAULT_FILE_NAME)
       internalFile.writeText(content)
     } catch (_: Exception) {}
   }
@@ -547,6 +566,7 @@ class RoutineRepository(context: Context) {
         put("dndDelayMinutes", t.dndDelayMinutes)
         if (t.originalStartTimeMinute != null) put("originalStartTimeMinute", t.originalStartTimeMinute)
         if (t.manualPlacementOrder != 0L) put("manualPlacementOrder", t.manualPlacementOrder)
+        if (t.originalDurationMinutes != null) put("originalDurationMinutes", t.originalDurationMinutes)
 
         val daysArray = JSONArray()
         t.selectedDays.forEach { daysArray.put(it.name) }
@@ -615,7 +635,8 @@ class RoutineRepository(context: Context) {
         isPausedTodayOnly = obj.optBoolean("isPausedTodayOnly", false),
         dndDelayMinutes = obj.optInt("dndDelayMinutes", 0).coerceIn(0, 25),
         originalStartTimeMinute = if (obj.has("originalStartTimeMinute")) obj.getInt("originalStartTimeMinute") else null,
-        manualPlacementOrder = obj.optLong("manualPlacementOrder", 0L)
+        manualPlacementOrder = obj.optLong("manualPlacementOrder", 0L),
+        originalDurationMinutes = if (obj.has("originalDurationMinutes")) obj.getInt("originalDurationMinutes") else null
       )
       list.add(task)
     }

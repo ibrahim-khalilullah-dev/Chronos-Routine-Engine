@@ -9,7 +9,7 @@
   <a href="https://raw.githubusercontent.com/ibrahim-khalilullah-dev/Chronos-Routine-Engine/main/chronos.apk" download="chronos.apk">
     <img src="https://img.shields.io/badge/Download-APK%20(Direct%20Install)-10B981?style=for-the-badge&logo=android&logoColor=white&labelColor=0B0E14" height="54" alt="Download Chronos APK" style="border-radius: 20px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);" />
   </a>
-  <p><sub>v1.1 • Direct one-tap APK installation • Android 7.0 to 16 • 100% Offline</sub></p>
+  <p><sub>v1.5 • Direct one-tap APK installation • Android 7.0 to 16 • 100% Offline</sub></p>
   <br/>
 </div>
 
@@ -88,15 +88,18 @@ Link two distinct routine sessions under a shared total duration pool (2m up to 
 
 ---
 
-### 7. Minimalist Header Countdown Pill & Auto-Day Transition ⏱️
-- **Clean Top-Right Countdown Pill:** Opposite the `"Chronos"` header title, a compact frosted countdown pill ticks down to the next scheduled task or anchor—wrapping smoothly past midnight to tomorrow's earliest slot late at night (`+1440 - currentMinute`)—with zero duplicate lower countdown banners cluttering the feed.
-- **Smart Pending Edit Swap:** Whenever interactive timeline drag edits are staged, the header pill cleanly transforms into the compact 3-button drag confirmation bar (`History`, `Apply`, `Discard`).
-- **Zero-Click Midnight Day-Shift:** Background date monitor automatically shifts the inspected day to the new day at 00:00 and resets `isPausedTodayOnly` flags cleanly.
+### 7. Sticky Top-Right Obsidian Glass Capsule & Auto-Day Transition ⏱️
+- **Pinned Top-Right Countdown Pill & Scroll Scrim:** Opposite the `"Chronos"` header title (and pinned inside a sleek frosted obsidian glass capsule above a subtle `48.dp` vertical fade scrim while scrolling), a compact countdown pill ticks down to the next scheduled task or anchor—wrapping smoothly past midnight to tomorrow's earliest slot late at night (`+1440 - currentMinute`).
+- **Sticky 3-Button Confirmation Bar & Auto-Dismiss:** Whenever timeline drag or compaction edits are staged, the pinned glass capsule cleanly transforms into the 3-button confirmation bar (`History`, `Apply`, `Discard`) and automatically dismisses itself if edits return the schedule to baseline. During active dragging, it auto-hides so the top live time pill owns full horizontal width.
+- **Zero-Click Midnight Day-Shift:** Foreground-resumed lifecycle clock automatically shifts the inspected day at 00:00 and resets `isPausedTodayOnly` flags cleanly.
 
 ---
 
-### 8. Silent Notification Channel, Custom Ringtone Playback & Lazy Self-Releasing TTS 🔔
+### 8. Alarm-Stream TTS, Per-Task Voice Sliders & Instant Hardware Voice Stop 🔔
 - **Silent Notification Channel (`chronos_automation_silent_channel`):** Foreground service notifications explicitly configure `setSound(null, null)` and `enableVibration(false)` so the OS notification channel never double-chimes alongside task audio, while displaying lock-screen timing (`VISIBILITY_PUBLIC`, e.g., `Ends at 10:45 AM`) and respecting device PIN/biometric locks.
+- **Strict `USAGE_ALARM` / `STREAM_ALARM` TTS Speech Routing:** ALL live Voice Announcements (`RoutineAutomationService`) and in-app TTS previews (Voice Persona Studio, Single Tasks, Fluid Twins, and all 7 Anchors) explicitly bind `AudioAttributes.USAGE_ALARM` + `CONTENT_TYPE_SPEECH`, pass `AudioManager.STREAM_ALARM`, and request transient ducking audio focus (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`), remaining clearly audible even when Media volume is `0%` or muted.
+- **Always-On Per-Task `0%–100%` Voice Volume Sliders:** Every voice-enabled routine—Dynamic Tasks, Fluid Twin Session 1 & Session 2, and all 7 Circadian Anchors (including Slot 3 Regular & Friday Jumu'ah mode)—exposes a dedicated `0%–100%` alarm-stream voice volume slider directly inside its editor modal (`test_voice_button_volume_slider`), scaled directly against Android's Alarm channel with clean upgrade migration from legacy settings.
+- **Zero-Overhead Hardware-Button Voice Stop (`Power`, `Volume Up`, `Volume Down`):** Pressing Power (`ACTION_SCREEN_OFF` / `ACTION_SCREEN_ON` with 200ms guard) or Volume Up/Down (both in-app via Activity/Dialog `dispatchKeyEvent` and on lockscreen/screen-off via scoped `VOLUME_CHANGED_ACTION` receiver & `Settings.System` observer) immediately silences ONLY active Voice Announcement playback (and companion chime), preserving active automation state, Task-Owned DND, notifications, and future alarms—with listeners registered **strictly** while voice playback is active and zero idle overhead otherwise.
 - **`USAGE_ALARM` Custom Ringtone & `MediaPlayer` Fallback:** User-selected phone ringtones play directly on `AudioAttributes.USAGE_ALARM` via `RingtoneManager`, falling back seamlessly to `MediaPlayer` if a vendor URI refuses direct Ringtone playback.
 - **Lazy Self-Releasing TTS & 25s WakeLock Cap:** `RoutineAutomationService` initializes `TextToSpeech(applicationContext)` strictly when `isVoiceEnabled == true`, immediately executes `stop()` and `shutdown()` inside `UtteranceProgressListener.onDone` / `onError` or a 20-second safety timeout so Google TTS (~150MB RAM) unbinds immediately, caps WakeLocks at `25_000L` (25 seconds), and runs with `START_NOT_STICKY` lifecycle safety.
 - **Zero-Leak 12-Persona Bilingual TTS & Studio Previews:** Choose from 12 offline BN/EN voice profiles in Settings (`Female (5)`, `Youth 10–15y (3)`, `Male & Studio (4)`), with custom BN/EN test text, `bn-BD`/`en-US` auto-detection, Google TTS (`com.google.android.tts`) fallback, and safe `applicationContext` previews in Task Studio and Settings.
@@ -120,29 +123,42 @@ Manage temporary routine suspensions without deleting configured tasks:
 ---
 
 ### 11. 60/120 FPS Fluid Engine & 4GB RAM Performance Architecture ⚡
-- **Off-Main-Thread Mutations & Throttled Vault Persistence:** `RoutineViewModel` executes repository saves and alarm rescheduling inside `scheduleMutex` on `Dispatchers.IO`, debounces 4-tier `chronos_vault.json` disk writes (`400ms` on serialized single-thread `ioScope`), and guards startup vault auto-restore so preferences are never re-parsed redundantly.
-- **Decoupled Ticker & `distinctUntilChanged` Sort Pipeline:** The 15-second clock ticker (`_currentMinute`) is decoupled from `SchedulerEngine.scheduleDay()`, and `activeSortMinuteTicker` emits updates only when `TimelineSortMode.ACTIVE_FIRST` is active.
-- **Smooth Placement Gliding & Stable Keys:** `LazyColumn` uses stable domain keys (`task.id`) and native `Modifier.animateItem` spring placement animations with zero infinite remeasure loops.
+- **Zero Unused Background SDKs & Lifecycle-Aware Ticker:** Unused networking/cloud libraries are pruned so zero stray `ContentProvider`s spin up on cold boot or alarm wakeup, the 15-second UI clock ticker runs strictly while foregrounded (`ON_START`/`ON_STOP`), `TextToSpeech` binds lazily only upon explicit preview taps using `applicationContext`, and `activeRingtone` self-releases via a bounded 10s timeout.
+- **Minimal Recomposition & Single-Canvas Cycle Map:** Rating persistence runs on `Dispatchers.IO`, the 24-Hour Cycle Map renders in a single `Canvas` pass, non-active cards skip 15s tick recompositions, and sorted interval-merging in `SchedulerEngine.findAvailableGaps()` eliminates `1440`-element per-minute allocations.
+- **Off-Main-Thread Mutations & Throttled Vault Persistence:** `RoutineViewModel` executes repository saves and serialized alarm rescheduling inside `scheduleMutex` on `Dispatchers.IO`, skips redundant 4-tier `chronos_vault.json` writes when content is unchanged, and guards startup vault auto-restore.
 
 ---
 
-### 12. Corner Stopwatch Net Free-Time Gap Telemetry ⏱️
+### 12. Human-Level Smart Solver, Fair-Share Water-Filling & Birth-Duration Auto-Return 🧠
+- **Two-Tier Constraint Solver (`SchedulerEngine.scheduleDay`):**
+  - **Pass 1 (Baseline Fit):** Places High Priority, Fluid Twin, and Normal dynamic tasks at full birth duration without premature flexing or overflow.
+  - **Pass 2 (4-Strategy Elastic Rescue):** Resolves blocked tasks deterministically in `< 1–3ms` (`O(N log N)`):
+    1. **Cross-Anchor Smart Task Migration:** Moves smaller non-priority tasks out of blocked windows into open space in other anchor windows at full duration (respecting Fluid Twin Same-Gap Partner Exclusion).
+    2. **Micro-Deficit Neighbor Borrowing (`1–5m`):** Covers small deficits from 1–2 flexible donors inside the window without shrinking the incoming task.
+    3. **Collective Fair-Share Elastic Compression:** Pools available flexibility inside the window using **Largest-Remainder Water-Filling** (exhausting non-priority Tier-1 flex before touching High Priority Tier-2 tasks).
+    4. **Flex-to-Shrink & Relocate:** Self-shrinks flexible tasks or shrinks-and-relocates movable neighbors within their flex margins to unlock tight slots.
+- **Birth-Duration Auto-Return (`originalDurationMinutes`) & Anti-Double-Flexing:** Canonical birth durations persist across JSON vault, Console CLI, Task Studio edits, and drag previews (`⚡ Auto-flexed to Xm today`), automatically snapping tasks back to full duration when blocking tasks move or pause.
+- **Transparent Telemetry Badges & 1-Tap `Compact` / `Auto-Fit`:** Timeline cards surface live `⚡ 60m→45m` flex pills and `↪ 09:00 AM` relocation markers alongside non-destructive `Compact` and `Auto-Fit` impact diff previews.
+
+---
+
+### 13. Corner Stopwatch Net Free-Time Gap Telemetry ⏱️
 - **Right-Aligned Obsidian Pill (`EARLIEST_START`):** Between consecutive cards with open breathing room, a sleek compact capsule (`#161E2E`, `1.dp` `#334155` border) with a crisp stopwatch icon displays exact open free time (e.g., `3m`, `1h 10m`).
 - **Buffer-Excluded Precision Math:** Powered by `SchedulerEngine.computeNetFreeGapMinutes()`, reserved `interTaskBufferMinutes` on dynamic tasks are cleanly subtracted from raw chronological spacing and the pill automatically hides whenever `netGapMinutes <= 0`.
 - **Real-Time Live Scrub Recalculation:** During horizontal scrubbing, adjacent corner gap pills recalculate live frame-by-frame (`3m` → `2m` → `1m` → hidden at `0m`) while the surrounding list order remains locked with zero layout jumping.
 
 ---
 
-### 13. Interactive Launcher-Grade Drag Scheduling & Schedule Impact Diff 🎯
+### 14. Interactive Launcher-Grade Drag Scheduling & Schedule Impact Diff 🎯
 - **Outer-Container Gesture Architecture (`PointerEventPass.Initial`):** Long-press any dynamic task card (safe tap margin preserves the top-right Edit pencil and native scrolling) to enter dual-axis drag mode:
   - **Horizontal Scrubbing:** Speed-sensitive fine scrubbing gliders move the card minute-by-minute within computed free bounds (`computeHorizontalScrubBounds`), strictly locking horizontal motion if surrounding gap is `0m`.
-  - **Vertical Reordering & Frame-Rate Edge Auto-Scroll:** Drag vertically across the timeline with an elevated floating overlay card, `withFrameNanos`-driven velocity-scaled edge auto-scroll, dimmed dashed **Source Shadow** (`alpha = 0.28`) at origin, animated full-card-height **Destination Drop Shadow** protected by `±8dp` anti-ping-pong hysteresis, neighbor card gliding via `Modifier.animateItem`, and a zero-blink settling handoff on release.
-- **Anchor Fencing vs. Cross-Anchor & Swap Cascade:** High Priority and Fluid Twin tasks clamp cleanly at enclosing **Anchor Walls** (`Anchor Wall` indicator), while Normal dynamic tasks can jump across anchors, land inside open gaps, or swap and cascade adjacent neighbors cleanly via `manualPlacementOrder`.
-- **Non-Destructive Preview & Impact Diff Modal:** Staged drag changes swap the header countdown pill for a 3-button review bar (`[History]` diff modal listing exact task shifts & overflows, `[Check]` Apply & reschedule alarms, `[Close]` Discard cleanly).
+  - **Two-Phase Silky-Smooth Vertical Settling:** Drag vertically across the timeline with an elevated floating overlay card, `withFrameNanos`-driven velocity-scaled edge auto-scroll, dimmed dashed **Source Shadow** (`alpha = 0.28`) at origin, animated full-card-height **Destination Drop Shadow** protected by `±8dp` anti-ping-pong hysteresis, neighbor card gliding via `Modifier.animateItem`, and a two-phase settling handoff that glides the floating overlay directly onto the card's settled bounds while smoothly tapering scale (`1.025x → 1.0x`) and shadow elevation.
+- **High Priority Anchor Wall vs. Fluid Twin Cross-Anchor Exclusion:** Strictly non-twin High Priority tasks clamp at enclosing **Anchor Walls** (`Anchor Wall`), whereas Fluid Twin sessions can jump freely across anchors into unoccupied windows—enforcing **Same-Gap Partner Exclusion** (`"Twin parts must stay in separate anchor gaps"`) whenever an active twin partner already occupies the destination inter-anchor gap.
+- **Non-Destructive Preview & Impact Diff Modal:** Staged drag or compaction changes show the pinned 3-button review bar (`[History]` diff modal listing exact task shifts & overflows, `[Check]` Apply & reschedule alarms, `[Close]` Discard cleanly).
 
 ---
 
-### 14. Monospace Obsidian Terminal Studio CLI Engine (v2) 💻
+### 15. Monospace Obsidian Terminal Studio CLI Engine (v2) 💻
 A developer-first, high-throughput monospace Obsidian terminal console with real-time debounced syntax parsing (250ms), active metrics diagnostic card, collapsible error accordion, and clickable inline context-aware ghost auto-prediction:
 - **`ANCHOR` Directive:** `ANCHOR | Slot(1-7) | Title | Start(HH:mm) | Dur(m) | DND(Y/N) | Delay(0-25) | Voice(Y/N) | Message | [FriTitle | FriStart | FriDur | FriMsg] | [Days | Sound(Y/N) | VoiceVol(0-100)]`.
 - **`TWIN` Directive:** `TWIN | TotalPool(m) | P1Title | P1Start | P1Dur | P1Voice | P2Title | P2Start | P2Dur | P2Voice | DND(Y/N) | Days | Flex | Rest | [Category | P1Safety | P2Safety | P1Voice(Y/N) | P2Voice(Y/N) | P1Vol | P2Vol | Sound | DndDelay(0-25)]`.
@@ -154,7 +170,7 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 
 ---
 
-### 15. Unified Obsidian Task Studio & Dual-Session Voice Architecture 🎙️
+### 16. Unified Obsidian Task Studio & Dual-Session Voice Architecture 🎙️
 - **Unified Luxury Parity Across All Modes:** Normal Tasks, Fluid Twin Split sessions, and all 7 Circadian Anchors share one cohesive Samsung One UI 8.5 Obsidian Studio aesthetic (`#101727` → `#0A0E18` glass gradient cards, `#070B13` recessed time/duration wells, glowing Material 3 custom `16.dp` circular slider thumbs, `36.dp` stepper badges, and streamlined Slot 1 / Slot 5 editors free of redundant description clutter).
 - **Header Quick-Pill Ergonomics & Mutual Exclusivity:** Direct header-integrated `Priority` and `Split` interactive toggle pills use `AnimatedVisibility` mutual exclusivity during task creation—enabling `Priority` smoothly hides `Split`, and engaging `Split` cleanly hides `Priority`—while editing an existing single task hides `Split` and keeps `Priority` editable.
 - **Compact 3-Box Matrix, `00` Defaults & Anti-Clipping Stepper Wells:** Uniform `START TIME`, `HOURS`, `MINS`, and `SAFETY` wells use `widthIn`-constrained `BasicTextField` inputs (`00` placeholders) with external `h`/`m`/`±` unit suffixes so symbols never clip, `"Born: <time>"` markers when displaced, a `"ENDING TIME"` (or `"TARGET SLEEP QUOTA"` for Slot 1) summary row, and a clean single-checkmark Save CTA.
@@ -176,7 +192,7 @@ A developer-first, high-throughput monospace Obsidian terminal console with real
 | **Local Storage** | SharedPreferences & Multi-Tier Vault | Memory-mapped JSON storage backed by 400ms debounced 4-tier `chronos_vault.json` |
 | **Background Work** | Foreground Service (`START_NOT_STICKY`) | Uninterrupted execution with 25s WakeLock cap and self-releasing TTS |
 | **Alarm Precision** | `setAlarmClock()` + `setExactAndAllowWhileIdle()` | Single-earliest Doze-piercing wakeups + 7-day horizon without broadcast storms |
-| **Audio Telemetry** | Lazy `TextToSpeech` & `RingtoneManager` | `USAGE_ALARM` ringtone + `MediaPlayer` fallback, audio ducking, 12 BN/EN personas |
+| **Audio Telemetry** | Lazy `TextToSpeech` & `RingtoneManager` | Strict `USAGE_ALARM` / `STREAM_ALARM` speech routing, per-task `0%–100%` voice volume sliders, hardware-key stop, 12 BN/EN personas |
 | **Testing** | Robolectric 4.16.1 & JUnit | Fast JVM-level Compose UI, drag/drop math, and CUJ integration testing |
 
 ---
@@ -213,7 +229,7 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## 📱 System & Device Specifications
 
-- **App Release Version:** v1.1 (`versionCode = 2`)
+- **App Release Version:** v1.5 (`versionCode = 6`)
 - **Minimum SDK:** Android 7.0 (API Level 24)
 - **Target / Tested SDK:** Android 15 / 16 (API Level 35 & 36 Ready)
 - **Runtime Memory Footprint:** < 65MB RAM (lazy self-releasing TTS, single-earliest `setAlarmClock()`, zero background leaks)

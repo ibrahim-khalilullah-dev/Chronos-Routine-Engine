@@ -6,6 +6,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -78,9 +81,95 @@ object AutomationManager {
     }
   }
 
+  private val previewLock = Any()
+  @Volatile
+  private var activePreviewStopHandler: (() -> Unit)? = null
+
+  fun registerActivePreviewStop(onStop: () -> Unit) {
+    synchronized(previewLock) {
+      activePreviewStopHandler = onStop
+    }
+  }
+
+  fun clearActivePreviewStop(onStop: () -> Unit) {
+    synchronized(previewLock) {
+      if (activePreviewStopHandler === onStop) {
+        activePreviewStopHandler = null
+      }
+    }
+  }
+
+  fun stopActivePreviewVoiceIfPlaying(): Boolean {
+    val handler = synchronized(previewLock) {
+      val current = activePreviewStopHandler
+      activePreviewStopHandler = null
+      current
+    } ?: return false
+    try {
+      handler.invoke()
+    } catch (_: Exception) {}
+    return true
+  }
+
+  fun configureAlarmTtsAttributes(tts: TextToSpeech?) {
+    if (tts == null) return
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        tts.setAudioAttributes(
+          AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+        )
+      }
+    } catch (_: Exception) {}
+  }
+
+  fun requestTransientAlarmAudioFocus(audioManager: AudioManager?): AudioFocusRequest? {
+    if (audioManager == null) return null
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val playbackAttributes = AudioAttributes.Builder()
+          .setUsage(AudioAttributes.USAGE_ALARM)
+          .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+          .build()
+        val afr = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+          .setAudioAttributes(playbackAttributes)
+          .setAcceptsDelayedFocusGain(false)
+          .setOnAudioFocusChangeListener { }
+          .build()
+        audioManager.requestAudioFocus(afr)
+        afr
+      } else {
+        @Suppress("DEPRECATION")
+        audioManager.requestAudioFocus(
+          null,
+          AudioManager.STREAM_ALARM,
+          AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+        )
+        null
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  fun abandonTransientAlarmAudioFocus(audioManager: AudioManager?, focusRequest: AudioFocusRequest?) {
+    if (audioManager == null) return
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+      } else {
+        @Suppress("DEPRECATION")
+        audioManager.abandonAudioFocus(null)
+      }
+    } catch (_: Exception) {}
+  }
+
   fun createTtsVolumeParams(volume: Float): Bundle {
     val clamped = volume.coerceIn(0.0f, 1.0f)
     return Bundle().apply {
+      putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM)
       putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, clamped)
     }
   }
@@ -308,6 +397,7 @@ object AutomationManager {
     voicePresetId: String = "natural_female"
   ): Boolean {
     if (tts == null) return false
+    configureAlarmTtsAttributes(tts)
     return try {
       val preset = getVoicePreset(voicePresetId)
       var selectedDistinctMaleVoice = false
@@ -679,7 +769,20 @@ object AutomationManager {
     }
   }
 
+  private val rescheduleLock = Any()
+  internal val receiverScope = kotlinx.coroutines.CoroutineScope(
+    kotlinx.coroutines.Dispatchers.Default + kotlinx.coroutines.SupervisorJob()
+  )
+  private var hasCleanedLegacySlots = false
+  private val lastScheduledStartIds = HashSet<String>()
+  private val lastScheduledDndIds = HashSet<String>()
+  private val lastScheduledEndIds = HashSet<String>()
+
+  private enum class AlarmKind { START, DND, END }
+
   private data class PlannedAlarmItem(
+    val taskId: String,
+    val kind: AlarmKind,
     val triggerMillis: Long,
     val pendingIntent: PendingIntent,
     val eligibleForAlarmClock: Boolean
@@ -714,6 +817,7 @@ object AutomationManager {
     var effectiveTitle = task.title
     var effectiveVoiceMessage = task.voiceMessage
     val effectiveDndDelay = task.dndDelayMinutes.coerceIn(0, 25)
+    val effectiveVoiceVolume = task.voiceVolume.coerceIn(0.0f, 1.0f)
 
     // Slot 3 Friday dual-mode check: if target day is Friday, use Friday title/duration/voice overrides while respecting user's custom DND delay
     if (task.slotNumber == 3 && targetRoutineDay == RoutineDay.FRIDAY) {
@@ -745,7 +849,7 @@ object AutomationManager {
         putExtra(EXTRA_CUSTOM_RINGTONE_URI, task.customRingtoneUri)
         putExtra(EXTRA_NOTIFICATION_TITLE, if (task.customNotificationTitle.isNotBlank()) task.customNotificationTitle else effectiveTitle)
         putExtra(EXTRA_NOTIFICATION_BODY, if (task.customNotificationBody.isNotBlank()) task.customNotificationBody else effectiveVoiceMessage.ifBlank { "$effectiveTitle starting now." })
-        putExtra(EXTRA_VOICE_VOLUME, task.voiceVolume)
+        putExtra(EXTRA_VOICE_VOLUME, effectiveVoiceVolume)
         putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
         putExtra(EXTRA_CATEGORY_NAME, catName)
         putExtra(EXTRA_FORMATTED_DURATION, formattedEffectiveDuration)
@@ -759,7 +863,7 @@ object AutomationManager {
         startIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
       )
-      items.add(PlannedAlarmItem(startMillis, pendingStart, eligibleForAlarmClock = true))
+      items.add(PlannedAlarmItem(task.id, AlarmKind.START, startMillis, pendingStart, eligibleForAlarmClock = true))
     }
 
     // Deep Sleep Immune Delayed DND via AlarmManager (only if trigger precedes task end)
@@ -779,7 +883,7 @@ object AutomationManager {
           dndIntent,
           PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        items.add(PlannedAlarmItem(dndTriggerMillis, pendingDnd, eligibleForAlarmClock = true))
+        items.add(PlannedAlarmItem(task.id, AlarmKind.DND, dndTriggerMillis, pendingDnd, eligibleForAlarmClock = true))
       }
     }
 
@@ -797,7 +901,7 @@ object AutomationManager {
         endIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
       )
-      items.add(PlannedAlarmItem(endMillis, pendingEnd, eligibleForAlarmClock = task.enableDnd))
+      items.add(PlannedAlarmItem(task.id, AlarmKind.END, endMillis, pendingEnd, eligibleForAlarmClock = task.enableDnd))
     }
 
     return items
@@ -821,7 +925,13 @@ object AutomationManager {
       cancelTaskAlarms(context, task.id)
     }
 
-    val items = buildTaskAlarmsForOccurrence(context, task, startMillis, targetRoutineDay, now)
+    val items = buildTaskAlarmsForOccurrence(
+      context,
+      task,
+      startMillis,
+      targetRoutineDay,
+      now
+    )
     val earliestAlarmClockMillis = items.filter { it.eligibleForAlarmClock }.minOfOrNull { it.triggerMillis }
     for (item in items) {
       val useAlarmClock = item.eligibleForAlarmClock &&
@@ -866,61 +976,56 @@ object AutomationManager {
     } catch (_: Exception) {}
   }
 
+  private fun cancelSingleAlarmIntent(
+    context: Context,
+    am: AlarmManager,
+    requestCode: Int,
+    actionName: String
+  ) {
+    val intent = Intent(context, RoutineAlarmReceiver::class.java).apply {
+      action = actionName
+    }
+    val pi = PendingIntent.getBroadcast(
+      context,
+      requestCode,
+      intent,
+      PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+    )
+    if (pi != null) {
+      am.cancel(pi)
+      pi.cancel()
+    }
+  }
+
   fun cancelTaskAlarms(context: Context, taskId: String) {
     val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-    val startIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
-      action = ACTION_START_TASK
-    }
-    val pendingStart = PendingIntent.getBroadcast(
-      context,
-      taskId.hashCode(),
-      startIntent,
-      PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-    )
-    if (pendingStart != null) {
-      am.cancel(pendingStart)
-      pendingStart.cancel()
-    }
-
-    val endIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
-      action = ACTION_END_TASK
-    }
-    val pendingEnd = PendingIntent.getBroadcast(
-      context,
-      (taskId + "_end").hashCode(),
-      endIntent,
-      PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-    )
-    if (pendingEnd != null) {
-      am.cancel(pendingEnd)
-      pendingEnd.cancel()
-    }
-
-    val dndIntent = Intent(context, RoutineAlarmReceiver::class.java).apply {
-      action = ACTION_APPLY_DND
-    }
-    val pendingDnd = PendingIntent.getBroadcast(
-      context,
-      (taskId + "_dnd").hashCode(),
-      dndIntent,
-      PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-    )
-    if (pendingDnd != null) {
-      am.cancel(pendingDnd)
-      pendingDnd.cancel()
-    }
+    cancelSingleAlarmIntent(context, am, taskId.hashCode(), ACTION_START_TASK)
+    cancelSingleAlarmIntent(context, am, (taskId + "_end").hashCode(), ACTION_END_TASK)
+    cancelSingleAlarmIntent(context, am, (taskId + "_dnd").hashCode(), ACTION_APPLY_DND)
   }
 
   fun reconcileStaleDndState(context: Context, nowMillis: Long = System.currentTimeMillis()) {
     try {
-      val activeDndTaskId = getActiveDndTaskId(context) ?: return
+      getActiveDndTaskId(context) ?: return
       val repository = RoutineRepository(context)
       val anchors = repository.getAnchors().filter { !it.isDeleted }
       val dynamicTasks = repository.getDynamicTasks().filter { !it.isDeleted }
       val sleepDuration = repository.getSleepDurationMinutes()
       val bufferMinutes = repository.getBufferMinutes()
       val calculatedAnchors = SchedulerEngine.calculateAnchors(anchors, sleepDuration)
+      reconcileStaleDndStateInternal(context, calculatedAnchors, dynamicTasks, bufferMinutes, nowMillis)
+    } catch (_: Exception) {}
+  }
 
+  private fun reconcileStaleDndStateInternal(
+    context: Context,
+    calculatedAnchors: List<RoutineTask>,
+    dynamicTasks: List<RoutineTask>,
+    bufferMinutes: Int,
+    nowMillis: Long
+  ) {
+    try {
+      val activeDndTaskId = getActiveDndTaskId(context) ?: return
       val baseCal = Calendar.getInstance().apply { timeInMillis = nowMillis }
       var hasValidOngoingDndOccurrence = false
 
@@ -971,82 +1076,126 @@ object AutomationManager {
   }
 
   internal fun rescheduleAllAlarmsAt(context: Context, now: Long) {
-    try {
-      reconcileStaleDndState(context, now)
-      val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-      val repository = RoutineRepository(context)
-      val anchors = repository.getAnchors().filter { !it.isDeleted }
-      val dynamicTasks = repository.getDynamicTasks().filter { !it.isDeleted }
-      val sleepDuration = repository.getSleepDurationMinutes()
-      val bufferMinutes = repository.getBufferMinutes()
-      val calculatedAnchors = SchedulerEngine.calculateAnchors(anchors, sleepDuration)
+    synchronized(rescheduleLock) {
+      try {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val repository = RoutineRepository(context)
+        val anchors = repository.getAnchors().filter { !it.isDeleted }
+        val dynamicTasks = repository.getDynamicTasks().filter { !it.isDeleted }
+        val sleepDuration = repository.getSleepDurationMinutes()
+        val bufferMinutes = repository.getBufferMinutes()
+        val calculatedAnchors = SchedulerEngine.calculateAnchors(anchors, sleepDuration)
 
-      // Purge any legacy slot_* alarms and stale alarms before re-registering upcoming horizon
-      for (slot in 1..7) {
-        cancelTaskAlarms(context, "slot_$slot")
-      }
-      for (anchor in calculatedAnchors) {
-        cancelTaskAlarms(context, anchor.id)
-      }
-      for (dyn in dynamicTasks) {
-        cancelTaskAlarms(context, dyn.id)
-      }
+        reconcileStaleDndStateInternal(context, calculatedAnchors, dynamicTasks, bufferMinutes, now)
 
-      val baseCal = Calendar.getInstance().apply { timeInMillis = now }
-      val scheduledTaskIds = mutableSetOf<String>()
-      val allPlannedAlarms = mutableListOf<PlannedAlarmItem>()
+        val baseCal = Calendar.getInstance().apply { timeInMillis = now }
+        val scheduledTaskIds = mutableSetOf<String>()
+        val allPlannedAlarms = mutableListOf<PlannedAlarmItem>()
 
-      for (dayOffset in -1..6) {
-        val dayCal = (baseCal.clone() as Calendar).apply {
-          add(Calendar.DAY_OF_YEAR, dayOffset)
-        }
-        val routineDay = calendarToRoutineDay(dayCal)
-        val daySchedule = SchedulerEngine.scheduleDay(
-          calculatedAnchors,
-          dynamicTasks,
-          routineDay,
-          bufferMinutes
-        )
-
-        for (task in daySchedule.scheduledTasks) {
-          if (task.id in scheduledTaskIds) continue
-          val startCal = (dayCal.clone() as Calendar).apply {
-            set(Calendar.HOUR_OF_DAY, task.startTimeMinute / 60)
-            set(Calendar.MINUTE, task.startTimeMinute % 60)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
+        for (dayOffset in -1..6) {
+          val dayCal = (baseCal.clone() as Calendar).apply {
+            add(Calendar.DAY_OF_YEAR, dayOffset)
           }
-          val startMillis = startCal.timeInMillis
-          val endMillis = startMillis + task.durationMinutes * 60L * 1000L
+          val routineDay = calendarToRoutineDay(dayCal)
+          val daySchedule = SchedulerEngine.scheduleDay(
+            calculatedAnchors,
+            dynamicTasks,
+            routineDay,
+            bufferMinutes
+          )
 
-          val isUpcomingOrOngoing = if (dayOffset <= 0) {
-            endMillis > now
-          } else {
-            startMillis > now
-          }
+          for (task in daySchedule.scheduledTasks) {
+            if (task.id in scheduledTaskIds) continue
+            val startCal = (dayCal.clone() as Calendar).apply {
+              set(Calendar.HOUR_OF_DAY, task.startTimeMinute / 60)
+              set(Calendar.MINUTE, task.startTimeMinute % 60)
+              set(Calendar.SECOND, 0)
+              set(Calendar.MILLISECOND, 0)
+            }
+            val startMillis = startCal.timeInMillis
+            val endMillis = startMillis + task.durationMinutes * 60L * 1000L
 
-          if (isUpcomingOrOngoing) {
-            allPlannedAlarms.addAll(
-              buildTaskAlarmsForOccurrence(context, task, startMillis, routineDay, now)
-            )
-            scheduledTaskIds.add(task.id)
+            val isUpcomingOrOngoing = if (dayOffset <= 0) {
+              endMillis > now
+            } else {
+              startMillis > now
+            }
+
+            if (isUpcomingOrOngoing) {
+              allPlannedAlarms.addAll(
+                buildTaskAlarmsForOccurrence(
+                  context,
+                  task,
+                  startMillis,
+                  routineDay,
+                  now
+                )
+              )
+              scheduledTaskIds.add(task.id)
+            }
           }
         }
-      }
 
-      // Single earliest upcoming alarm timestamp across Start / Delayed-DND / DND-End uses setAlarmClock()
-      // to pierce Deep Doze without flooding SystemUI; all subsequent future alarms use setExactAndAllowWhileIdle().
-      val earliestAlarmClockMillis = allPlannedAlarms
-        .filter { it.eligibleForAlarmClock }
-        .minOfOrNull { it.triggerMillis }
+        val plannedStartIds = HashSet<String>()
+        val plannedDndIds = HashSet<String>()
+        val plannedEndIds = HashSet<String>()
+        for (item in allPlannedAlarms) {
+          when (item.kind) {
+            AlarmKind.START -> plannedStartIds.add(item.taskId)
+            AlarmKind.DND -> plannedDndIds.add(item.taskId)
+            AlarmKind.END -> plannedEndIds.add(item.taskId)
+          }
+        }
 
-      for (item in allPlannedAlarms) {
-        val useAlarmClock = item.eligibleForAlarmClock &&
-          earliestAlarmClockMillis != null &&
-          item.triggerMillis == earliestAlarmClockMillis
-        scheduleExactOrAlarmClock(am, item.triggerMillis, item.pendingIntent, useAlarmClock = useAlarmClock)
-      }
-    } catch (_: Exception) {}
+        if (!hasCleanedLegacySlots) {
+          hasCleanedLegacySlots = true
+          for (slot in 1..7) {
+            cancelTaskAlarms(context, "slot_$slot")
+          }
+          // On initial run, also purge any stale alarms on known tasks not in planned sets
+          for (task in calculatedAnchors) {
+            if (task.id !in plannedStartIds) cancelSingleAlarmIntent(context, am, task.id.hashCode(), ACTION_START_TASK)
+            if (task.id !in plannedDndIds) cancelSingleAlarmIntent(context, am, (task.id + "_dnd").hashCode(), ACTION_APPLY_DND)
+            if (task.id !in plannedEndIds) cancelSingleAlarmIntent(context, am, (task.id + "_end").hashCode(), ACTION_END_TASK)
+          }
+          for (dyn in dynamicTasks) {
+            if (dyn.id !in plannedStartIds) cancelSingleAlarmIntent(context, am, dyn.id.hashCode(), ACTION_START_TASK)
+            if (dyn.id !in plannedDndIds) cancelSingleAlarmIntent(context, am, (dyn.id + "_dnd").hashCode(), ACTION_APPLY_DND)
+            if (dyn.id !in plannedEndIds) cancelSingleAlarmIntent(context, am, (dyn.id + "_end").hashCode(), ACTION_END_TASK)
+          }
+        } else {
+          for (id in lastScheduledStartIds) {
+            if (id !in plannedStartIds) cancelSingleAlarmIntent(context, am, id.hashCode(), ACTION_START_TASK)
+          }
+          for (id in lastScheduledDndIds) {
+            if (id !in plannedDndIds) cancelSingleAlarmIntent(context, am, (id + "_dnd").hashCode(), ACTION_APPLY_DND)
+          }
+          for (id in lastScheduledEndIds) {
+            if (id !in plannedEndIds) cancelSingleAlarmIntent(context, am, (id + "_end").hashCode(), ACTION_END_TASK)
+          }
+        }
+
+        lastScheduledStartIds.clear()
+        lastScheduledStartIds.addAll(plannedStartIds)
+        lastScheduledDndIds.clear()
+        lastScheduledDndIds.addAll(plannedDndIds)
+        lastScheduledEndIds.clear()
+        lastScheduledEndIds.addAll(plannedEndIds)
+
+        // Single earliest upcoming alarm timestamp across Start / Delayed-DND / DND-End uses setAlarmClock()
+        // to pierce Deep Doze without flooding SystemUI; all subsequent future alarms use setExactAndAllowWhileIdle().
+        val earliestAlarmClockMillis = allPlannedAlarms
+          .filter { it.eligibleForAlarmClock }
+          .minOfOrNull { it.triggerMillis }
+
+        for (item in allPlannedAlarms) {
+          val useAlarmClock = item.eligibleForAlarmClock &&
+            earliestAlarmClockMillis != null &&
+            item.triggerMillis == earliestAlarmClockMillis
+          scheduleExactOrAlarmClock(am, item.triggerMillis, item.pendingIntent, useAlarmClock = useAlarmClock)
+        }
+      } catch (_: Exception) {}
+    }
   }
 
   fun rescheduleCompletedTaskNextCycle(context: Context, taskId: String) {
@@ -1062,6 +1211,8 @@ object AutomationManager {
     val endHourMin = ((task.startTimeMinute + task.durationMinutes) % 1440 + 1440) % 1440
     val formattedEndTime = RoutineTask.formatTime(endHourMin)
 
+    val effectiveVoiceVolume = task.voiceVolume.coerceIn(0.0f, 1.0f)
+
     val serviceIntent = Intent(context, RoutineAutomationService::class.java).apply {
       action = ACTION_START_TASK
       putExtra(EXTRA_TASK_ID, task.id)
@@ -1074,7 +1225,7 @@ object AutomationManager {
       putExtra(EXTRA_CUSTOM_RINGTONE_URI, task.customRingtoneUri)
       putExtra(EXTRA_NOTIFICATION_TITLE, task.notificationDisplayTitle)
       putExtra(EXTRA_NOTIFICATION_BODY, task.notificationDisplayBody)
-      putExtra(EXTRA_VOICE_VOLUME, task.voiceVolume)
+      putExtra(EXTRA_VOICE_VOLUME, effectiveVoiceVolume)
       putExtra(EXTRA_CATEGORY_EMOJI, catEmoji)
       putExtra(EXTRA_CATEGORY_NAME, catName)
       putExtra(EXTRA_FORMATTED_DURATION, task.formattedDuration)

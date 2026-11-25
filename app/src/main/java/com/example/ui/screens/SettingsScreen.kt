@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.content.Context
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -7,7 +10,6 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -409,7 +411,6 @@ fun SettingsScreen(
       .fillMaxSize()
       .background(Color(0xFF080A0F)) // Pure AMOLED Deep Obsidian
       .statusBarsPadding()
-      .animateContentSize()
       .verticalScroll(rememberScrollState())
       .padding(horizontal = 20.dp, vertical = 16.dp)
       .padding(bottom = 36.dp),
@@ -1309,6 +1310,11 @@ fun SettingsScreen(
     // 2B. VOICE PERSONA STUDIO (COLLAPSIBLE 12-PERSONA BN & EN DROPDOWN)
     // ==============================================================
     val settingsContext = LocalContext.current
+    val appContext = settingsContext.applicationContext ?: settingsContext
+    val settingsAudioManager = remember(appContext) {
+      appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    }
+    var personaAudioFocusRequest by remember { mutableStateOf<AudioFocusRequest?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var personaTts by remember { mutableStateOf<TextToSpeech?>(null) }
     var isPersonaTtsReady by remember { mutableStateOf(false) }
@@ -1316,6 +1322,7 @@ fun SettingsScreen(
     var playingPresetId by remember { mutableStateOf<String?>(null) }
     var pendingPreviewPresetId by remember { mutableStateOf<String?>(null) }
     var isVoiceDropdownExpanded by remember { mutableStateOf(false) }
+    var personaTtsRequested by remember { mutableStateOf(false) }
     var customTestText by remember { mutableStateOf("") }
     var selectedVoiceCategory by remember { mutableStateOf("all") }
     var pendingConfirmPreset by remember { mutableStateOf<AutomationManager.VoicePreset?>(null) }
@@ -1324,15 +1331,36 @@ fun SettingsScreen(
       AutomationManager.getVoicePreset(selectedVoicePresetId)
     }
 
+    val stopPersonaPreview: () -> Unit = {
+      try {
+        personaTts?.stop()
+      } catch (_: Exception) {}
+      AutomationManager.abandonTransientAlarmAudioFocus(settingsAudioManager, personaAudioFocusRequest)
+      personaAudioFocusRequest = null
+      playingPresetId = null
+    }
+
+    DisposableEffect(playingPresetId) {
+      if (playingPresetId != null) {
+        AutomationManager.registerActivePreviewStop(stopPersonaPreview)
+      }
+      onDispose {
+        AutomationManager.clearActivePreviewStop(stopPersonaPreview)
+      }
+    }
+
     fun speakVoicePresetSample(ttsEngine: TextToSpeech?, preset: AutomationManager.VoicePreset) {
       if (ttsEngine == null) return
       val textToSpeak = customTestText.trim().ifBlank { preset.defaultSampleText }
+      AutomationManager.configureAlarmTtsAttributes(ttsEngine)
       AutomationManager.applyTtsLanguage(ttsEngine, textToSpeak, preset.id)
+      AutomationManager.abandonTransientAlarmAudioFocus(settingsAudioManager, personaAudioFocusRequest)
+      personaAudioFocusRequest = AutomationManager.requestTransientAlarmAudioFocus(settingsAudioManager)
       playingPresetId = preset.id
       ttsEngine.speak(
         textToSpeak,
         TextToSpeech.QUEUE_FLUSH,
-        Bundle(),
+        AutomationManager.createTtsVolumeParams(1.0f),
         "voice_persona_preview_${preset.id}"
       )
     }
@@ -1341,65 +1369,105 @@ fun SettingsScreen(
       engine?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) {}
         override fun onDone(utteranceId: String?) {
-          mainHandler.post { playingPresetId = null }
+          mainHandler.post {
+            playingPresetId = null
+            AutomationManager.abandonTransientAlarmAudioFocus(settingsAudioManager, personaAudioFocusRequest)
+            personaAudioFocusRequest = null
+          }
         }
         @Deprecated("Deprecated in Java")
         override fun onError(utteranceId: String?) {
-          mainHandler.post { playingPresetId = null }
+          mainHandler.post {
+            playingPresetId = null
+            AutomationManager.abandonTransientAlarmAudioFocus(settingsAudioManager, personaAudioFocusRequest)
+            personaAudioFocusRequest = null
+          }
         }
         override fun onError(utteranceId: String?, errorCode: Int) {
-          mainHandler.post { playingPresetId = null }
+          mainHandler.post {
+            playingPresetId = null
+            AutomationManager.abandonTransientAlarmAudioFocus(settingsAudioManager, personaAudioFocusRequest)
+            personaAudioFocusRequest = null
+          }
         }
       })
     }
 
-    DisposableEffect(settingsContext) {
-      var engine: TextToSpeech? = null
-      try {
-        engine = TextToSpeech(settingsContext) { status ->
-          if (status == TextToSpeech.SUCCESS) {
-            isPersonaTtsReady = true
-            attachPersonaTtsListener(engine)
-            val queued = pendingPreviewPresetId
-            if (queued != null) {
-              pendingPreviewPresetId = null
-              speakVoicePresetSample(engine, AutomationManager.getVoicePreset(queued))
-            }
-          } else if (!triedPersonaGoogleFallback && AutomationManager.hasGoogleTtsEngine(settingsContext)) {
-            triedPersonaGoogleFallback = true
-            try {
-              engine?.shutdown()
-            } catch (_: Exception) {}
-            try {
-              var googleEngine: TextToSpeech? = null
-              googleEngine = TextToSpeech(settingsContext, { gStatus ->
-                if (gStatus == TextToSpeech.SUCCESS) {
-                  isPersonaTtsReady = true
-                  personaTts = googleEngine
-                  attachPersonaTtsListener(googleEngine)
-                  val queued = pendingPreviewPresetId
-                  if (queued != null) {
-                    pendingPreviewPresetId = null
-                    speakVoicePresetSample(googleEngine, AutomationManager.getVoicePreset(queued))
-                  }
-                }
-              }, "com.google.android.tts")
-              personaTts = googleEngine
-            } catch (_: Exception) {}
-          }
+    DisposableEffect(appContext, personaTtsRequested, isVoiceDropdownExpanded) {
+      if (!personaTtsRequested || !isVoiceDropdownExpanded) {
+        onDispose {
+          AutomationManager.clearActivePreviewStop(stopPersonaPreview)
+          AutomationManager.abandonTransientAlarmAudioFocus(settingsAudioManager, personaAudioFocusRequest)
+          personaAudioFocusRequest = null
         }
-        personaTts = engine
-      } catch (_: Exception) {
-        isPersonaTtsReady = false
-      }
-      onDispose {
-        playingPresetId = null
-        pendingPreviewPresetId = null
+      } else {
+        var engine: TextToSpeech? = null
+        var disposed = false
         try {
-          personaTts?.stop()
-          personaTts?.shutdown()
-        } catch (_: Exception) {}
-        personaTts = null
+          engine = TextToSpeech(appContext) { status ->
+            if (disposed) {
+              try {
+                engine?.shutdown()
+              } catch (_: Exception) {}
+              return@TextToSpeech
+            }
+            if (status == TextToSpeech.SUCCESS) {
+              isPersonaTtsReady = true
+              AutomationManager.configureAlarmTtsAttributes(engine)
+              attachPersonaTtsListener(engine)
+              val queued = pendingPreviewPresetId
+              if (queued != null) {
+                pendingPreviewPresetId = null
+                speakVoicePresetSample(engine, AutomationManager.getVoicePreset(queued))
+              }
+            } else if (!triedPersonaGoogleFallback && AutomationManager.hasGoogleTtsEngine(appContext)) {
+              triedPersonaGoogleFallback = true
+              try {
+                engine?.shutdown()
+              } catch (_: Exception) {}
+              try {
+                var googleEngine: TextToSpeech? = null
+                googleEngine = TextToSpeech(appContext, { gStatus ->
+                  if (disposed) {
+                    try {
+                      googleEngine?.shutdown()
+                    } catch (_: Exception) {}
+                    return@TextToSpeech
+                  }
+                  if (gStatus == TextToSpeech.SUCCESS) {
+                    isPersonaTtsReady = true
+                    personaTts = googleEngine
+                    AutomationManager.configureAlarmTtsAttributes(googleEngine)
+                    attachPersonaTtsListener(googleEngine)
+                    val queued = pendingPreviewPresetId
+                    if (queued != null) {
+                      pendingPreviewPresetId = null
+                      speakVoicePresetSample(googleEngine, AutomationManager.getVoicePreset(queued))
+                    }
+                  }
+                }, "com.google.android.tts")
+                personaTts = googleEngine
+              } catch (_: Exception) {}
+            }
+          }
+          personaTts = engine
+        } catch (_: Exception) {
+          isPersonaTtsReady = false
+        }
+        onDispose {
+          disposed = true
+          isPersonaTtsReady = false
+          playingPresetId = null
+          pendingPreviewPresetId = null
+          AutomationManager.clearActivePreviewStop(stopPersonaPreview)
+          AutomationManager.abandonTransientAlarmAudioFocus(settingsAudioManager, personaAudioFocusRequest)
+          personaAudioFocusRequest = null
+          try {
+            personaTts?.stop()
+            personaTts?.shutdown()
+          } catch (_: Exception) {}
+          personaTts = null
+        }
       }
     }
 
@@ -1704,17 +1772,17 @@ fun SettingsScreen(
                       )
                       .clickable {
                         if (isPlaying) {
-                          try {
-                            personaTts?.stop()
-                          } catch (_: Exception) {}
-                          playingPresetId = null
+                          stopPersonaPreview()
+                        } else if (!personaTtsRequested || personaTts == null || !isPersonaTtsReady) {
+                          pendingPreviewPresetId = preset.id
+                          personaTtsRequested = true
                         } else {
                           val textToSpeak = customTestText.trim().ifBlank { preset.defaultSampleText }
                           val needsBengali = AutomationManager.containsBengali(textToSpeak)
                           if (needsBengali &&
                             !AutomationManager.isBengaliTtsAvailable(personaTts) &&
                             !triedPersonaGoogleFallback &&
-                            AutomationManager.hasGoogleTtsEngine(settingsContext)
+                            AutomationManager.hasGoogleTtsEngine(appContext)
                           ) {
                             triedPersonaGoogleFallback = true
                             pendingPreviewPresetId = preset.id
@@ -1723,10 +1791,11 @@ fun SettingsScreen(
                             } catch (_: Exception) {}
                             try {
                               var googleEngine: TextToSpeech? = null
-                              googleEngine = TextToSpeech(settingsContext, { gStatus ->
+                              googleEngine = TextToSpeech(appContext, { gStatus ->
                                 if (gStatus == TextToSpeech.SUCCESS) {
                                   isPersonaTtsReady = true
                                   personaTts = googleEngine
+                                  AutomationManager.configureAlarmTtsAttributes(googleEngine)
                                   attachPersonaTtsListener(googleEngine)
                                   val queued = pendingPreviewPresetId
                                   if (queued != null) {
@@ -1737,7 +1806,7 @@ fun SettingsScreen(
                               }, "com.google.android.tts")
                               personaTts = googleEngine
                             } catch (_: Exception) {}
-                          } else if (isPersonaTtsReady && personaTts != null) {
+                          } else {
                             speakVoicePresetSample(personaTts, preset)
                           }
                         }

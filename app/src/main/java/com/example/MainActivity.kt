@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -58,12 +59,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,6 +85,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.model.RoutineTask
 import com.example.service.AutomationManager
+import com.example.service.RoutineAutomationService
 import com.example.ui.NavigationTab
 import com.example.ui.RoutineViewModel
 import com.example.ui.components.ChronosArchitectureGuideSheet
@@ -108,6 +114,19 @@ class MainActivity : ComponentActivity() {
         MainScreen()
       }
     }
+  }
+
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (event.action == KeyEvent.ACTION_DOWN &&
+      (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+    ) {
+      val stoppedServiceVoice = RoutineAutomationService.stopVoiceIfSpeaking(applicationContext)
+      val stoppedPreviewVoice = AutomationManager.stopActivePreviewVoiceIfPlaying()
+      if (stoppedServiceVoice || stoppedPreviewVoice) {
+        return true
+      }
+    }
+    return super.dispatchKeyEvent(event)
   }
 }
 
@@ -139,6 +158,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
   // Modal Sheet State
   var isModalOpen by remember { mutableStateOf(false) }
   var editingTask by remember { mutableStateOf<RoutineTask?>(null) }
+  var editingTaskActiveFlexedMinutes by remember { mutableStateOf<Int?>(null) }
   var showAddChooserSheet by remember { mutableStateOf(false) }
   var showArchitectureGuideSheet by remember { mutableStateOf(false) }
 
@@ -147,6 +167,22 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
     contract = ActivityResultContracts.RequestPermission(),
     onResult = { /* Permission handled */ }
   )
+
+  val lifecycleOwner = LocalLifecycleOwner.current
+  DisposableEffect(lifecycleOwner) {
+    val observer = LifecycleEventObserver { _, event ->
+      when (event) {
+        Lifecycle.Event.ON_START -> viewModel.onUiForegrounded()
+        Lifecycle.Event.ON_STOP -> viewModel.onUiBackgrounded()
+        else -> Unit
+      }
+    }
+    lifecycleOwner.lifecycle.addObserver(observer)
+    onDispose {
+      lifecycleOwner.lifecycle.removeObserver(observer)
+      viewModel.onUiBackgrounded()
+    }
+  }
 
   LaunchedEffect(Unit) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -282,18 +318,26 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
               viewModel.quickAdjustAnchor(slotNum, delta)
             },
             onEditTask = { task ->
-              val canonicalTask = if (task.slotNumber != null) {
-                anchors.firstOrNull { it.slotNumber == task.slotNumber } ?: task
+              if (task.slotNumber != null) {
+                editingTaskActiveFlexedMinutes = null
+                editingTask = anchors.firstOrNull { it.slotNumber == task.slotNumber } ?: task
               } else {
                 val saved = dynamicTasks.firstOrNull { it.id == task.id }
-                task.copy(
-                  originalStartTimeMinute = task.originalStartTimeMinute
-                    ?: saved?.originalStartTimeMinute
-                    ?: saved?.startTimeMinute
-                    ?: task.startTimeMinute
+                val birthStart = task.originalStartTimeMinute
+                  ?: saved?.originalStartTimeMinute
+                  ?: saved?.startTimeMinute
+                  ?: task.startTimeMinute
+                val birthDur = task.originalDurationMinutes
+                  ?: saved?.originalDurationMinutes
+                  ?: saved?.durationMinutes
+                  ?: task.durationMinutes
+                editingTaskActiveFlexedMinutes = if (task.durationMinutes < birthDur) task.durationMinutes else null
+                editingTask = task.copy(
+                  originalStartTimeMinute = birthStart,
+                  durationMinutes = birthDur,
+                  originalDurationMinutes = birthDur
                 )
               }
-              editingTask = canonicalTask
               isModalOpen = true
             },
             onMoveToTrash = { taskId ->
@@ -331,6 +375,9 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
             },
             onDiscardPendingEdits = {
               viewModel.discardPendingEdits()
+            },
+            onCompactAndRescueSchedule = { onNoChanges ->
+              viewModel.previewCompactAndRescueSchedule(onNoChanges)
             }
           )
         }
@@ -458,6 +505,7 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 showAddChooserSheet = false
                 editingTask = null
+                editingTaskActiveFlexedMinutes = null
                 isModalOpen = true
               },
               shape = RoundedCornerShape(14.dp),
@@ -587,9 +635,11 @@ fun MainScreen(viewModel: RoutineViewModel = viewModel()) {
         val slot2Start = anchors.firstOrNull { it.slotNumber == 2 }?.startTimeMinute ?: 300
         TaskModalBottomSheet(
           initialTask = editingTask,
+          activeFlexedMinutes = editingTaskActiveFlexedMinutes,
           onDismiss = {
             isModalOpen = false
             editingTask = null
+            editingTaskActiveFlexedMinutes = null
           },
           onSaveTask = { task ->
             viewModel.saveDynamicTask(task)
